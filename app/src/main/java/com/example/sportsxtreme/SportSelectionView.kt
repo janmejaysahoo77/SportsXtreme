@@ -105,7 +105,7 @@ class SportSelectionView @JvmOverloads constructor(
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(context).apply {
-                text = "CHOOSE YOUR ARENA"
+                text = context.getString(R.string.str_choose_your_arena)
                 setTextColor(primaryFixed)
                 textSize = 19f
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
@@ -113,7 +113,7 @@ class SportSelectionView @JvmOverloads constructor(
                 setShadowLayer(dp(2).toFloat(), 0f, 0f, Color.argb(150, 193, 255, 0))
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(TextView(context).apply {
-                text = "SELECT THE BATTLEFIELD TO BEGIN YOUR DOMINANCE"
+                text = context.getString(R.string.str_select_the_battlefie)
                 setTextColor(Color.rgb(124, 132, 126))
                 textSize = 7.8f
                 letterSpacing = 0.12f
@@ -151,7 +151,7 @@ class SportSelectionView @JvmOverloads constructor(
                 rightMargin = dp(16)
                 bottomMargin = dp(16)
             })
-            addView(check, LayoutParams(dp(27), dp(27), Gravity.TOP or Gravity.RIGHT).apply {
+            addView(check, LayoutParams(dp(27), dp(27), Gravity.TOP or Gravity.END).apply {
                 topMargin = dp(16)
                 rightMargin = dp(16)
             })
@@ -164,7 +164,7 @@ class SportSelectionView @JvmOverloads constructor(
 
     private fun selectedCheckView(context: Context): TextView {
         return TextView(context).apply {
-            text = "\u2713"
+            text = context.getString(R.string.str_u2713)
             visibility = View.GONE
             gravity = Gravity.CENTER
             setTextColor(Color.rgb(9, 18, 5))
@@ -216,7 +216,7 @@ class SportSelectionView @JvmOverloads constructor(
     }
 
     private fun chooseButton(context: Context): TextView {
-        val text = SpannableString("CHOOSE SPORT  ->")
+        val text = SpannableString(context.getString(R.string.str_choose_sport))
         text.setSpan(ForegroundColorSpan(Color.rgb(18, 24, 18)), 0, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         text.setSpan(StyleSpan(Typeface.BOLD_ITALIC), 0, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         return TextView(context).apply {
@@ -267,18 +267,22 @@ class SportSelectionView @JvmOverloads constructor(
 
     private class CardShadeView(context: Context) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var bgShader: Shader? = null
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            if (h > 0) {
+                bgShader = LinearGradient(
+                    0f, 0f, 0f, h.toFloat(),
+                    intArrayOf(Color.argb(26, 255, 255, 255), Color.TRANSPARENT, Color.argb(220, 0, 0, 0)),
+                    floatArrayOf(0f, 0.42f, 1f), Shader.TileMode.CLAMP
+                )
+            }
+        }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            paint.shader = LinearGradient(
-                0f,
-                0f,
-                0f,
-                height.toFloat(),
-                intArrayOf(Color.argb(26, 255, 255, 255), Color.TRANSPARENT, Color.argb(220, 0, 0, 0)),
-                floatArrayOf(0f, 0.42f, 1f),
-                Shader.TileMode.CLAMP
-            )
+            paint.shader = bgShader
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
             paint.shader = null
             paint.color = Color.argb(54, 0, 0, 0)
@@ -292,6 +296,18 @@ class SportSelectionView @JvmOverloads constructor(
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private val rect = RectF()
         private var startTimeMs = android.os.SystemClock.uptimeMillis()
+        private var bgShader: Shader? = null
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            if (h > 0) {
+                bgShader = LinearGradient(
+                    0f, 0f, 0f, h.toFloat(),
+                    intArrayOf(Color.argb(230, 0, 0, 0), Color.argb(212, 0, 5, 4), Color.BLACK),
+                    floatArrayOf(0f, 0.58f, 1f), Shader.TileMode.CLAMP
+                )
+            }
+        }
 
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()
@@ -317,15 +333,7 @@ class SportSelectionView @JvmOverloads constructor(
                 bitmapPaint.alpha = 255
             }
 
-            paint.shader = LinearGradient(
-                0f,
-                0f,
-                0f,
-                h,
-                intArrayOf(Color.argb(230, 0, 0, 0), Color.argb(212, 0, 5, 4), Color.BLACK),
-                floatArrayOf(0f, 0.58f, 1f),
-                Shader.TileMode.CLAMP
-            )
+            paint.shader = bgShader
             canvas.drawRect(0f, 0f, w, h, paint)
             paint.shader = null
 

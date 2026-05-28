@@ -89,7 +89,7 @@ class SignupScreenView @JvmOverloads constructor(
         }, fullWidthParams())
 
         content.addView(TextView(context).apply {
-            text = "Join the elite performance network."
+            text = context.getString(R.string.str_join_the_elite_perfo)
             setTextColor(Color.rgb(218, 229, 210))
             textSize = 12f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
@@ -154,7 +154,7 @@ class SignupScreenView @JvmOverloads constructor(
 
     private fun primaryButton(context: Context): TextView {
         return TextView(context).apply {
-            text = "CREATE ACCOUNT  ->"
+            text = context.getString(R.string.str_create_account)
             gravity = Gravity.CENTER
             setTextColor(onPrimary)
             textSize = 14f
@@ -176,7 +176,7 @@ class SignupScreenView @JvmOverloads constructor(
             gravity = Gravity.CENTER
             addView(lineView(context), LinearLayout.LayoutParams(0, dp(1), 1f))
             addView(TextView(context).apply {
-                text = "OR CONTINUE WITH"
+                text = context.getString(R.string.str_or_continue_with)
                 setTextColor(Color.rgb(108, 118, 101))
                 textSize = 8f
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
@@ -228,7 +228,7 @@ class SignupScreenView @JvmOverloads constructor(
                 })
             } else {
                 addView(TextView(context).apply {
-                    text = "A"
+                    text = context.getString(R.string.str_a)
                     gravity = Gravity.CENTER
                     setTextColor(Color.WHITE)
                     textSize = 9f
@@ -250,8 +250,8 @@ class SignupScreenView @JvmOverloads constructor(
     }
 
     private fun loginPrompt(context: Context): TextView {
-        val text = SpannableString("Already have an account? LOGIN")
-        val start = text.indexOf("LOGIN")
+        val text = SpannableString(context.getString(R.string.str_already_have_an_acco))
+        val start = text.indexOf(context.getString(R.string.str_login_1))
         text.setSpan(ForegroundColorSpan(primaryFixed), start, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         text.setSpan(StyleSpan(Typeface.BOLD_ITALIC), start, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         return TextView(context).apply {
@@ -302,6 +302,18 @@ class SignupScreenView @JvmOverloads constructor(
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private val rect = RectF()
         private var startTimeMs = android.os.SystemClock.uptimeMillis()
+        private var bgShader: Shader? = null
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            if (h > 0) {
+                bgShader = LinearGradient(
+                    0f, 0f, 0f, h.toFloat(),
+                    intArrayOf(Color.argb(232, 0, 0, 0), Color.argb(218, 0, 5, 4), Color.BLACK),
+                    floatArrayOf(0f, 0.56f, 1f), Shader.TileMode.CLAMP
+                )
+            }
+        }
 
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()
@@ -327,15 +339,7 @@ class SignupScreenView @JvmOverloads constructor(
                 bitmapPaint.alpha = 255
             }
 
-            paint.shader = LinearGradient(
-                0f,
-                0f,
-                0f,
-                h,
-                intArrayOf(Color.argb(232, 0, 0, 0), Color.argb(218, 0, 5, 4), Color.BLACK),
-                floatArrayOf(0f, 0.56f, 1f),
-                Shader.TileMode.CLAMP
-            )
+            paint.shader = bgShader
             canvas.drawRect(0f, 0f, w, h, paint)
             paint.shader = null
 
@@ -369,6 +373,7 @@ class SignupScreenView @JvmOverloads constructor(
         private val bounds = RectF()
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        private var logoShader: Shader? = null
 
         init {
             appIcon?.let { bitmap ->
@@ -377,6 +382,22 @@ class SignupScreenView @JvmOverloads constructor(
                     (bitmap.height * 0.34f).toInt(),
                     (bitmap.width * 0.84f).toInt(),
                     (bitmap.height * 0.62f).toInt()
+                )
+            }
+        }
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            val wf = w.toFloat()
+            val hf = h.toFloat()
+            if (wf > 0 && hf > 0) {
+                val cx = wf / 2f
+                val cy = hf / 2f
+                val density = resources.displayMetrics.density
+                logoShader = LinearGradient(
+                    cx - 52f * density, cy, cx + 52f * density, cy,
+                    intArrayOf(Color.TRANSPARENT, Color.argb(46, 193, 255, 0), Color.argb(88, 193, 255, 0), Color.argb(46, 193, 255, 0), Color.TRANSPARENT),
+                    floatArrayOf(0f, 0.24f, 0.5f, 0.76f, 1f), Shader.TileMode.CLAMP
                 )
             }
         }
@@ -401,15 +422,7 @@ class SignupScreenView @JvmOverloads constructor(
 
         private fun drawNeonAccent(canvas: Canvas, cx: Float, cy: Float, density: Float) {
             paint.style = Paint.Style.FILL
-            paint.shader = LinearGradient(
-                cx - 52f * density,
-                cy,
-                cx + 52f * density,
-                cy,
-                intArrayOf(Color.TRANSPARENT, Color.argb(46, 193, 255, 0), Color.argb(88, 193, 255, 0), Color.argb(46, 193, 255, 0), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.24f, 0.5f, 0.76f, 1f),
-                Shader.TileMode.CLAMP
-            )
+            paint.shader = logoShader
             bounds.set(cx - 52f * density, cy - 6f * density, cx + 52f * density, cy + 6f * density)
             canvas.drawRoundRect(bounds, 6f * density, 6f * density, paint)
             paint.shader = null

@@ -2,16 +2,33 @@ package com.example.sportsxtreme
 
 import android.os.Bundle
 import android.view.ViewTreeObserver
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 
 class MainActivity : AppCompatActivity() {
 
+    private enum class Screen {
+        Splash,
+        Onboarding,
+        Signup,
+        Login,
+        SportSelection,
+        Home
+    }
+
     private var isCustomSplashReady = false
     private var homeScreenView: HomeScreenView? = null
+    private var currentScreen by mutableStateOf(Screen.Splash)
 
+    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
 
@@ -22,53 +39,96 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        showSplash()
+        setContent {
+            SportsXtremeApp()
+        }
     }
 
-    private fun showSplash() {
-        homeScreenView = null
-        val splashView = SportsSplashView(this)
-        setContentView(splashView)
+    @Composable
+    private fun SportsXtremeApp() {
+        when (currentScreen) {
+            Screen.Splash -> AndroidView(
+                factory = { context ->
+                    homeScreenView = null
+                    SportsSplashView(context).apply {
+                        viewTreeObserver.addOnPreDrawListener(
+                            object : ViewTreeObserver.OnPreDrawListener {
+                                override fun onPreDraw(): Boolean {
+                                    isCustomSplashReady = true
+                                    viewTreeObserver.removeOnPreDrawListener(this)
+                                    return true
+                                }
+                            }
+                        )
 
-        // Signal ready once the custom splash view has been measured and drawn
-        splashView.viewTreeObserver.addOnPreDrawListener(
-            object : ViewTreeObserver.OnPreDrawListener {
-                override fun onPreDraw(): Boolean {
-                    isCustomSplashReady = true
-                    splashView.viewTreeObserver.removeOnPreDrawListener(this)
-                    return true
+                        postDelayed({
+                            showMainScreen()
+                        }, 2800L)
+                    }
                 }
-            }
-        )
+            )
 
-        splashView.postDelayed({
-            showMainScreen()
-        }, 2800L)
+            Screen.Onboarding -> AndroidView(
+                factory = { context ->
+                    homeScreenView = null
+                    OnboardingScreenView(context)
+                }
+            )
+
+            Screen.Signup -> AndroidView(
+                factory = { context ->
+                    homeScreenView = null
+                    SignupScreenView(context)
+                }
+            )
+
+            Screen.Login -> AndroidView(
+                factory = { context ->
+                    homeScreenView = null
+                    LoginScreenView(context)
+                }
+            )
+
+            Screen.SportSelection -> AndroidView(
+                factory = { context ->
+                    homeScreenView = null
+                    SportSelectionView(context)
+                }
+            )
+
+            Screen.Home -> AndroidView(
+                factory = { context ->
+                    HomeScreenView(context).also {
+                        homeScreenView = it
+                    }
+                }
+            )
+        }
     }
 
     private fun showMainScreen() {
         homeScreenView = null
-        setContentView(OnboardingScreenView(this))
+        currentScreen = Screen.Onboarding
     }
 
     fun showSignupScreen() {
         homeScreenView = null
-        setContentView(SignupScreenView(this))
+        currentScreen = Screen.Signup
     }
 
     fun showLoginScreen() {
         homeScreenView = null
-        setContentView(LoginScreenView(this))
+        currentScreen = Screen.Login
     }
 
     fun showSportSelectionScreen() {
         homeScreenView = null
-        setContentView(SportSelectionView(this))
+        currentScreen = Screen.SportSelection
     }
 
     fun showHomeScreen() {
-        homeScreenView = HomeScreenView(this)
-        setContentView(homeScreenView)
+        homeScreenView = null
+        currentScreen = Screen.Home
     }
 
     override fun onResume() {

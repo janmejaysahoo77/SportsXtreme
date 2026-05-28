@@ -45,6 +45,7 @@ class HomeScreenView @JvmOverloads constructor(
     private var selectedIndex = 0
     private lateinit var contentHolder: FrameLayout
     private lateinit var navRow: LinearLayout
+    private val cachedTabs = mutableMapOf<Int, View>()
 
     init {
         setBackgroundColor(bg)
@@ -115,17 +116,15 @@ class HomeScreenView @JvmOverloads constructor(
         selectedIndex = index
         buildNav()
         contentHolder.removeAllViews()
-        val view = if (index == 0) createHomeContent(context) else createComingSoon(context, navItems[index])
+        val view = cachedTabs.getOrPut(index) {
+            if (index == 0) createHomeContent(context) else createComingSoon(context, navItems[index])
+        }
         contentHolder.addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     fun refreshAfterResume() {
         post {
-            if (selectedIndex == 0 && ::contentHolder.isInitialized) {
-                showTab(0)
-            } else {
-                invalidate()
-            }
+            invalidate()
         }
     }
 
@@ -225,7 +224,7 @@ class HomeScreenView @JvmOverloads constructor(
                 setTint(primary)
             }, LinearLayout.LayoutParams(dp(17), dp(17)))
             addView(TextView(context).apply {
-                text = "Madanpur,Bhubaneswar"
+                text = context.getString(R.string.str_madanpurbhubaneswar)
                 setTextColor(Color.rgb(210, 224, 220))
                 textSize = 10f
                 typeface = Typeface.DEFAULT_BOLD
@@ -245,7 +244,7 @@ class HomeScreenView @JvmOverloads constructor(
             }
             setPadding(dp(14), dp(11), dp(14), dp(11))
             addView(TextView(context).apply {
-                text = "XtremeMedia"
+                text = context.getString(R.string.str_xtrememedia)
                 gravity = Gravity.CENTER
                 setTextColor(Color.rgb(2, 11, 5))
                 textSize = 17f
@@ -286,14 +285,14 @@ class HomeScreenView @JvmOverloads constructor(
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(TextView(context).apply {
-                    text = "Upgrade to Premium"
+                    text = context.getString(R.string.str_upgrade_to_premium)
                     setTextColor(Color.WHITE)
                     textSize = 12f
                     typeface = Typeface.DEFAULT_BOLD
                     includeFontPadding = false
                 })
                 addView(TextView(context).apply {
-                    text = "Ad-free, exclusive content & stats"
+                    text = context.getString(R.string.str_adfree_exclusive_con)
                     setTextColor(Color.rgb(210, 224, 220))
                     textSize = 8.8f
                     includeFontPadding = false
@@ -304,7 +303,7 @@ class HomeScreenView @JvmOverloads constructor(
                 leftMargin = dp(10)
             })
             addView(TextView(context).apply {
-                text = "GO PRO"
+                text = context.getString(R.string.str_go_pro)
                 gravity = Gravity.CENTER
                 setTextColor(Color.rgb(6, 15, 6))
                 textSize = 8f
@@ -325,7 +324,7 @@ class HomeScreenView @JvmOverloads constructor(
                 gravity = Gravity.CENTER_VERTICAL
                 addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
                 addView(TextView(context).apply {
-                    text = "View All"
+                    text = context.getString(R.string.str_view_all)
                     setTextColor(primary)
                     textSize = 10f
                     typeface = Typeface.DEFAULT_BOLD
@@ -425,7 +424,7 @@ class HomeScreenView @JvmOverloads constructor(
                     addView(scoreTeam(context, leftName, leftScore, leftOvers, TopIconView.Icon.SHIELD, primary), LinearLayout.LayoutParams(0, dp(116), 1f))
                     addView(FrameLayout(context).apply {
                         addView(TextView(context).apply {
-                            text = "VS"
+                            text = context.getString(R.string.str_vs)
                             gravity = Gravity.CENTER
                             setTextColor(Color.rgb(7, 14, 20))
                             textSize = 10f
@@ -575,10 +574,8 @@ class HomeScreenView @JvmOverloads constructor(
             val cardContainer = FrameLayout(context).apply {
                 elevation = dp(48).toFloat()
                 translationZ = dp(18).toFloat()
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                    outlineAmbientShadowColor = Color.BLACK
-                    outlineSpotShadowColor = Color.BLACK
-                }
+                outlineAmbientShadowColor = Color.BLACK
+                outlineSpotShadowColor = Color.BLACK
                 
                 background = GradientDrawable().apply {
                     cornerRadius = dp(20).toFloat()
@@ -610,7 +607,7 @@ class HomeScreenView @JvmOverloads constructor(
                             }, LinearLayout.LayoutParams(dp(5), dp(24)))
                             
                             addView(TextView(context).apply {
-                                text = "ELITE MEMBER"
+                                text = context.getString(R.string.str_elite_member)
                                 setTextColor(primary)
                                 textSize = 9.2f
                                 letterSpacing = 0.16f
@@ -639,7 +636,7 @@ class HomeScreenView @JvmOverloads constructor(
                     val titleRow = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         addView(TextView(context).apply {
-                            text = "PRO"
+                            text = context.getString(R.string.str_pro)
                             setTextColor(Color.WHITE)
                             textSize = 45f
                             letterSpacing = -0.02f
@@ -647,7 +644,7 @@ class HomeScreenView @JvmOverloads constructor(
                             includeFontPadding = false
                         })
                         addView(TextView(context).apply {
-                            text = "PASS"
+                            text = context.getString(R.string.str_pass)
                             setTextColor(primary)
                             textSize = 45f
                             letterSpacing = -0.02f
@@ -676,14 +673,14 @@ class HomeScreenView @JvmOverloads constructor(
                         gravity = Gravity.CENTER
                         
                         addView(TextView(context).apply {
-                            text = "₹19"
+                            text = context.getString(R.string.str_19)
                             setTextColor(Color.WHITE)
                             textSize = 44f
                             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
                             includeFontPadding = false
                         })
                         addView(TextView(context).apply {
-                            text = " /MONTH"
+                            text = context.getString(R.string.str_month)
                             setTextColor(Color.rgb(156, 166, 156))
                             textSize = 7.2f
                             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
@@ -697,7 +694,7 @@ class HomeScreenView @JvmOverloads constructor(
 
                     // Trust text
                     addView(TextView(context).apply {
-                        text = "CANCEL ANYTIME • NO HIDDEN FEES"
+                        text = context.getString(R.string.str_cancel_anytime__no_h)
                         gravity = Gravity.CENTER
                         setTextColor(primary)
                         textSize = 6.3f
@@ -740,7 +737,7 @@ class HomeScreenView @JvmOverloads constructor(
                                 orientation = LinearLayout.HORIZONTAL
                                 gravity = Gravity.CENTER
                                 addView(TextView(context).apply {
-                                    text = "ACTIVATE PRO"
+                                    text = context.getString(R.string.str_activate_pro)
                                     setTextColor(Color.rgb(4, 9, 4))
                                     textSize = 9.3f
                                     letterSpacing = 0.08f
@@ -809,7 +806,7 @@ class HomeScreenView @JvmOverloads constructor(
                     topMargin = dp(1)
                 })
                 addView(TextView(context).apply {
-                    text = "REAL-TIME PLAYER ANALYTICS"
+                    text = context.getString(R.string.str_realtime_player_anal)
                     setTextColor(Color.rgb(126, 136, 128))
                     textSize = 6.2f
                     letterSpacing = 0.04f
@@ -851,7 +848,7 @@ class HomeScreenView @JvmOverloads constructor(
             addView(LinearLayout(context).apply {
                 gravity = Gravity.BOTTOM
                 addView(TextView(context).apply {
-                    text = "Personalize Your\nGear"
+                    text = context.getString(R.string.str_personalize_yourngea)
                     setTextColor(Color.WHITE)
                     textSize = 24f
                     setLineSpacing(0f, 0.9f)
@@ -859,7 +856,7 @@ class HomeScreenView @JvmOverloads constructor(
                     includeFontPadding = false
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 addView(TextView(context).apply {
-                    text = "VIEW\nALL"
+                    text = context.getString(R.string.str_viewnall)
                     gravity = Gravity.CENTER
                     setTextColor(primary)
                     textSize = 8.5f
@@ -879,13 +876,13 @@ class HomeScreenView @JvmOverloads constructor(
                 }
 
                 addView(TextView(context).apply {
-                    text = "Siddheshwar Sahoo, get top sellers at an extra 20%\noff"
+                    text = context.getString(R.string.str_siddheshwar_sahoo_ge)
                     setTextColor(Color.WHITE)
                     textSize = 10.2f
                     typeface = Typeface.DEFAULT_BOLD
                     includeFontPadding = false
                     setLineSpacing(0f, 0.95f)
-                    val limeStart = text.indexOf("20%")
+                    val limeStart = text.indexOf(context.getString(R.string.str_20))
                     if (limeStart >= 0) {
                         val spannable = android.text.SpannableString(text)
                         spannable.setSpan(android.text.style.ForegroundColorSpan(primary), limeStart, text.length, 0)
@@ -905,7 +902,7 @@ class HomeScreenView @JvmOverloads constructor(
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
 
                 addView(TextView(context).apply {
-                    text = "CUSTOM NAME"
+                    text = context.getString(R.string.str_custom_name)
                     setTextColor(Color.WHITE)
                     textSize = 8.4f
                     letterSpacing = 0.12f
@@ -949,7 +946,7 @@ class HomeScreenView @JvmOverloads constructor(
                             cornerRadius = dp(6).toFloat()
                         }
                         addView(TextView(context).apply {
-                            text = "APPLY TO JERSEY"
+                            text = context.getString(R.string.str_apply_to_jersey)
                             gravity = Gravity.CENTER
                             setTextColor(Color.rgb(2, 8, 5))
                             textSize = 10.5f
@@ -1031,7 +1028,7 @@ class HomeScreenView @JvmOverloads constructor(
                     setStroke(1, Color.argb(74, 193, 255, 0))
                 }
                 addView(TextView(context).apply {
-                    text = "GET IT NOW"
+                    text = context.getString(R.string.str_get_it_now)
                     setTextColor(primary)
                     textSize = 8.4f
                     letterSpacing = 0.08f
@@ -1058,7 +1055,7 @@ class HomeScreenView @JvmOverloads constructor(
             addView(LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 addView(TextView(context).apply {
-                    text = "SX"
+                    text = context.getString(R.string.str_sx)
                     gravity = Gravity.CENTER
                     setTextColor(Color.WHITE)
                     textSize = 12f
@@ -1077,7 +1074,7 @@ class HomeScreenView @JvmOverloads constructor(
                     addView(LinearLayout(context).apply {
                         gravity = Gravity.CENTER_VERTICAL
                         addView(TextView(context).apply {
-                            text = "SportsXtreme"
+                            text = context.getString(R.string.str_sportsxtreme)
                             setTextColor(Color.WHITE)
                             textSize = 10f
                             typeface = Typeface.DEFAULT_BOLD
@@ -1091,7 +1088,7 @@ class HomeScreenView @JvmOverloads constructor(
                         }, LinearLayout.LayoutParams(dp(8), dp(8)).apply { leftMargin = dp(4) })
                     })
                     addView(TextView(context).apply {
-                        text = "23 may 2024,  12:08 PM"
+                        text = context.getString(R.string.str_23_may_2024__1208_pm)
                         setTextColor(Color.rgb(135, 150, 158))
                         textSize = 7.2f
                         typeface = Typeface.DEFAULT_BOLD
@@ -1107,7 +1104,7 @@ class HomeScreenView @JvmOverloads constructor(
             })
 
             addView(TextView(context).apply {
-                text = "Sailing through life,\ngrounded by cricket"
+                text = context.getString(R.string.str_sailing_through_life)
                 setTextColor(Color.WHITE)
                 textSize = 22f
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
@@ -1116,7 +1113,7 @@ class HomeScreenView @JvmOverloads constructor(
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
 
             addView(TextView(context).apply {
-                text = "On and off the field, it's the game that keeps me\nfocused, driven and humble."
+                text = context.getString(R.string.str_on_and_off_the_field)
                 setTextColor(Color.WHITE)
                 textSize = 10.3f
                 typeface = Typeface.DEFAULT_BOLD
@@ -1132,7 +1129,7 @@ class HomeScreenView @JvmOverloads constructor(
                     setStroke(1, Color.argb(80, 193, 255, 0))
                 }
                 addView(TextView(context).apply {
-                    text = "Check his Insights"
+                    text = context.getString(R.string.str_check_his_insights)
                     setTextColor(primary)
                     textSize = 8.5f
                     typeface = Typeface.DEFAULT_BOLD
@@ -1154,14 +1151,14 @@ class HomeScreenView @JvmOverloads constructor(
                 addView(reactionBubble(context, Color.rgb(255, 92, 35), "❤"), LinearLayout.LayoutParams(dp(20), dp(20)).apply { leftMargin = dp(-5) })
                 addView(reactionBubble(context, Color.rgb(255, 132, 25), "⚡"), LinearLayout.LayoutParams(dp(20), dp(20)).apply { leftMargin = dp(-5) })
                 addView(TextView(context).apply {
-                    text = "150 reactions"
+                    text = context.getString(R.string.str_150_reactions)
                     setTextColor(Color.WHITE)
                     textSize = 8.2f
                     typeface = Typeface.DEFAULT_BOLD
                     includeFontPadding = false
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
                 addView(TextView(context).apply {
-                    text = "34 comments"
+                    text = context.getString(R.string.str_34_comments)
                     setTextColor(Color.WHITE)
                     textSize = 8.2f
                     typeface = Typeface.DEFAULT_BOLD
@@ -1230,7 +1227,7 @@ class HomeScreenView @JvmOverloads constructor(
                 scaleType = ImageView.ScaleType.CENTER_CROP
             }, LayoutParams(LayoutParams.MATCH_PARENT, dp(210)))
             addView(TextView(context).apply {
-                text = "NEXT BIG MATCH"
+                text = context.getString(R.string.str_next_big_match)
                 setTextColor(primary)
                 textSize = 10f
                 typeface = Typeface.DEFAULT_BOLD
@@ -1262,7 +1259,7 @@ class HomeScreenView @JvmOverloads constructor(
                     includeFontPadding = false
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
                 addView(TextView(context).apply {
-                    text = "This bottom nav is wired and ready for the next screen."
+                    text = context.getString(R.string.str_this_bottom_nav_is_w)
                     gravity = Gravity.CENTER
                     setTextColor(muted)
                     textSize = 12f
@@ -1294,6 +1291,32 @@ class HomeScreenView @JvmOverloads constructor(
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val path = Path()
         private val rect = RectF()
+        private var bgShader: Shader? = null
+        private var glowShader1: Shader? = null
+        private var glowShader2: Shader? = null
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            val wf = w.toFloat()
+            val hf = h.toFloat()
+            if (wf > 0 && hf > 0) {
+                bgShader = LinearGradient(
+                    0f, 0f, wf, hf,
+                    intArrayOf(Color.rgb(14, 25, 35), Color.rgb(5, 10, 17), Color.rgb(11, 20, 24)),
+                    floatArrayOf(0f, 0.48f, 1f), Shader.TileMode.CLAMP
+                )
+                glowShader1 = android.graphics.RadialGradient(
+                    wf * 0.14f, hf * 0.15f, wf * 0.7f,
+                    intArrayOf(Color.argb(92, 193, 255, 0), Color.argb(18, 193, 255, 0), Color.TRANSPARENT),
+                    floatArrayOf(0f, 0.42f, 1f), Shader.TileMode.CLAMP
+                )
+                glowShader2 = android.graphics.RadialGradient(
+                    wf * 0.9f, hf * 0.05f, wf * 0.72f,
+                    intArrayOf(Color.argb(78, 0, 210, 255), Color.argb(16, 0, 210, 255), Color.TRANSPARENT),
+                    floatArrayOf(0f, 0.44f, 1f), Shader.TileMode.CLAMP
+                )
+            }
+        }
 
         override fun onDraw(canvas: Canvas) {
             val w = width.toFloat()
@@ -1304,37 +1327,13 @@ class HomeScreenView @JvmOverloads constructor(
             val radius = 14f * d
             rect.set(0f, 0f, w, h)
 
-            paint.shader = LinearGradient(
-                0f,
-                0f,
-                w,
-                h,
-                intArrayOf(Color.rgb(14, 25, 35), Color.rgb(5, 10, 17), Color.rgb(11, 20, 24)),
-                floatArrayOf(0f, 0.48f, 1f),
-                Shader.TileMode.CLAMP
-            )
+            paint.shader = bgShader
             canvas.drawRoundRect(rect, radius, radius, paint)
-            paint.shader = null
 
-            paint.shader = android.graphics.RadialGradient(
-                w * 0.14f,
-                h * 0.15f,
-                w * 0.7f,
-                intArrayOf(Color.argb(92, 193, 255, 0), Color.argb(18, 193, 255, 0), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.42f, 1f),
-                Shader.TileMode.CLAMP
-            )
+            paint.shader = glowShader1
             canvas.drawRoundRect(rect, radius, radius, paint)
-            paint.shader = null
 
-            paint.shader = android.graphics.RadialGradient(
-                w * 0.9f,
-                h * 0.05f,
-                w * 0.72f,
-                intArrayOf(Color.argb(78, 0, 210, 255), Color.argb(16, 0, 210, 255), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.44f, 1f),
-                Shader.TileMode.CLAMP
-            )
+            paint.shader = glowShader2
             canvas.drawRoundRect(rect, radius, radius, paint)
             paint.shader = null
 
@@ -1504,6 +1503,26 @@ class HomeScreenView @JvmOverloads constructor(
     private class ScoreCardGlowView(context: Context) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val rect = RectF()
+        private var radialShader: Shader? = null
+        private var linearShader: Shader? = null
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            val wf = w.toFloat()
+            val hf = h.toFloat()
+            if (wf > 0 && hf > 0) {
+                radialShader = android.graphics.RadialGradient(
+                    wf * 0.16f, hf * 0.16f, wf * 0.72f,
+                    intArrayOf(Color.argb(96, 22, 96, 172), Color.argb(36, 11, 58, 118), Color.TRANSPARENT),
+                    floatArrayOf(0f, 0.48f, 1f), Shader.TileMode.CLAMP
+                )
+                linearShader = LinearGradient(
+                    0f, 0f, wf * 0.52f, hf * 0.34f,
+                    intArrayOf(Color.argb(58, 42, 116, 196), Color.TRANSPARENT),
+                    null, Shader.TileMode.CLAMP
+                )
+            }
+        }
 
         override fun onDraw(canvas: Canvas) {
             val w = width.toFloat()
@@ -1513,25 +1532,10 @@ class HomeScreenView @JvmOverloads constructor(
             val d = resources.displayMetrics.density
             rect.set(0f, 0f, w, h)
 
-            paint.shader = android.graphics.RadialGradient(
-                w * 0.16f,
-                h * 0.16f,
-                w * 0.72f,
-                intArrayOf(Color.argb(96, 22, 96, 172), Color.argb(36, 11, 58, 118), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.48f, 1f),
-                Shader.TileMode.CLAMP
-            )
+            paint.shader = radialShader
             canvas.drawRoundRect(rect, 14f * d, 14f * d, paint)
 
-            paint.shader = LinearGradient(
-                0f,
-                0f,
-                w * 0.52f,
-                h * 0.34f,
-                intArrayOf(Color.argb(58, 42, 116, 196), Color.TRANSPARENT),
-                null,
-                Shader.TileMode.CLAMP
-            )
+            paint.shader = linearShader
             canvas.drawRoundRect(rect, 14f * d, 14f * d, paint)
             paint.shader = null
         }
@@ -1542,6 +1546,7 @@ class HomeScreenView @JvmOverloads constructor(
         private val path = Path()
         private val rect = RectF()
         private var glowBitmap: android.graphics.Bitmap? = null
+        private var bgShader: Shader? = null
 
         init {
             // LAYER_TYPE_SOFTWARE removed to prevent vanishing on resume
@@ -1559,6 +1564,15 @@ class HomeScreenView @JvmOverloads constructor(
 
         override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
             super.onSizeChanged(w, h, oldw, oldh)
+            val wf = w.toFloat()
+            val hf = h.toFloat()
+            if (wf > 0 && hf > 0) {
+                bgShader = LinearGradient(
+                    0f, 0f, wf, hf,
+                    intArrayOf(Color.rgb(17, 24, 17), Color.rgb(7, 10, 12), Color.rgb(4, 6, 8)),
+                    floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+                )
+            }
             rebuildGlowBitmap(w, h)
         }
 
@@ -1611,15 +1625,7 @@ class HomeScreenView @JvmOverloads constructor(
             val radius = 20f * d
 
             rect.set(0f, 0f, w, h)
-            paint.shader = LinearGradient(
-                0f,
-                0f,
-                w,
-                h,
-                intArrayOf(Color.rgb(17, 24, 17), Color.rgb(7, 10, 12), Color.rgb(4, 6, 8)),
-                floatArrayOf(0f, 0.5f, 1f),
-                Shader.TileMode.CLAMP
-            )
+            paint.shader = bgShader
             canvas.drawRoundRect(rect, radius, radius, paint)
             paint.shader = null
 
@@ -1670,16 +1676,45 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 
-    private class PremiumRayView(
-        context: Context,
-        private val cornerRadiusDp: Int,
-        private val startDelayMs: Long
-    ) : View(context) {
+    private class PremiumRayView(context: Context, private val cornerRadiusDp: Int = 0, private val startDelayMs: Long = 0) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val rayPath = Path()
         private val clipPath = Path()
-        private var progress = -0.4f
+        private val rayPath = Path()
+        private val rect = RectF()
+        private val shaderMatrix = android.graphics.Matrix()
+        private var rayShader: Shader? = null
+        private var progress = 0f
         private var animator: android.animation.ValueAnimator? = null
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            val wf = w.toFloat()
+            val hf = h.toFloat()
+            if (wf > 0 && hf > 0) {
+                val d = resources.displayMetrics.density
+                val diagonal = Math.sqrt((wf * wf + hf * hf).toDouble()).toFloat()
+                val band = max(10f * d, minOf(wf, hf) * 0.42f)
+                val ux = wf / diagonal
+                val uy = hf / diagonal
+                val halfBand = band * 0.5f
+
+                rayShader = LinearGradient(
+                    -ux * halfBand,
+                    -uy * halfBand,
+                    ux * halfBand,
+                    uy * halfBand,
+                    intArrayOf(
+                        Color.TRANSPARENT,
+                        Color.argb(76, 255, 198, 42),
+                        Color.argb(172, 255, 248, 196),
+                        Color.argb(76, 255, 198, 42),
+                        Color.TRANSPARENT
+                    ),
+                    floatArrayOf(0f, 0.28f, 0.5f, 0.72f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+            }
+        }
 
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()
@@ -1739,7 +1774,8 @@ class HomeScreenView @JvmOverloads constructor(
             val d = resources.displayMetrics.density
             val radius = cornerRadiusDp * d
             clipPath.reset()
-            clipPath.addRoundRect(RectF(0f, 0f, w, h), radius, radius, Path.Direction.CW)
+            rect.set(0f, 0f, w, h)
+            clipPath.addRoundRect(rect, radius, radius, Path.Direction.CW)
 
             val diagonal = Math.sqrt((w * w + h * h).toDouble()).toFloat()
             val band = max(10f * d, minOf(w, h) * 0.42f)
@@ -1759,21 +1795,9 @@ class HomeScreenView @JvmOverloads constructor(
             rayPath.lineTo(centerX - nx * halfLength + ux * halfBand, centerY - ny * halfLength + uy * halfBand)
             rayPath.close()
 
-            paint.shader = LinearGradient(
-                centerX - ux * halfBand,
-                centerY - uy * halfBand,
-                centerX + ux * halfBand,
-                centerY + uy * halfBand,
-                intArrayOf(
-                    Color.TRANSPARENT,
-                    Color.argb(76, 255, 198, 42),
-                    Color.argb(172, 255, 248, 196),
-                    Color.argb(76, 255, 198, 42),
-                    Color.TRANSPARENT
-                ),
-                floatArrayOf(0f, 0.28f, 0.5f, 0.72f, 1f),
-                Shader.TileMode.CLAMP
-            )
+            shaderMatrix.setTranslate(centerX, centerY)
+            rayShader?.setLocalMatrix(shaderMatrix)
+            paint.shader = rayShader
 
             val save = canvas.save()
             canvas.clipPath(clipPath)
@@ -1966,7 +1990,8 @@ class HomeScreenView @JvmOverloads constructor(
                 Icon.MIC -> {
                     rect.set(w * 0.38f, h * 0.18f, w * 0.62f, h * 0.55f)
                     canvas.drawRoundRect(rect, 7f * d, 7f * d, paint)
-                    canvas.drawArc(RectF(w * 0.26f, h * 0.38f, w * 0.74f, h * 0.76f), 20f, 140f, false, paint)
+                    rect.set(w * 0.26f, h * 0.38f, w * 0.74f, h * 0.76f)
+                    canvas.drawArc(rect, 20f, 140f, false, paint)
                     canvas.drawLine(w * 0.5f, h * 0.74f, w * 0.5f, h * 0.86f, paint)
                     canvas.drawLine(w * 0.38f, h * 0.86f, w * 0.62f, h * 0.86f, paint)
                 }
