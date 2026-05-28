@@ -1,0 +1,24 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Base.Theme.SportsXtreme" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#05090E</item>
+        <item name="android:statusBarColor">#05090E</item>
+        <item name="colorPrimary">#CBFF20</item>
+        <item name="colorSecondary">#2984FF</item>
+    </style>
+
+    <style name="Theme.SportsXtreme" parent="Base.Theme.SportsXtreme" />
+
+    <!-- Splash theme: kept on screen until custom view is ready (like WhatsApp/Instagram) -->
+    <style name="Theme.SportsXtreme.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#000306</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_empty_icon</item>
+        <item name="postSplashScreenTheme">@style/Theme.SportsXtreme</item>
+        <item name="android:windowBackground">@drawable/splash_window_background</item>
+        <item name="android:navigationBarColor">#05090E</item>
+        <item name="android:statusBarColor">#05090E</item>
+    </style>
+</resources>
