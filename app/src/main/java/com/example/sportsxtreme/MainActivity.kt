@@ -1,5 +1,6 @@
 package com.example.sportsxtreme
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.ViewTreeObserver
 import androidx.activity.compose.setContent
@@ -103,6 +104,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             )
+
         }
     }
 
@@ -129,6 +131,16 @@ class MainActivity : AppCompatActivity() {
     fun showHomeScreen() {
         homeScreenView = null
         currentScreen = Screen.Home
+    }
+
+    fun showXtremeMediaScreen() {
+        startActivity(Intent(this, XtremeMediaActivity::class.java))
+        overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
+    }
+
+    fun showXtremeCartScreen() {
+        startActivity(Intent(this, ShoppingActivity::class.java))
+        overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
     }
 
     override fun onResume() {

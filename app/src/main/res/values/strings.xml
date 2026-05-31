@@ -2,6 +2,11 @@
     <string name="app_name">SportsXtreme</string>
     <string name="str_madanpurbhubaneswar">Madanpur,Bhubaneswar</string>
     <string name="str_xtrememedia">XtremeMedia</string>
+    <string name="str_xtremecart">XtremeCart</string>
+    <string name="str_shopping">Shopping</string>
+    <string name="str_back_to_sportsxtreme">SportsXtreme</string>
+    <string name="str_xtrememedia_activity_placeholder">XtremeMedia activity placeholder</string>
+    <string name="str_xtremecart_activity_placeholder">XtremeCart activity placeholder</string>
     <string name="str_upgrade_to_premium">Upgrade to Premium</string>
     <string name="str_adfree_exclusive_con">Ad-free, exclusive content &amp; stats</string>
     <string name="str_go_pro">GO PRO</string>

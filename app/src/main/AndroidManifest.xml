@@ -6,11 +6,23 @@
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
-        android:icon="@drawable/appicon"
+        android:icon="@drawable/appiconfromcanvawithbg"
         android:label="@string/app_name"
-        android:roundIcon="@drawable/appicon"
+        android:roundIcon="@drawable/appiconfromcanvawithbg"
         android:supportsRtl="true"
         android:theme="@style/Theme.SportsXtreme">
+        <activity
+            android:name=".ShoppingActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ScorecardActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ViewAllScoreCardActivity"
+            android:exported="false" />
+        <activity
+            android:name=".XtremeMediaActivity"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -1,5 +1,6 @@
 package com.example.sportsxtreme
 
+import android.content.Intent
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -25,8 +26,11 @@ import kotlin.math.max
 
 class HomeScreenView @JvmOverloads constructor(
     context: Context,
-    attrs: AttributeSet? = null
+    attrs: AttributeSet? = null,
+    private val topMode: TopMode = TopMode.SPORTS
 ) : FrameLayout(context, attrs) {
+
+    enum class TopMode { SPORTS, MEDIA, CART }
 
     private data class NavItem(val label: String, val icon: NavIconView.Icon)
 
@@ -141,16 +145,25 @@ class HomeScreenView @JvmOverloads constructor(
 
                     val content = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
-                        setPadding(dp(14), dp(14), dp(14), dp(14))
+                        setPadding(dp(14), dp(6), dp(14), dp(14))
                     }
 
-                    content.addView(locationRow(context))
-                    content.addView(xtremeMediaCard(context))
-                    content.addView(scoreCardsSection(context), blockParams(top = 14))
-                    content.addView(proPassCard(context), blockParams(top = 16))
-                    content.addView(personalizeGearSection(context), blockParams(top = 12))
-                    content.addView(sectionHeader(context, "Sports Feed", null), blockParams(top = 14))
-                    content.addView(feedCard(context), blockParams(top = 8))
+                    when (topMode) {
+                        TopMode.SPORTS -> {
+                            content.addView(locationRow(context))
+                            content.addView(scoreCardsSection(context), blockParams(top = 6))
+                            content.addView(proPassCardsSection(context), blockParams(top = 8))
+                            content.addView(personalizeGearSection(context), blockParams(top = 10))
+                            content.addView(sectionHeader(context, "Sports Feed", null), blockParams(top = 14))
+                            content.addView(feedCard(context), blockParams(top = 8))
+                        }
+                        TopMode.MEDIA -> {
+                            content.addView(simpleTopModeScreen(context, context.getString(R.string.str_xtrememedia)))
+                        }
+                        TopMode.CART -> {
+                            content.addView(simpleTopModeScreen(context, context.getString(R.string.str_xtremecart)))
+                        }
+                    }
 
                     addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                 }
@@ -178,32 +191,112 @@ class HomeScreenView @JvmOverloads constructor(
 
     private fun topBar(context: Context): View {
         return LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            
+            orientation = LinearLayout.VERTICAL
+
             // Premium app bar style
             background = GradientDrawable().apply {
                 setColor(Color.rgb(6, 12, 17)) // Solid dark color to separate from body
             }
             // Removed standard elevation to use custom gradient shadow/glow below
-            setPadding(dp(16), dp(20), dp(16), dp(12)) // Increased top padding to handle status bar area
+            setPadding(dp(16), dp(24), dp(16), dp(18)) // Taller top bar for the mode buttons
 
-            addView(TopIconView(context, TopIconView.Icon.MENU).apply {
-                setTint(Color.WHITE)
-            }, LinearLayout.LayoutParams(dp(22), dp(22)))
-            addView(sxLogo(context), LinearLayout.LayoutParams(dp(86), dp(38)).apply {
-                leftMargin = dp(12)
+            addView(xtremeTopBarButtons(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)))
+
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+
+                addView(TopIconView(context, TopIconView.Icon.MENU).apply {
+                    setTint(Color.WHITE)
+                }, LinearLayout.LayoutParams(dp(22), dp(22)))
+                addView(sxLogo(context), LinearLayout.LayoutParams(dp(64), dp(36)).apply {
+                    leftMargin = dp(12)
+                })
+                addView(topBarBrandTitle(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    leftMargin = dp(7)
+                })
+                addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+                addView(TopIconView(context, TopIconView.Icon.SEARCH).apply {
+                    setTint(Color.WHITE)
+                }, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
+                addView(TopIconView(context, TopIconView.Icon.BELL).apply {
+                    setTint(Color.WHITE)
+                }, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
+                addView(TopIconView(context, TopIconView.Icon.MESSAGE).apply {
+                    setTint(Color.WHITE)
+                }, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)).apply {
+                topMargin = dp(20)
             })
-            addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(TopIconView(context, TopIconView.Icon.SEARCH).apply {
-                setTint(Color.WHITE)
-            }, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(14) })
-            addView(TopIconView(context, TopIconView.Icon.BELL).apply {
-                setTint(Color.WHITE)
-            }, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(14) })
-            addView(TopIconView(context, TopIconView.Icon.MESSAGE).apply {
-                setTint(Color.WHITE)
-            }, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(14) })
+        }
+    }
+
+    private fun topBarBrandTitle(context: Context): View {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+
+            addView(TextView(context).apply {
+                text = "Sports"
+                setTextColor(Color.rgb(232, 241, 246))
+                textSize = 15f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                includeFontPadding = false
+                setShadowLayer(dp(2).toFloat(), 0f, 0f, Color.argb(95, 0, 120, 255))
+            })
+
+            addView(TextView(context).apply {
+                text = "Xtreme"
+                setTextColor(Color.rgb(0, 127, 255))
+                textSize = 16.5f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                includeFontPadding = false
+                setShadowLayer(dp(2).toFloat(), 0f, 0f, Color.argb(115, 0, 120, 255))
+            })
+        }
+    }
+
+    private fun xtremeTopBarButtons(context: Context): View {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+
+            addView(xtremeModeButton(
+                context = context,
+                label = context.getString(R.string.str_sportsxtreme),
+                selected = topMode == TopMode.SPORTS,
+                imageRes = R.drawable.appicon2
+            ).apply {
+                setOnClickListener {
+                    (context as? MainActivity)?.showHomeScreen()
+                }
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+
+            addView(xtremeModeButton(
+                context = context,
+                label = context.getString(R.string.str_xtrememedia),
+                selected = topMode == TopMode.MEDIA,
+                imageRes = R.drawable.xtrememediaicon
+            ).apply {
+                setOnClickListener {
+                    (context as? MainActivity)?.showXtremeMediaScreen()
+                }
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+                leftMargin = dp(7)
+            })
+
+            addView(xtremeModeButton(
+                context = context,
+                label = context.getString(R.string.str_xtremecart),
+                selected = topMode == TopMode.CART,
+                navIcon = NavIconView.Icon.CART
+            ).apply {
+                setOnClickListener {
+                    (context as? MainActivity)?.showXtremeCartScreen()
+                }
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+                leftMargin = dp(7)
+            })
         }
     }
 
@@ -219,7 +312,7 @@ class HomeScreenView @JvmOverloads constructor(
             gravity = Gravity.CENTER_VERTICAL
             isClickable = true
             isFocusable = true
-            setPadding(0, 0, 0, dp(10))
+            setPadding(0, 0, 0, dp(4))
             addView(LocationPinView(context).apply {
                 setTint(primary)
             }, LinearLayout.LayoutParams(dp(17), dp(17)))
@@ -236,27 +329,125 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun xtremeMediaCard(context: Context): View {
-        return FrameLayout(context).apply {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 cornerRadius = dp(7).toFloat()
                 setColor(Color.rgb(7, 15, 25))
                 setStroke(dp(1), Color.argb(45, 255, 255, 255))
             }
-            setPadding(dp(14), dp(11), dp(14), dp(11))
-            addView(TextView(context).apply {
-                text = context.getString(R.string.str_xtrememedia)
-                gravity = Gravity.CENTER
-                setTextColor(Color.rgb(2, 11, 5))
-                textSize = 17f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
-                includeFontPadding = false
-                background = GradientDrawable(
+            setPadding(dp(8), dp(10), dp(8), dp(10))
+
+            addView(xtremeModeButton(
+                context = context,
+                label = context.getString(R.string.str_sportsxtreme),
+                selected = topMode == TopMode.SPORTS,
+                imageRes = R.drawable.appicon2
+            ).apply {
+                setOnClickListener {
+                    (context as? MainActivity)?.showHomeScreen()
+                }
+            }, LinearLayout.LayoutParams(0, dp(48), 1f))
+
+            addView(xtremeModeButton(
+                context = context,
+                label = context.getString(R.string.str_xtrememedia),
+                selected = topMode == TopMode.MEDIA,
+                imageRes = R.drawable.xtrememediaicon
+            ).apply {
+                setOnClickListener {
+                    (context as? MainActivity)?.showXtremeMediaScreen()
+                }
+            }, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                leftMargin = dp(7)
+            })
+
+            addView(xtremeModeButton(
+                context = context,
+                label = context.getString(R.string.str_xtremecart),
+                selected = topMode == TopMode.CART,
+                navIcon = NavIconView.Icon.CART
+            ).apply {
+                setOnClickListener {
+                    (context as? MainActivity)?.showXtremeCartScreen()
+                }
+            }, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                leftMargin = dp(7)
+            })
+        }
+    }
+
+    private fun xtremeModeButton(
+        context: Context,
+        label: String,
+        selected: Boolean,
+        imageRes: Int? = null,
+        navIcon: NavIconView.Icon? = null
+    ): View {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            background = if (selected) {
+                GradientDrawable(
                     GradientDrawable.Orientation.LEFT_RIGHT,
-                    intArrayOf(primary, Color.rgb(0, 126, 255))
+                    intArrayOf(Color.rgb(12, 30, 24), Color.rgb(4, 24, 50))
                 ).apply {
                     cornerRadius = dp(10).toFloat()
+                    setStroke(dp(1), primary)
                 }
-            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(50)))
+            } else {
+                GradientDrawable().apply {
+                    cornerRadius = dp(10).toFloat()
+                    setColor(Color.WHITE)
+                    setStroke(dp(1), Color.argb(85, 255, 255, 255))
+                }
+            }
+            setPadding(dp(3), 0, dp(3), 0)
+
+            imageRes?.let { resId ->
+                addView(ImageView(context).apply {
+                    setImageResource(resId)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    adjustViewBounds = true
+                }, LinearLayout.LayoutParams(dp(22), dp(22)).apply {
+                    rightMargin = dp(4)
+                })
+            }
+
+            navIcon?.let { icon ->
+                addView(NavIconView(context, icon).apply {
+                    setTint(if (selected) primary else Color.rgb(6, 12, 17))
+                }, LinearLayout.LayoutParams(dp(17), dp(17)).apply {
+                    rightMargin = dp(4)
+                })
+            }
+
+            addView(TextView(context).apply {
+                text = label
+                gravity = Gravity.CENTER
+                setTextColor(if (selected) Color.WHITE else Color.rgb(6, 12, 17))
+                textSize = 8.4f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                includeFontPadding = false
+                maxLines = 1
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
+    private fun simpleTopModeScreen(context: Context, title: String): View {
+        return FrameLayout(context).apply {
+            setPadding(0, dp(90), 0, 0)
+            addView(TextView(context).apply {
+                text = title
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                textSize = 26f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                includeFontPadding = false
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP))
         }
     }
 
@@ -322,16 +513,28 @@ class HomeScreenView @JvmOverloads constructor(
             orientation = LinearLayout.VERTICAL
             addView(LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+                addView(TextView(context).apply {
+                    text = "Matches Near You"
+                    setTextColor(Color.WHITE)
+                    textSize = 14f
+                    typeface = Typeface.DEFAULT_BOLD
+                    includeFontPadding = false
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 addView(TextView(context).apply {
                     text = context.getString(R.string.str_view_all)
                     setTextColor(primary)
                     textSize = 10f
                     typeface = Typeface.DEFAULT_BOLD
                     includeFontPadding = false
+                    isClickable = true
+                    isFocusable = true
+                    setPadding(dp(10), dp(6), 0, dp(6))
+                    setOnClickListener {
+                        context.startActivity(Intent(context, ViewAllScoreCardActivity::class.java))
+                    }
                 })
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = dp(8)
+                bottomMargin = dp(5)
             })
 
             addView(HorizontalScrollView(context).apply {
@@ -340,7 +543,7 @@ class HomeScreenView @JvmOverloads constructor(
                 overScrollMode = View.OVER_SCROLL_NEVER
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
-                    setPadding(0, 0, dp(14), dp(4))
+                    setPadding(0, 0, dp(14), dp(2))
                     addView(heroScoreCard(context), LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                         rightMargin = dp(12)
                     })
@@ -380,6 +583,24 @@ class HomeScreenView @JvmOverloads constructor(
         note: String = "VCR chose to bowl - Powerplay complete"
     ): View {
         return FrameLayout(context).apply {
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                context.startActivity(Intent(context, ScorecardActivity::class.java).apply {
+                    putExtra(ScorecardActivity.EXTRA_LEAGUE, league)
+                    putExtra(ScorecardActivity.EXTRA_ROUND, round)
+                    putExtra(ScorecardActivity.EXTRA_LEFT_NAME, leftName)
+                    putExtra(ScorecardActivity.EXTRA_LEFT_SCORE, leftScore)
+                    putExtra(ScorecardActivity.EXTRA_LEFT_OVERS, leftOvers)
+                    putExtra(ScorecardActivity.EXTRA_RIGHT_NAME, rightName)
+                    putExtra(ScorecardActivity.EXTRA_RIGHT_SCORE, rightScore)
+                    putExtra(ScorecardActivity.EXTRA_RIGHT_OVERS, rightOvers)
+                    putExtra(ScorecardActivity.EXTRA_TARGET, target)
+                    putExtra(ScorecardActivity.EXTRA_RRR, rrr)
+                    putExtra(ScorecardActivity.EXTRA_WIN, win)
+                    putExtra(ScorecardActivity.EXTRA_NOTE, note)
+                })
+            }
             elevation = dp(14).toFloat()
             translationZ = dp(8).toFloat()
             background = GradientDrawable().apply {
@@ -390,7 +611,7 @@ class HomeScreenView @JvmOverloads constructor(
 
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(16), dp(14), dp(16), dp(15))
+                setPadding(dp(14), dp(11), dp(14), dp(12))
 
                 addView(LinearLayout(context).apply {
                     gravity = Gravity.CENTER_VERTICAL
@@ -421,7 +642,7 @@ class HomeScreenView @JvmOverloads constructor(
                 addView(LinearLayout(context).apply {
                     gravity = Gravity.CENTER
                     orientation = LinearLayout.HORIZONTAL
-                    addView(scoreTeam(context, leftName, leftScore, leftOvers, TopIconView.Icon.SHIELD, primary), LinearLayout.LayoutParams(0, dp(116), 1f))
+                    addView(scoreTeam(context, leftName, leftScore, leftOvers, TopIconView.Icon.SHIELD, primary), LinearLayout.LayoutParams(0, dp(96), 1f))
                     addView(FrameLayout(context).apply {
                         addView(TextView(context).apply {
                             text = context.getString(R.string.str_vs)
@@ -438,9 +659,9 @@ class HomeScreenView @JvmOverloads constructor(
                             }
                         }, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER))
                     }, LinearLayout.LayoutParams(dp(54), LinearLayout.LayoutParams.MATCH_PARENT))
-                    addView(scoreTeam(context, rightName, rightScore, rightOvers, TopIconView.Icon.BOLT, cyan), LinearLayout.LayoutParams(0, dp(116), 1f))
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(116)).apply {
-                    topMargin = dp(18)
+                    addView(scoreTeam(context, rightName, rightScore, rightOvers, TopIconView.Icon.BOLT, cyan), LinearLayout.LayoutParams(0, dp(96), 1f))
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(96)).apply {
+                    topMargin = dp(10)
                 })
 
                 addView(LinearLayout(context).apply {
@@ -452,8 +673,8 @@ class HomeScreenView @JvmOverloads constructor(
                     addView(scoreStatChip(context, "WIN", win), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)).apply {
                         leftMargin = dp(8)
                     })
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)).apply {
-                    topMargin = dp(14)
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(30)).apply {
+                    topMargin = dp(9)
                 })
 
                 addView(TextView(context).apply {
@@ -464,7 +685,7 @@ class HomeScreenView @JvmOverloads constructor(
                     typeface = Typeface.DEFAULT_BOLD
                     includeFontPadding = false
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(12)
+                    topMargin = dp(8)
                 })
             }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         }
@@ -482,7 +703,7 @@ class HomeScreenView @JvmOverloads constructor(
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                setPadding(dp(8), dp(10), dp(8), dp(10))
+                setPadding(dp(8), dp(7), dp(8), dp(7))
                 addView(FrameLayout(context).apply {
                     background = GradientDrawable().apply {
                         shape = GradientDrawable.OVAL
@@ -492,7 +713,7 @@ class HomeScreenView @JvmOverloads constructor(
                     addView(TopIconView(context, icon).apply {
                         setTint(accent)
                     }, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
-                }, LinearLayout.LayoutParams(dp(42), dp(42)))
+                }, LinearLayout.LayoutParams(dp(34), dp(34)))
                 addView(TextView(context).apply {
                     text = name
                     gravity = Gravity.CENTER
@@ -502,7 +723,7 @@ class HomeScreenView @JvmOverloads constructor(
                     typeface = Typeface.DEFAULT_BOLD
                     includeFontPadding = false
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(8)
+                    topMargin = dp(5)
                 })
                 addView(TextView(context).apply {
                     text = score
@@ -555,7 +776,133 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 
-    private fun proPassCard(context: Context): View {
+    private fun proPassCardsSection(context: Context): View {
+        val red = Color.rgb(255, 62, 70)
+        val purple = Color.rgb(156, 82, 255)
+        val gold = Color.rgb(255, 215, 0)
+        return HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 0, dp(14), dp(2))
+                addView(
+                    proPassCard(
+                        context = context,
+                        accent = primary,
+                        title = "PRO",
+                        memberLabel = "PRO MEMBER",
+                        oldPrice = "49",
+                        price = context.getString(R.string.str_19),
+                        priceSuffix = context.getString(R.string.str_month),
+                        baseColor = Color.rgb(5, 8, 11),
+                        features = listOf(
+                            Triple(ProIconView.Icon.AD_BLOCK, "ZERO AD", "INTERRUPTIONS"),
+                            Triple(ProIconView.Icon.FOUR_K, "4K ULTRA HDR", "STREAMING"),
+                            Triple(ProIconView.Icon.STATS, "PREMIUM INSIDER", "STATS")
+                        )
+                    ),
+                    LinearLayout.LayoutParams(dp(332), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        rightMargin = dp(12)
+                    }
+                )
+                addView(
+                    proPassCard(
+                        context = context,
+                        accent = red,
+                        title = "ELITE",
+                        memberLabel = context.getString(R.string.str_elite_member),
+                        oldPrice = "99",
+                        price = "\u20B949",
+                        priceSuffix = "/mo",
+                        baseColor = Color.rgb(17, 5, 7),
+                        features = listOf(
+                            Triple(ProIconView.Icon.AD_BLOCK, "1. NO INTERSTITIAL", "AD"),
+                            Triple(ProIconView.Icon.MEDAL, "2. STORE", "DISCOUNT"),
+                            Triple(ProIconView.Icon.FOUR_K, "3. WATCH LIVE", "STREAMING"),
+                            Triple(ProIconView.Icon.STATS, "4. PREMIUM MATCH", "INSIGHTS"),
+                            Triple(ProIconView.Icon.ARROW, "5. AFTER MATCH", "HIGHLIGHTS")
+                        )
+                    ),
+                    LinearLayout.LayoutParams(dp(332), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        rightMargin = dp(12)
+                    }
+                )
+                addView(
+                    proPassCard(
+                        context = context,
+                        accent = purple,
+                        title = "LEGEND",
+                        memberLabel = "LEGEND MEMBER",
+                        oldPrice = "299",
+                        price = "\u20B9199",
+                        priceSuffix = "/Month",
+                        baseColor = Color.rgb(13, 6, 22),
+                        features = listOf(
+                            Triple(ProIconView.Icon.AD_BLOCK, "1. NOT A", "SINGLE AD"),
+                            Triple(ProIconView.Icon.MEDAL, "2. STORE", "DISCOUNT"),
+                            Triple(ProIconView.Icon.FOUR_K, "3. WATCH LIVE", "STREAMING"),
+                            Triple(ProIconView.Icon.STATS, "4. PREMIUM MATCH", "INSIGHTS"),
+                            Triple(ProIconView.Icon.ARROW, "5. AFTER MATCH", "HIGHLIGHTS"),
+                            Triple(ProIconView.Icon.STATS, "6. MATCH PLANNING", "WITH AI COACH"),
+                            Triple(ProIconView.Icon.MEDAL, "7. AI PERSONAL COACH", "FROM YOUR STATS"),
+                            Triple(ProIconView.Icon.ARROW, "8. DRS/BALL/SPEED", "TRACKING")
+                        )
+                    ),
+                    LinearLayout.LayoutParams(dp(620), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        rightMargin = dp(12)
+                    }
+                )
+                addView(
+                    proPassCard(
+                        context = context,
+                        accent = gold,
+                        title = "HALL OF FAME",
+                        passLabel = "",
+                        memberLabel = "VIP MEMBER",
+                        oldPrice = "",
+                        price = "\u20B9499",
+                        priceSuffix = "/1yr",
+                        baseColor = Color.rgb(3, 3, 3),
+                        features = listOf(
+                            Triple(ProIconView.Icon.MEDAL, "1. VERIFIED", "BADGE"),
+                            Triple(ProIconView.Icon.AD_BLOCK, "2. NO", "ADS"),
+                            Triple(ProIconView.Icon.MEDAL, "3. OFFLINE EVENT", "INVITE + AWARD"),
+                            Triple(ProIconView.Icon.FOUR_K, "4. LIVE", "STREAMING"),
+                            Triple(ProIconView.Icon.MEDAL, "5. HUGE STORE", "DISCOUNT"),
+                            Triple(ProIconView.Icon.STATS, "6. PREMIUM MATCH", "INSIGHTS"),
+                            Triple(ProIconView.Icon.ARROW, "7. AFTER MATCH", "HIGHLIGHTS"),
+                            Triple(ProIconView.Icon.MEDAL, "8. FREE JERSEY", "+ GOODIES"),
+                            Triple(ProIconView.Icon.STATS, "9. MATCH PLANNING", "WITH AI COACH"),
+                            Triple(ProIconView.Icon.MEDAL, "10. AI PERSONAL COACH", "FROM YOUR STATS"),
+                            Triple(ProIconView.Icon.ARROW, "11. DRS/BALL/SPEED", "TRACKING")
+                        )
+                    ),
+                    LinearLayout.LayoutParams(dp(920), LinearLayout.LayoutParams.WRAP_CONTENT)
+                )
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
+    private fun proPassCard(
+        context: Context,
+        accent: Int,
+        title: String,
+        passLabel: String = context.getString(R.string.str_pass),
+        memberLabel: String,
+        oldPrice: String,
+        price: String,
+        priceSuffix: String,
+        baseColor: Int,
+        features: List<Triple<ProIconView.Icon, String, String>>
+    ): View {
+        val isLegend = features.size > 5
+        val isHallOfFame = accent == Color.rgb(255, 215, 0)
+        val hallTextColor = Color.BLACK
+        val hallDarkGold = Color.rgb(138, 106, 0)
+        val cardHeight = dp(296)
+        val shadowHeight = dp(286)
         return FrameLayout(context).apply {
             clipChildren = false
             clipToPadding = false
@@ -563,31 +910,37 @@ class HomeScreenView @JvmOverloads constructor(
             addView(View(context).apply {
                 background = GradientDrawable().apply {
                     cornerRadius = dp(21).toFloat()
-                    setColor(Color.argb(165, 0, 0, 0))
+                    setColor(if (isHallOfFame) Color.argb(190, 42, 32, 0) else Color.argb(165, 0, 0, 0))
                 }
-                translationY = dp(12).toFloat()
-            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(512)).apply {
-                setMargins(dp(10), dp(12), dp(10), 0)
+                translationY = dp(8).toFloat()
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, shadowHeight).apply {
+                setMargins(dp(8), dp(8), dp(8), 0)
             })
 
             // The main card container
             val cardContainer = FrameLayout(context).apply {
-                elevation = dp(48).toFloat()
-                translationZ = dp(18).toFloat()
+                elevation = dp(if (isHallOfFame) 38 else 28).toFloat()
+                translationZ = dp(if (isHallOfFame) 18 else 12).toFloat()
                 outlineAmbientShadowColor = Color.BLACK
                 outlineSpotShadowColor = Color.BLACK
                 
                 background = GradientDrawable().apply {
                     cornerRadius = dp(20).toFloat()
-                    setColor(Color.rgb(5, 8, 11))
+                    setColor(baseColor)
+                    if (isHallOfFame) {
+                        setStroke(dp(1), hallDarkGold)
+                    }
                 }
                 clipToOutline = true
 
-                addView(ProPassCardArtView(context), FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                addView(ProPassCardArtView(context, accent), FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                if (isHallOfFame) {
+                    addView(PremiumRayView(context, 20, 0L), FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                }
 
                 val content = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
-                    setPadding(dp(25), dp(24), dp(25), dp(30))
+                    setPadding(dp(if (isLegend) 20 else 18), dp(16), dp(if (isLegend) 20 else 18), dp(18))
 
                     // 1. Top Bar: Elite Badge
                     val headerRow = LinearLayout(context).apply {
@@ -602,17 +955,31 @@ class HomeScreenView @JvmOverloads constructor(
                             addView(View(context).apply {
                                 background = GradientDrawable().apply {
                                     cornerRadius = dp(4).toFloat()
-                                    setColor(primary)
+                                    setColor(accent)
                                 }
-                            }, LinearLayout.LayoutParams(dp(5), dp(24)))
+                            }, LinearLayout.LayoutParams(dp(5), dp(20)))
                             
                             addView(TextView(context).apply {
-                                text = context.getString(R.string.str_elite_member)
-                                setTextColor(primary)
+                                text = memberLabel
+                                setTextColor(if (isHallOfFame) hallTextColor else accent)
                                 textSize = 9.2f
                                 letterSpacing = 0.16f
                                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
                                 includeFontPadding = false
+                                if (isHallOfFame) {
+                                    post {
+                                        paint.shader = LinearGradient(
+                                            0f,
+                                            0f,
+                                            width.toFloat().coerceAtLeast(1f),
+                                            0f,
+                                            intArrayOf(Color.BLACK, Color.rgb(185, 0, 20)),
+                                            null,
+                                            Shader.TileMode.CLAMP
+                                        )
+                                        invalidate()
+                                    }
+                                }
                             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                                 leftMargin = dp(7)
                             })
@@ -622,97 +989,141 @@ class HomeScreenView @JvmOverloads constructor(
                             background = GradientDrawable().apply {
                                 cornerRadius = dp(9).toFloat()
                                 setColor(Color.argb(58, 255, 255, 255))
-                                setStroke(1, Color.argb(150, 193, 255, 0))
+                                setStroke(1, if (isHallOfFame) Color.argb(170, 74, 58, 0) else Color.argb(150, Color.red(accent), Color.green(accent), Color.blue(accent)))
                             }
                             addView(ProIconView(context, ProIconView.Icon.MEDAL).apply {
-                                setTint(primary)
-                            }, FrameLayout.LayoutParams(dp(21), dp(21), Gravity.CENTER))
+                                setTint(if (isHallOfFame) hallTextColor else accent)
+                            }, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
                             addView(PremiumRayView(context, 9, 500L), FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-                        }, LinearLayout.LayoutParams(dp(38), dp(38)))
+                        }, LinearLayout.LayoutParams(dp(32), dp(32)))
                     }
                     addView(headerRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-                    // 2. Large PRO PASS Typography
-                    val titleRow = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        addView(TextView(context).apply {
-                            text = context.getString(R.string.str_pro)
-                            setTextColor(Color.WHITE)
-                            textSize = 45f
-                            letterSpacing = -0.02f
-                            typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD_ITALIC)
-                            includeFontPadding = false
-                        })
-                        addView(TextView(context).apply {
-                            text = context.getString(R.string.str_pass)
-                            setTextColor(primary)
-                            textSize = 45f
-                            letterSpacing = -0.02f
-                            typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD_ITALIC)
-                            includeFontPadding = false
-                        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                            topMargin = dp(-5)
-                        })
-                    }
-                    addView(titleRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
-
-                    // 3. Features
-                    val features = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                    }
-                    features.addView(proFeatureLine(context, ProIconView.Icon.AD_BLOCK, "ZERO AD", "INTERRUPTIONS"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(28) })
-                    features.addView(proFeatureLine(context, ProIconView.Icon.FOUR_K, "4K ULTRA HDR", "STREAMING"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(17) })
-                    features.addView(proFeatureLine(context, ProIconView.Icon.STATS, "PREMIUM INSIDER", "STATS"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(17) })
-                    addView(features, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-
-                    addView(View(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.72f))
-
-                    // 4. Large centered pricing
-                    val priceRow = LinearLayout(context).apply {
+                    val bodyRow = LinearLayout(context).apply {
                         orientation = LinearLayout.HORIZONTAL
-                        gravity = Gravity.CENTER
-                        
-                        addView(TextView(context).apply {
-                            text = context.getString(R.string.str_19)
-                            setTextColor(Color.WHITE)
-                            textSize = 44f
-                            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
-                            includeFontPadding = false
-                        })
-                        addView(TextView(context).apply {
-                            text = context.getString(R.string.str_month)
-                            setTextColor(Color.rgb(156, 166, 156))
-                            textSize = 7.2f
-                            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-                            includeFontPadding = false
-                        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                            leftMargin = dp(4)
-                            bottomMargin = dp(7)
+                        gravity = Gravity.CENTER_VERTICAL
+
+                        addView(LinearLayout(context).apply {
+                            orientation = LinearLayout.VERTICAL
+
+                            addView(TextView(context).apply {
+                                text = title
+                                setTextColor(if (isHallOfFame) hallTextColor else Color.WHITE)
+                                textSize = if (isHallOfFame) 30f else if (isLegend) 39f else if (title.length > 5) 33f else 39f
+                                letterSpacing = -0.02f
+                                typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD_ITALIC)
+                                includeFontPadding = false
+                                if (isHallOfFame) {
+                                    setShadowLayer(dp(2).toFloat(), 0f, 1f, Color.argb(70, 255, 246, 190))
+                                }
+                            })
+                            if (passLabel.isNotBlank()) {
+                                addView(TextView(context).apply {
+                                    text = passLabel
+                                    setTextColor(accent)
+                                    textSize = 39f
+                                    letterSpacing = -0.02f
+                                    typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD_ITALIC)
+                                    includeFontPadding = false
+                                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                                    topMargin = dp(-5)
+                                })
+                            }
+
+                            addView(LinearLayout(context).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = Gravity.BOTTOM
+
+                                if (oldPrice.isNotBlank()) {
+                                    addView(TextView(context).apply {
+                                        text = oldPrice
+                                        setTextColor(Color.rgb(156, 166, 156))
+                                        textSize = 18f
+                                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                                        includeFontPadding = false
+                                        paintFlags = paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+                                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                                        rightMargin = dp(7)
+                                        bottomMargin = dp(6)
+                                    })
+                                }
+                                addView(TextView(context).apply {
+                                    text = price
+                                    setTextColor(if (isHallOfFame) Color.BLACK else Color.WHITE)
+                                    textSize = if (isHallOfFame) 38f else if (isLegend) 35f else if (price.length > 2) 31f else 35f
+                                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                                    includeFontPadding = false
+                                    if (isHallOfFame) {
+                                        setShadowLayer(dp(2).toFloat(), 0f, 1f, Color.argb(95, 255, 246, 190))
+                                    }
+                                })
+                                addView(TextView(context).apply {
+                                    text = priceSuffix
+                                    setTextColor(if (isHallOfFame) hallTextColor else Color.rgb(156, 166, 156))
+                                    textSize = 7.2f
+                                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                                    includeFontPadding = false
+                                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                                    leftMargin = dp(4)
+                                    bottomMargin = dp(6)
+                                })
+                            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                                topMargin = dp(6)
+                            })
+                        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, if (isLegend) 0.72f else 0.88f))
+
+                        val featuresView = if (isLegend) {
+                            LinearLayout(context).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                val columns = features.chunked(4)
+                                columns.forEachIndexed { columnIndex, columnFeatures ->
+                                    addView(LinearLayout(context).apply {
+                                        orientation = LinearLayout.VERTICAL
+                                        columnFeatures.forEachIndexed { index, feature ->
+                                            addView(
+                                                proFeatureLine(context, feature.first, feature.second, feature.third, accent),
+                                                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                                                    if (index > 0) topMargin = dp(7)
+                                                }
+                                            )
+                                        }
+                                    }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                                        if (columnIndex > 0) leftMargin = dp(14)
+                                    })
+                                }
+                            }
+                        } else {
+                            LinearLayout(context).apply {
+                                orientation = LinearLayout.VERTICAL
+                                features.forEachIndexed { index, feature ->
+                                    addView(
+                                        proFeatureLine(context, feature.first, feature.second, feature.third, accent),
+                                        LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                                            if (index > 0) topMargin = when {
+                                                features.size > 3 -> dp(5)
+                                                else -> dp(9)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        addView(featuresView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, if (isLegend) 1.58f else 1.12f).apply {
+                            leftMargin = dp(if (isLegend) 16 else 12)
                         })
                     }
-                    addView(priceRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
-
-                    // Trust text
-                    addView(TextView(context).apply {
-                        text = context.getString(R.string.str_cancel_anytime__no_h)
-                        gravity = Gravity.CENTER
-                        setTextColor(primary)
-                        textSize = 6.3f
-                        letterSpacing = 0.06f
-                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-                        includeFontPadding = false
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(1) })
+                    addView(bodyRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(10) })
 
                     // 5. CTA Button
                     val btnContainer = FrameLayout(context).apply {
-                        setPadding(0, 0, 0, dp(8))
+                        setPadding(0, 0, 0, dp(5))
                         addView(View(context).apply {
                             background = GradientDrawable().apply {
                                 cornerRadius = dp(8).toFloat()
                                 setColor(Color.argb(92, 0, 0, 0))
                             }
-                        }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(39)).apply {
-                            topMargin = dp(8)
+                        }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(34)).apply {
+                            topMargin = dp(6)
                             leftMargin = dp(5)
                             rightMargin = dp(5)
                         })
@@ -721,7 +1132,7 @@ class HomeScreenView @JvmOverloads constructor(
                         val btn = FrameLayout(context).apply {
                             background = GradientDrawable(
                                 GradientDrawable.Orientation.TOP_BOTTOM,
-                                intArrayOf(Color.rgb(196, 255, 44), Color.rgb(166, 242, 0))
+                                intArrayOf(lightenColor(accent, 0.18f), accent)
                             ).apply {
                                 cornerRadius = dp(8).toFloat()
                             }
@@ -738,29 +1149,53 @@ class HomeScreenView @JvmOverloads constructor(
                                 gravity = Gravity.CENTER
                                 addView(TextView(context).apply {
                                     text = context.getString(R.string.str_activate_pro)
-                                    setTextColor(Color.rgb(4, 9, 4))
+                                    setTextColor(if (accent == primary || isHallOfFame) Color.rgb(4, 9, 4) else Color.WHITE)
                                     textSize = 9.3f
                                     letterSpacing = 0.08f
                                     typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
                                     includeFontPadding = false
                                 })
                                 addView(ProIconView(context, ProIconView.Icon.ARROW).apply {
-                                    setTint(Color.rgb(4, 9, 4))
+                                    setTint(if (accent == primary || isHallOfFame) Color.rgb(4, 9, 4) else Color.WHITE)
                                 }, LinearLayout.LayoutParams(dp(15), dp(15)).apply { leftMargin = dp(9) })
                             }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
                         }
-                        addView(btn, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(42)))
+                        addView(btn, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(38)))
                     }
-                    addView(btnContainer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(11) })
+                    addView(TextView(context).apply {
+                        text = context.getString(R.string.str_cancel_anytime__no_h)
+                        gravity = Gravity.CENTER
+                        setTextColor(if (isHallOfFame) hallTextColor else accent)
+                        textSize = 6.3f
+                        letterSpacing = 0.06f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        includeFontPadding = false
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                    addView(btnContainer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(7) })
                 }
                 addView(content, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             }
 
-            addView(cardContainer, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(522)))
+            addView(cardContainer, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, cardHeight))
         }
     }
 
-    private fun proFeatureLine(context: Context, icon: ProIconView.Icon, title: String, subtitle: String): View {
+    private fun proFeatureLine(context: Context, icon: ProIconView.Icon, title: String, subtitle: String, accent: Int): View {
+        val compact = accent != primary
+        val dense = accent == Color.rgb(156, 82, 255) || accent == Color.rgb(255, 215, 0)
+        val isHallOfFame = accent == Color.rgb(255, 215, 0)
+        val featureTextColor = if (isHallOfFame) Color.rgb(26, 20, 0) else Color.WHITE
+        val featureTint = if (isHallOfFame) Color.rgb(74, 58, 0) else accent
+        val iconSize = when {
+            dense -> 26
+            compact -> 24
+            else -> 32
+        }
+        val glyphSize = when {
+            dense -> 15
+            compact -> 14
+            else -> 18
+        }
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -769,53 +1204,68 @@ class HomeScreenView @JvmOverloads constructor(
                 elevation = dp(4).toFloat()
                 background = GradientDrawable().apply {
                     cornerRadius = dp(6).toFloat()
-                    setColor(Color.argb(42, 255, 255, 255))
-                    setStroke(1, Color.argb(58, 193, 255, 0))
+                    setColor(if (isHallOfFame) Color.argb(34, 0, 0, 0) else Color.argb(42, 255, 255, 255))
+                    setStroke(1, if (isHallOfFame) Color.argb(70, 74, 58, 0) else Color.argb(58, Color.red(accent), Color.green(accent), Color.blue(accent)))
                 }
                 addView(View(context).apply {
                     background = GradientDrawable().apply {
                         gradientType = GradientDrawable.RADIAL_GRADIENT
                         gradientRadius = dp(26).toFloat()
-                        colors = intArrayOf(Color.argb(34, 193, 255, 0), Color.TRANSPARENT)
+                        colors = intArrayOf(
+                            if (isHallOfFame) Color.argb(28, 255, 255, 255) else Color.argb(34, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                            Color.TRANSPARENT
+                        )
                     }
                 }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
                 addView(ProIconView(context, icon).apply {
-                    setTint(primary)
-                }, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
+                    setTint(featureTint)
+                }, FrameLayout.LayoutParams(dp(glyphSize), dp(glyphSize), Gravity.CENTER))
             }
-            addView(iconBox, LinearLayout.LayoutParams(dp(36), dp(36)))
+            addView(iconBox, LinearLayout.LayoutParams(dp(iconSize), dp(iconSize)))
             
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                addView(TextView(context).apply {
-                    text = title
-                    setTextColor(Color.WHITE)
-                    textSize = 10.4f
-                    letterSpacing = 0.01f
-                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-                    includeFontPadding = false
-                })
-                addView(TextView(context).apply {
-                    text = subtitle
-                    setTextColor(Color.WHITE)
-                    textSize = 10.4f
-                    letterSpacing = 0.01f
-                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-                    includeFontPadding = false
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(1)
-                })
-                addView(TextView(context).apply {
-                    text = context.getString(R.string.str_realtime_player_anal)
-                    setTextColor(Color.rgb(126, 136, 128))
-                    textSize = 6.2f
-                    letterSpacing = 0.04f
-                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-                    includeFontPadding = false
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(2)
-                })
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(17) })
+                if (compact) {
+                    addView(TextView(context).apply {
+                        text = "$title $subtitle"
+                        setTextColor(featureTextColor)
+                        textSize = if (accent == Color.rgb(255, 215, 0)) 8.7f else if (dense) 9.2f else 7.8f
+                        letterSpacing = 0.04f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        includeFontPadding = false
+                        maxLines = 1
+                    })
+                } else {
+                    addView(TextView(context).apply {
+                        text = title
+                        setTextColor(featureTextColor)
+                        textSize = 10.4f
+                        letterSpacing = 0.01f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        includeFontPadding = false
+                    })
+                    addView(TextView(context).apply {
+                        text = subtitle
+                        setTextColor(featureTextColor)
+                        textSize = 10.4f
+                        letterSpacing = 0.01f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        includeFontPadding = false
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        topMargin = dp(1)
+                    })
+                    addView(TextView(context).apply {
+                        text = context.getString(R.string.str_realtime_player_anal)
+                        setTextColor(Color.rgb(126, 136, 128))
+                        textSize = 6.2f
+                        letterSpacing = 0.04f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        includeFontPadding = false
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        topMargin = dp(2)
+                    })
+                }
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(if (dense) 10 else 12) })
         }
     }
 
@@ -1287,6 +1737,15 @@ class HomeScreenView @JvmOverloads constructor(
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 
+    private fun lightenColor(color: Int, amount: Float): Int {
+        val safeAmount = amount.coerceIn(0f, 1f)
+        return Color.rgb(
+            (Color.red(color) + (255 - Color.red(color)) * safeAmount).toInt().coerceIn(0, 255),
+            (Color.green(color) + (255 - Color.green(color)) * safeAmount).toInt().coerceIn(0, 255),
+            (Color.blue(color) + (255 - Color.blue(color)) * safeAmount).toInt().coerceIn(0, 255)
+        )
+    }
+
     private class ScoreCardBackgroundView(context: Context) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val path = Path()
@@ -1541,12 +2000,20 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 
-    private class ProPassCardArtView(context: Context) : View(context) {
+    private class ProPassCardArtView(context: Context, private val accent: Int) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val path = Path()
         private val rect = RectF()
         private var glowBitmap: android.graphics.Bitmap? = null
         private var bgShader: Shader? = null
+        private val isGold = accent == Color.rgb(255, 215, 0)
+
+        override fun drawableStateChanged() {
+            super.drawableStateChanged()
+            if (isGold) {
+                refreshCardArt(width, height)
+            }
+        }
 
         init {
             // LAYER_TYPE_SOFTWARE removed to prevent vanishing on resume
@@ -1554,23 +2021,52 @@ class HomeScreenView @JvmOverloads constructor(
 
         override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
             super.onWindowFocusChanged(hasWindowFocus)
-            if (hasWindowFocus) invalidate()
+            if (hasWindowFocus) {
+                refreshCardArt(width, height)
+                invalidate()
+            }
         }
 
         override fun onVisibilityAggregated(isVisible: Boolean) {
             super.onVisibilityAggregated(isVisible)
-            if (isVisible) invalidate()
+            if (isVisible) {
+                refreshCardArt(width, height)
+                invalidate()
+            }
         }
 
         override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
             super.onSizeChanged(w, h, oldw, oldh)
+            refreshCardArt(w, h)
+        }
+
+        private fun refreshCardArt(w: Int, h: Int) {
             val wf = w.toFloat()
             val hf = h.toFloat()
             if (wf > 0 && hf > 0) {
                 bgShader = LinearGradient(
                     0f, 0f, wf, hf,
-                    intArrayOf(Color.rgb(17, 24, 17), Color.rgb(7, 10, 12), Color.rgb(4, 6, 8)),
-                    floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+                    if (isGold) {
+                        intArrayOf(
+                            Color.rgb(138, 106, 0),
+                            Color.rgb(212, 175, 55),
+                            Color.rgb(255, 215, 0),
+                            Color.rgb(138, 106, 0),
+                            Color.rgb(201, 162, 39)
+                        )
+                    } else {
+                        intArrayOf(
+                            Color.rgb(
+                                (Color.red(accent) * 0.22f).toInt().coerceAtLeast(7),
+                                (Color.green(accent) * 0.14f).toInt().coerceAtLeast(5),
+                                (Color.blue(accent) * 0.14f).toInt().coerceAtLeast(7)
+                            ),
+                            Color.rgb(7, 10, 12),
+                            Color.rgb(4, 6, 8)
+                        )
+                    },
+                    if (isGold) floatArrayOf(0f, 0.32f, 0.55f, 0.78f, 1f) else floatArrayOf(0f, 0.5f, 1f),
+                    Shader.TileMode.CLAMP
                 )
             }
             rebuildGlowBitmap(w, h)
@@ -1597,18 +2093,42 @@ class HomeScreenView @JvmOverloads constructor(
                 w * 0.2f,
                 h * 0.1f,
                 w * 0.7f,
-                intArrayOf(Color.argb(42, 193, 255, 0), Color.argb(12, 193, 255, 0), Color.TRANSPARENT),
+                intArrayOf(
+                    Color.argb(if (isGold) 88 else 42, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                    Color.argb(if (isGold) 26 else 12, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                    Color.TRANSPARENT
+                ),
                 floatArrayOf(0f, 0.44f, 1f),
                 Shader.TileMode.CLAMP
             )
             bitmapCanvas.drawRoundRect(bounds, radius, radius, glowPaint)
+
+            if (isGold) {
+                glowPaint.shader = android.graphics.RadialGradient(
+                    w * 0.72f,
+                    h * 0.08f,
+                    w * 0.48f,
+                    intArrayOf(
+                        Color.argb(64, 255, 246, 196),
+                        Color.argb(28, 255, 215, 0),
+                        Color.TRANSPARENT
+                    ),
+                    floatArrayOf(0f, 0.44f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                bitmapCanvas.drawRoundRect(bounds, radius, radius, glowPaint)
+            }
 
             glowPaint.shader = LinearGradient(
                 0f,
                 0f,
                 w * 0.62f,
                 h * 0.28f,
-                intArrayOf(Color.argb(38, 193, 255, 0), Color.argb(8, 193, 255, 0), Color.TRANSPARENT),
+                intArrayOf(
+                    Color.argb(if (isGold) 58 else 38, 255, 246, 190),
+                    Color.argb(if (isGold) 18 else 8, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                    Color.TRANSPARENT
+                ),
                 floatArrayOf(0f, 0.52f, 1f),
                 Shader.TileMode.CLAMP
             )
@@ -1623,8 +2143,19 @@ class HomeScreenView @JvmOverloads constructor(
             val h = height.toFloat()
             val d = resources.displayMetrics.density
             val radius = 20f * d
+            if (w <= 0f || h <= 0f) return
+
+            paint.reset()
+            paint.isAntiAlias = true
+            paint.style = Paint.Style.FILL
 
             rect.set(0f, 0f, w, h)
+            paint.color = if (isGold) Color.rgb(138, 106, 0) else Color.rgb(4, 6, 8)
+            canvas.drawRoundRect(rect, radius, radius, paint)
+
+            if (bgShader == null) {
+                refreshCardArt(width, height)
+            }
             paint.shader = bgShader
             canvas.drawRoundRect(rect, radius, radius, paint)
             paint.shader = null
@@ -1634,8 +2165,48 @@ class HomeScreenView @JvmOverloads constructor(
             }
             glowBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
 
+            if (isGold) {
+                drawHallOfFameWatermark(canvas, w, h, d)
+
+                paint.shader = LinearGradient(
+                    0f,
+                    0f,
+                    0f,
+                    h * 0.5f,
+                    intArrayOf(
+                        Color.argb(72, 255, 250, 220),
+                        Color.argb(24, 255, 215, 0),
+                        Color.TRANSPARENT
+                    ),
+                    floatArrayOf(0f, 0.38f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawRoundRect(RectF(1.5f * d, 1.5f * d, w - 1.5f * d, h * 0.48f), radius, radius, paint)
+                paint.shader = null
+
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 1.2f * d
+                paint.shader = LinearGradient(
+                    0f,
+                    0f,
+                    w,
+                    0f,
+                    intArrayOf(
+                        Color.argb(155, 74, 58, 0),
+                        Color.argb(210, 138, 106, 0),
+                        Color.argb(145, 255, 215, 0),
+                        Color.argb(190, 74, 58, 0)
+                    ),
+                    floatArrayOf(0f, 0.34f, 0.68f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawRoundRect(RectF(1f * d, 1f * d, w - 1f * d, h - 1f * d), radius, radius, paint)
+                paint.shader = null
+                paint.style = Paint.Style.FILL
+            }
+
             paint.style = Paint.Style.FILL
-            paint.color = Color.argb(42, 193, 255, 0)
+            paint.color = if (isGold) Color.argb(50, 0, 0, 0) else Color.argb(42, Color.red(accent), Color.green(accent), Color.blue(accent))
             path.reset()
             path.moveTo(w * 0.76f, h * 0.78f)
             path.lineTo(w * 0.86f, h * 0.78f)
@@ -1644,7 +2215,7 @@ class HomeScreenView @JvmOverloads constructor(
             path.close()
             canvas.drawPath(path, paint)
 
-            paint.color = Color.argb(28, 255, 255, 255)
+            paint.color = if (isGold) Color.argb(34, 0, 0, 0) else Color.argb(28, 255, 255, 255)
             path.reset()
             path.moveTo(w * 0.9f, h * 0.74f)
             path.lineTo(w, h * 0.72f)
@@ -1653,7 +2224,7 @@ class HomeScreenView @JvmOverloads constructor(
             path.close()
             canvas.drawPath(path, paint)
 
-            paint.color = Color.argb(18, 193, 255, 0)
+            paint.color = if (isGold) Color.argb(20, 0, 0, 0) else Color.argb(18, Color.red(accent), Color.green(accent), Color.blue(accent))
             repeat(4) { index ->
                 val left = w * (0.57f + index * 0.08f)
                 path.reset()
@@ -1667,12 +2238,71 @@ class HomeScreenView @JvmOverloads constructor(
 
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 0.8f * d
-            paint.color = Color.argb(16, 255, 255, 255)
+            paint.color = if (isGold) Color.argb(22, 0, 0, 0) else Color.argb(16, 255, 255, 255)
             repeat(3) { index ->
                 val y = h * (0.82f + index * 0.045f)
                 canvas.drawLine(w * 0.58f, y, w * 0.96f, y - h * 0.13f, paint)
             }
+            paint.reset()
+            paint.isAntiAlias = true
+        }
+
+        private fun drawHallOfFameWatermark(canvas: Canvas, w: Float, h: Float, d: Float) {
+            val cx = w * 0.79f
+            val cy = h * 0.48f
+            val unit = minOf(w, h) * 0.16f
+
+            paint.style = Paint.Style.STROKE
+            paint.strokeCap = Paint.Cap.ROUND
+            paint.strokeWidth = 2.2f * d
+            paint.color = Color.argb(22, 74, 58, 0)
+
+            repeat(7) { index ->
+                val offset = index * 0.065f
+                canvas.drawArc(
+                    RectF(cx - unit * (1.55f + offset), cy - unit * 1.45f, cx - unit * 0.18f, cy + unit * 1.6f),
+                    210f + index * 2f,
+                    16f,
+                    false,
+                    paint
+                )
+                canvas.drawArc(
+                    RectF(cx + unit * 0.18f, cy - unit * 1.45f, cx + unit * (1.55f + offset), cy + unit * 1.6f),
+                    -46f - index * 2f,
+                    16f,
+                    false,
+                    paint
+                )
+            }
+
             paint.style = Paint.Style.FILL
+            paint.color = Color.argb(18, 74, 58, 0)
+
+            rect.set(cx - unit * 0.42f, cy - unit * 0.72f, cx + unit * 0.42f, cy + unit * 0.18f)
+            canvas.drawRoundRect(rect, unit * 0.12f, unit * 0.12f, paint)
+
+            path.reset()
+            path.moveTo(cx - unit * 0.58f, cy - unit * 0.48f)
+            path.cubicTo(cx - unit * 1.05f, cy - unit * 0.58f, cx - unit * 1.02f, cy + unit * 0.05f, cx - unit * 0.38f, cy + unit * 0.02f)
+            path.lineTo(cx - unit * 0.38f, cy - unit * 0.18f)
+            path.cubicTo(cx - unit * 0.72f, cy - unit * 0.14f, cx - unit * 0.72f, cy - unit * 0.42f, cx - unit * 0.48f, cy - unit * 0.36f)
+            path.close()
+            canvas.drawPath(path, paint)
+
+            path.reset()
+            path.moveTo(cx + unit * 0.58f, cy - unit * 0.48f)
+            path.cubicTo(cx + unit * 1.05f, cy - unit * 0.58f, cx + unit * 1.02f, cy + unit * 0.05f, cx + unit * 0.38f, cy + unit * 0.02f)
+            path.lineTo(cx + unit * 0.38f, cy - unit * 0.18f)
+            path.cubicTo(cx + unit * 0.72f, cy - unit * 0.14f, cx + unit * 0.72f, cy - unit * 0.42f, cx + unit * 0.48f, cy - unit * 0.36f)
+            path.close()
+            canvas.drawPath(path, paint)
+
+            rect.set(cx - unit * 0.12f, cy + unit * 0.14f, cx + unit * 0.12f, cy + unit * 0.6f)
+            canvas.drawRoundRect(rect, unit * 0.04f, unit * 0.04f, paint)
+            rect.set(cx - unit * 0.42f, cy + unit * 0.56f, cx + unit * 0.42f, cy + unit * 0.76f)
+            canvas.drawRoundRect(rect, unit * 0.06f, unit * 0.06f, paint)
+            rect.set(cx - unit * 0.62f, cy + unit * 0.76f, cx + unit * 0.62f, cy + unit * 0.94f)
+            canvas.drawRoundRect(rect, unit * 0.05f, unit * 0.05f, paint)
         }
     }
 
