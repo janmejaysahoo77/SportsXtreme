@@ -4,7 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.ViewTreeObserver
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -14,7 +14,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
 
     private enum class Screen {
         Splash,

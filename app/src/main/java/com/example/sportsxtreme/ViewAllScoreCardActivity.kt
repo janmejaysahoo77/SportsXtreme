@@ -3,7 +3,7 @@ package com.example.sportsxtreme
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 
-class ViewAllScoreCardActivity : AppCompatActivity() {
+class ViewAllScoreCardActivity : ComponentActivity() {
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {

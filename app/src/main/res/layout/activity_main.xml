@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#05090E"
+    android:gravity="center"
+    android:orientation="vertical"
     tools:context=".MainActivity">
 
     <TextView
@@ -17,12 +18,7 @@
         android:text="SPORTSXTREME"
         android:textColor="#F5FDFF"
         android:textSize="34sp"
-        android:textStyle="bold"
-        app:layout_constraintBottom_toTopOf="@id/homeSubtitle"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_chainStyle="packed" />
+        android:textStyle="bold" />
 
     <TextView
         android:id="@+id/homeSubtitle"
@@ -32,10 +28,6 @@
         android:letterSpacing="0.16"
         android:text="LIVE SPORTS INTELLIGENCE"
         android:textColor="#CBFF20"
-        android:textSize="12sp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="@id/homeTitle"
-        app:layout_constraintStart_toStartOf="@id/homeTitle"
-        app:layout_constraintTop_toBottomOf="@id/homeTitle" />
+        android:textSize="12sp" />
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+</LinearLayout>

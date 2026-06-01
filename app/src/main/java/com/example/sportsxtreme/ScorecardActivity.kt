@@ -2,7 +2,7 @@ package com.example.sportsxtreme
 
 import android.os.Bundle
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.RepeatMode
@@ -69,7 +69,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 
-class ScorecardActivity : AppCompatActivity() {
+class ScorecardActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_LEAGUE = "scorecard.extra.LEAGUE"

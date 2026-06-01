@@ -17,13 +17,15 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        resourceConfigurations += setOf("en")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -45,12 +47,10 @@ dependencies {
     implementation(libs.androidx.compose.runtime)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.splashscreen)
+    implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
