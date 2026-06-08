@@ -12,6 +12,30 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SportsXtreme">
         <activity
+            android:name=".ViewDetailsScreenWhileStartMatch"
+            android:exported="false" />
+        <activity
+            android:name=".SelectTeamAorBActivity"
+            android:exported="false" />
+        <activity
+            android:name=".SelectPlayingTeamsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".StartMatchActivity"
+            android:exported="false" />
+        <activity
+            android:name=".LeagueTournamentFlowActivity"
+            android:exported="false" />
+        <activity
+            android:name=".LeagueMatchSetupActivity"
+            android:exported="false" />
+        <activity
+            android:name=".TournamentRequirementsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".TournamentRegistrationActivity"
+            android:exported="false" />
+        <activity
             android:name=".ShoppingActivity"
             android:exported="false" />
         <activity
