@@ -206,9 +206,9 @@ private fun CommunityTopStrip(onMenuClick: () -> Unit) {
             painter = painterResource(R.drawable.appicon),
             contentDescription = "SportsXtreme",
             modifier = Modifier
-                .width(36.dp)
-                .height(24.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .width(58.dp)
+                .height(32.dp)
+                .clip(RoundedCornerShape(5.dp))
         )
         Spacer(Modifier.width(8.dp))
         Box(

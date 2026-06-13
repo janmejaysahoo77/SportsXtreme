@@ -2,21 +2,32 @@ package com.example.sportsxtreme
 
 import android.content.Intent
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RadialGradient
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.util.AttributeSet
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.AlphaAnimation
+import android.view.animation.Animation
+import android.view.animation.AnimationSet
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.TranslateAnimation
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -24,6 +35,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.ViewFlipper
 import androidx.compose.ui.platform.ComposeView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.core.view.GravityCompat
@@ -38,6 +50,20 @@ class HomeScreenView @JvmOverloads constructor(
     enum class TopMode { SPORTS, MEDIA, CART }
 
     private data class NavItem(val label: String, val icon: NavIconView.Icon)
+    private data class HostSlide(
+        val imageRes: Int,
+        val eyebrow: String,
+        val title: String,
+        val features: List<String>,
+        val cta: String,
+        val accent: Int,
+        val onClick: ((Context) -> Unit)? = null
+    )
+
+    private enum class DrawerAction {
+        ADD_TOURNAMENT,
+        START_MATCH
+    }
 
     private val primary = Color.rgb(193, 255, 0)
     private val cyan = Color.rgb(0, 210, 255)
@@ -49,7 +75,7 @@ class HomeScreenView @JvmOverloads constructor(
         NavItem("Stats", NavIconView.Icon.BARS),
         NavItem("Host", NavIconView.Icon.PLUS),
         NavItem("Community", NavIconView.Icon.USERS),
-        NavItem("Shop", NavIconView.Icon.CART)
+        NavItem("Leaderboard", NavIconView.Icon.TROPHY)
     )
     private var selectedIndex = 0
     private lateinit var contentHolder: FrameLayout
@@ -274,8 +300,8 @@ class HomeScreenView @JvmOverloads constructor(
 
                     // Drawer Items
                     val items = listOf(
-                        DrawerItem("Add a Tournament/Series", DrawerIconView.Icon.PLUS_CIRCLE, badge = "FREE"),
-                        DrawerItem("Start A Match", DrawerIconView.Icon.BAT, badge = "FREE"),
+                        DrawerItem("Add a Tournament/Series", DrawerIconView.Icon.PLUS_CIRCLE, badge = "FREE", action = DrawerAction.ADD_TOURNAMENT),
+                        DrawerItem("Start A Match", DrawerIconView.Icon.BAT, badge = "FREE", action = DrawerAction.START_MATCH),
                         DrawerItem("Go Live", DrawerIconView.Icon.VIDEO),
                         DrawerItem("My Cricket", DrawerIconView.Icon.STADIUM),
                         DrawerItem("My Stats", DrawerIconView.Icon.STATS),
@@ -324,12 +350,30 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 
-    private data class DrawerItem(val label: String, val icon: DrawerIconView.Icon, val badge: String? = null, val hasDot: Boolean = false, val isExpandable: Boolean = false)
+    private data class DrawerItem(
+        val label: String,
+        val icon: DrawerIconView.Icon,
+        val badge: String? = null,
+        val hasDot: Boolean = false,
+        val isExpandable: Boolean = false,
+        val action: DrawerAction? = null
+    )
 
     private fun createDrawerItemView(context: Context, item: DrawerItem): View {
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            isClickable = item.action != null
+            isFocusable = item.action != null
+            item.action?.let { action ->
+                setOnClickListener {
+                    drawerLayout.closeDrawer(GravityCompat.START)
+                    when (action) {
+                        DrawerAction.ADD_TOURNAMENT -> context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
+                        DrawerAction.START_MATCH -> context.startActivity(Intent(context, StartMatchActivity::class.java))
+                    }
+                }
+            }
             
             addView(DrawerIconView(context, item.icon).apply {
                 setTint(Color.rgb(200, 210, 215))
@@ -461,7 +505,7 @@ class HomeScreenView @JvmOverloads constructor(
                 text = item.label
                 gravity = Gravity.CENTER
                 setTextColor(if (active) Color.rgb(8, 16, 7) else muted)
-                textSize = 8.5f
+                textSize = if (item.label.length > 9) 7.2f else 8.5f
                 includeFontPadding = false
                 typeface = Typeface.create(Typeface.SANS_SERIF, if (active) Typeface.BOLD else Typeface.NORMAL)
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
@@ -562,6 +606,7 @@ class HomeScreenView @JvmOverloads constructor(
                 0 -> createHomeContent(context)
                 2 -> createHostContent(context)
                 3 -> createCommunityContent(context)
+                4 -> createLeaderboardContent(context)
                 else -> createComingSoon(context, navItems[index])
             }
         }
@@ -572,6 +617,14 @@ class HomeScreenView @JvmOverloads constructor(
         return ComposeView(context).apply {
             setContent {
                 CommunityScreen(onMenuClick = { openDrawer() })
+            }
+        }
+    }
+
+    private fun createLeaderboardContent(context: Context): View {
+        return ComposeView(context).apply {
+            setContent {
+                LeaderboardScreen(onMenuClick = { openDrawer() })
             }
         }
     }
@@ -654,26 +707,39 @@ class HomeScreenView @JvmOverloads constructor(
 
                     addView(LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
-                        setPadding(dp(12), dp(16), dp(12), dp(20))
+                        setPadding(0, dp(12), 0, dp(20))
 
-                        addView(hostHeader(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-                        addView(hostArenaCard(
-                            context = context,
-                            icon = HostIconView.Icon.TROPHY,
-                            title = "Register Tournament /\nSeries",
-                            subtitle = "LEAGUES & CHAMPIONSHIPS",
-                            features = listOf("TEAM PORTAL", "FIXTURES AI", "LIVE TABLES", "ADVANCED STATS"),
-                            buttonLabel = "REGISTER TOURNAMENT / SERIES"
-                        ), blockParams(top = 18))
-                        addView(hostArenaCard(
-                            context = context,
-                            icon = HostIconView.Icon.BAT,
-                            title = "Start a Match",
-                            subtitle = "FAST-PACED LOCAL PLAY",
-                            features = listOf("LIVE SCORING", "MVPS TRACK", "AUTO-SYNC", "SHARE CARDS"),
-                            buttonLabel = "START A MATCH"
-                        ), blockParams(top = 14))
-                        addView(hostSecurityNote(context), blockParams(top = 18))
+                        addView(hostHeader(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                            leftMargin = dp(12)
+                            rightMargin = dp(12)
+                        })
+                        addView(LinearLayout(context).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(dp(12), 0, dp(12), 0)
+                            addView(hostArenaCard(
+                                context = context,
+                                icon = HostIconView.Icon.TROPHY,
+                                title = "Register Tournament /\nSeries",
+                                subtitle = "LEAGUES & CHAMPIONSHIPS",
+                                features = listOf("TEAM PORTAL", "FIXTURES AI", "LIVE TABLES", "ADVANCED STATS"),
+                                buttonLabel = "REGISTER TOURNAMENT / SERIES",
+                                onClick = {
+                                    context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
+                                }
+                            ), blockParams(top = 18))
+                            addView(hostArenaCard(
+                                context = context,
+                                icon = HostIconView.Icon.BAT,
+                                title = "Start a Match",
+                                subtitle = "FAST-PACED LOCAL PLAY",
+                                features = listOf("LIVE SCORING", "MVPS TRACK", "AUTO-SYNC", "SHARE CARDS"),
+                                buttonLabel = "START A MATCH",
+                                onClick = {
+                                    context.startActivity(Intent(context, StartMatchActivity::class.java))
+                                }
+                            ), blockParams(top = 14))
+                            addView(hostSecurityNote(context), blockParams(top = 18))
+                        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
                     }, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
             }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -686,7 +752,7 @@ class HomeScreenView @JvmOverloads constructor(
             setPadding(dp(14), 0, dp(14), 0)
             background = GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(Color.rgb(5, 13, 17), Color.rgb(3, 10, 22))
+                intArrayOf(Color.rgb(2, 15, 27), Color.rgb(4, 18, 38), Color.rgb(2, 9, 22))
             )
 
             addView(TopIconView(context, TopIconView.Icon.MENU).apply {
@@ -699,7 +765,7 @@ class HomeScreenView @JvmOverloads constructor(
             addView(ImageView(context).apply {
                 setImageResource(R.drawable.appicon)
                 scaleType = ImageView.ScaleType.CENTER_CROP
-            }, LinearLayout.LayoutParams(dp(36), dp(24)).apply {
+            }, LinearLayout.LayoutParams(dp(52), dp(30)).apply {
                 leftMargin = dp(20)
             })
             addView(TextView(context).apply {
@@ -725,68 +791,294 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun hostHeader(context: Context): View {
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
+        return FrameLayout(context).apply {
+            clipChildren = false
+            clipToPadding = false
+            val slides = listOf(
+                HostSlide(
+                    imageRes = R.drawable.cricket_choosesports,
+                    eyebrow = "SPORTSXTREME HOST NETWORK",
+                    title = "Are You Ready For\nNext Host Of This Xtreme",
+                    features = listOf("1800 Matches Live Now", "20k+ viewers watching now", "1Lakh+ Tournament Hosted"),
+                    cta = "Build Matchday",
+                    accent = primary
+                ),
+                HostSlide(
+                    imageRes = R.drawable.secondimage_slider,
+                    eyebrow = "EASY TOURNAMENT MANAGEMENT",
+                    title = "Host Tournaments\nLike A Pro",
+                    features = listOf("Easy Management", "Auto Fixtures", "Team Portal", "Live Points Table"),
+                    cta = "Register Tournament",
+                    accent = primary,
+                    onClick = { it.startActivity(Intent(it, TournamentRegistrationActivity::class.java)) }
+                ),
+                HostSlide(
+                    imageRes = R.drawable.cloudsync_sliderimage,
+                    eyebrow = "100% CLOUD SYNC",
+                    title = "Never Lose\nMatch Data",
+                    features = listOf("Real-time Sync", "Secure Cloud Storage", "Multi-device Access", "Automatic Backup"),
+                    cta = "Start A Match",
+                    accent = cyan,
+                    onClick = { it.startActivity(Intent(it, StartMatchActivity::class.java)) }
+                ),
+                HostSlide(
+                    imageRes = R.drawable.superfastscoring_slider,
+                    eyebrow = "HIGH-SPEED SCORING",
+                    title = "Score Matches At\nLightning Speed",
+                    features = listOf("Ball-by-Ball Scoring", "One-Tap Actions", "Live Score Updates", "Advanced Statistics"),
+                    cta = "Try Scoring",
+                    accent = Color.rgb(255, 205, 34),
+                    onClick = { it.startActivity(Intent(it, ScorecardActivity::class.java)) }
+                )
+            )
+            val flipper = ViewFlipper(context).apply {
+                inAnimation = hostSlideInAnimation()
+                outAnimation = hostSlideOutAnimation()
+                flipInterval = 3300
+                isAutoStart = true
+                slides.forEach { addView(hostSlideView(context, it), ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
+                startFlipping()
+            }
+            addView(flipper, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(304)))
 
-            addView(FrameLayout(context).apply {
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.argb(34, 193, 255, 0))
-                    setStroke(dp(1), Color.argb(86, 193, 255, 0))
+            val dots = LinearLayout(context).apply {
+                gravity = Gravity.CENTER
+                repeat(slides.size) {
+                    addView(View(context), LinearLayout.LayoutParams(dp(7), dp(7)).apply {
+                        leftMargin = dp(4)
+                        rightMargin = dp(4)
+                    })
                 }
-                addView(HostIconView(context, HostIconView.Icon.TROPHY).apply {
-                    setTint(primary)
-                }, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
-            }, LinearLayout.LayoutParams(dp(38), dp(38)))
-
-            addView(TextView(context).apply {
-                text = "HOST"
-                gravity = Gravity.CENTER
-                setTextColor(Color.rgb(216, 222, 224))
-                textSize = 29f
-                letterSpacing = 0.08f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-                includeFontPadding = false
-                setShadowLayer(dp(10).toFloat(), 0f, 0f, Color.argb(125, 193, 255, 0))
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(8)
+            }
+            addView(dots, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, dp(28), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = dp(8)
             })
 
-            addView(TextView(context).apply {
-                text = "Tournament Control Center"
-                gravity = Gravity.CENTER
-                setTextColor(Color.rgb(178, 190, 188))
-                textSize = 11f
-                typeface = Typeface.DEFAULT_BOLD
-                includeFontPadding = false
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(6)
+            val updateDots = object : Runnable {
+                override fun run() {
+                    updateHostSliderDots(dots, flipper.displayedChild)
+                    dots.postDelayed(this, 250)
+                }
+            }
+            addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) {
+                    dots.post(updateDots)
+                }
+
+                override fun onViewDetachedFromWindow(v: View) {
+                    dots.removeCallbacks(updateDots)
+                }
             })
+            dots.post(updateDots)
+        }
+    }
+
+    private fun hostSlideView(context: Context, slide: HostSlide): View {
+        return FrameLayout(context).apply {
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(Color.rgb(4, 10, 18))
+            }
+            clipToOutline = true
+
+            addView(ImageView(context).apply {
+                setImageResource(slide.imageRes)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                alpha = 0.92f
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+
+            addView(View(context).apply {
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.LEFT_RIGHT,
+                    intArrayOf(Color.argb(204, 0, 0, 0), Color.argb(132, 0, 0, 0), Color.argb(42, 0, 0, 0))
+                )
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+
+            addView(View(context).apply {
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(Color.argb(44, 0, 0, 0), Color.TRANSPARENT, Color.argb(96, 0, 0, 0))
+                )
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
             addView(LinearLayout(context).apply {
-                gravity = Gravity.CENTER
-                addView(View(context).apply {
-                    setBackgroundColor(Color.argb(80, 193, 255, 0))
-                }, LinearLayout.LayoutParams(dp(18), 1))
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(18), dp(18), dp(18), dp(42))
+
+                addView(hostSlideEyebrow(context, slide.eyebrow, slide.accent))
                 addView(TextView(context).apply {
-                    text = "SELECT ARENA MODE"
+                    text = slide.title
+                    gravity = Gravity.START
+                    setTextColor(Color.WHITE)
+                    textSize = 26f
+                    letterSpacing = 0.02f
+                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                    includeFontPadding = false
+                    setLineSpacing(0f, 0.92f)
+                    setShadowLayer(dp(16).toFloat(), 0f, 0f, Color.argb(235, 0, 0, 0))
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = dp(12)
+                })
+
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    slide.features.forEach { addView(hostSlideFeature(context, it, slide.accent)) }
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = dp(10)
+                })
+
+                addView(TextView(context).apply {
+                    text = slide.cta.uppercase()
                     gravity = Gravity.CENTER
-                    setTextColor(primary)
-                    textSize = 8.8f
-                    letterSpacing = 0.08f
+                    setTextColor(Color.rgb(4, 9, 12))
+                    textSize = 10f
+                    letterSpacing = 0.05f
                     typeface = Typeface.DEFAULT_BOLD
                     includeFontPadding = false
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    leftMargin = dp(10)
-                    rightMargin = dp(10)
+                    isClickable = true
+                    isFocusable = true
+                    background = GradientDrawable(
+                        GradientDrawable.Orientation.LEFT_RIGHT,
+                        intArrayOf(slide.accent, Color.WHITE)
+                    ).apply {
+                        cornerRadius = dp(13).toFloat()
+                    }
+                    setOnClickListener { slide.onClick?.invoke(context) }
+                }, LinearLayout.LayoutParams(dp(190), dp(38)).apply {
+                    topMargin = dp(10)
                 })
-                addView(View(context).apply {
-                    setBackgroundColor(Color.argb(80, 193, 255, 0))
-                }, LinearLayout.LayoutParams(dp(18), 1))
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(8)
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+    }
+
+    private fun hostSlideEyebrow(context: Context, label: String, accent: Int): View {
+        return LinearLayout(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat()
+                setColor(Color.argb(118, 0, 0, 0))
+            }
+            setPadding(dp(12), 0, dp(12), 0)
+            addView(HostIconView(context, HostIconView.Icon.SHIELD).apply {
+                setTint(accent)
+            }, LinearLayout.LayoutParams(dp(15), dp(15)))
+            addView(TextView(context).apply {
+                text = label
+                setTextColor(Color.WHITE)
+                textSize = 8.4f
+                letterSpacing = 0.08f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                includeFontPadding = false
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = dp(7)
             })
+        }.also {
+            it.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(30))
+        }
+    }
+
+    private fun hostSlideFeature(context: Context, label: String, accent: Int): View {
+        return TextView(context).apply {
+            text = "- $label"
+            setTextColor(Color.WHITE)
+            textSize = 13.2f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+            includeFontPadding = false
+            setShadowLayer(dp(8).toFloat(), 0f, 0f, Color.argb(230, 0, 0, 0))
+            setPadding(0, dp(2), 0, dp(2))
+            compoundDrawablePadding = dp(4)
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.argb(86, 0, 0, 0), Color.TRANSPARENT)
+            )
+        }
+    }
+
+    private fun updateHostSliderDots(dots: LinearLayout, activeIndex: Int) {
+        for (i in 0 until dots.childCount) {
+            val isActive = i == activeIndex
+            dots.getChildAt(i).background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (isActive) primary else Color.argb(138, 255, 255, 255))
+                if (!isActive) setStroke(dp(1), Color.argb(120, 0, 0, 0))
+            }
+            val params = dots.getChildAt(i).layoutParams as LinearLayout.LayoutParams
+            params.width = if (isActive) dp(18) else dp(7)
+            params.height = dp(7)
+            dots.getChildAt(i).layoutParams = params
+        }
+    }
+
+    private fun hostSlideInAnimation(): Animation {
+        return AnimationSet(true).apply {
+            interpolator = DecelerateInterpolator()
+            addAnimation(AlphaAnimation(0f, 1f))
+            addAnimation(TranslateAnimation(Animation.RELATIVE_TO_SELF, 0.08f, Animation.RELATIVE_TO_SELF, 0f, Animation.RELATIVE_TO_SELF, 0f, Animation.RELATIVE_TO_SELF, 0f))
+            duration = 520
+        }
+    }
+
+    private fun hostSlideOutAnimation(): Animation {
+        return AnimationSet(true).apply {
+            interpolator = DecelerateInterpolator()
+            addAnimation(AlphaAnimation(1f, 0f))
+            addAnimation(TranslateAnimation(Animation.RELATIVE_TO_SELF, 0f, Animation.RELATIVE_TO_SELF, -0.08f, Animation.RELATIVE_TO_SELF, 0f, Animation.RELATIVE_TO_SELF, 0f))
+            duration = 420
+        }
+    }
+
+    private fun hostLivePhrase(context: Context, phrase: String, liveRed: Boolean = false): View {
+        return TextView(context).apply {
+            text = if (liveRed) {
+                SpannableString(phrase).apply {
+                    val start = phrase.indexOf("Live")
+                    if (start >= 0) {
+                        setSpan(ForegroundColorSpan(Color.rgb(255, 42, 52)), start, start + 4, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
+                }
+            } else {
+                phrase
+            }
+            setTextColor(Color.WHITE)
+            textSize = 14.2f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+            includeFontPadding = false
+            setShadowLayer(dp(8).toFloat(), 0f, 0f, Color.argb(230, 0, 0, 0))
+            setPadding(0, dp(3), 0, dp(3))
+        }
+    }
+
+    private fun hostMetric(context: Context, label: String, value: String): View {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(Color.argb(84, 5, 18, 31))
+                setStroke(dp(1), Color.argb(84, 0, 210, 255))
+            }
+            addView(TextView(context).apply {
+                text = value
+                gravity = Gravity.CENTER
+                setTextColor(if (value == "PRO") primary else Color.WHITE)
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+            })
+            addView(TextView(context).apply {
+                text = label
+                gravity = Gravity.CENTER
+                setTextColor(Color.rgb(129, 160, 168))
+                textSize = 7.2f
+                letterSpacing = 0.08f
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(5)
+            })
+        }.also {
+            it.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
         }
     }
 
@@ -796,28 +1088,32 @@ class HomeScreenView @JvmOverloads constructor(
         title: String,
         subtitle: String,
         features: List<String>,
-        buttonLabel: String
+        buttonLabel: String,
+        onClick: (() -> Unit)? = null
     ): View {
         return FrameLayout(context).apply {
-            elevation = dp(8).toFloat()
+            elevation = 0f
+            isClickable = onClick != null
+            isFocusable = onClick != null
+            onClick?.let { setOnClickListener { it() } }
             addView(HostCardBackgroundView(context), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(18), dp(28), dp(18), dp(18))
+                setPadding(dp(18), dp(20), dp(18), dp(18))
 
                 addView(LinearLayout(context).apply {
                     gravity = Gravity.CENTER_VERTICAL
 
                     addView(FrameLayout(context).apply {
-                        elevation = dp(5).toFloat()
+                        elevation = 0f
                         background = GradientDrawable().apply {
                             shape = GradientDrawable.OVAL
-                            setColor(Color.argb(58, 193, 255, 0))
-                            setStroke(dp(1), Color.argb(145, 193, 255, 0))
+                            setColor(Color.argb(62, 193, 255, 0))
+                            setStroke(dp(1), Color.argb(82, 193, 255, 0))
                         }
                         addView(HostIconView(context, icon).apply {
-                            setTint(primary)
+                            setTint(Color.WHITE)
                         }, FrameLayout.LayoutParams(dp(23), dp(23), Gravity.CENTER))
                     }, LinearLayout.LayoutParams(dp(44), dp(44)))
 
@@ -826,14 +1122,15 @@ class HomeScreenView @JvmOverloads constructor(
                         addView(TextView(context).apply {
                             text = title
                             setTextColor(Color.WHITE)
-                            textSize = 18f
+                            textSize = 19f
                             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
                             includeFontPadding = false
                             setLineSpacing(0f, 0.98f)
+                            setShadowLayer(dp(8).toFloat(), 0f, 0f, Color.argb(120, 0, 108, 255))
                         })
                         addView(TextView(context).apply {
                             text = subtitle
-                            setTextColor(Color.rgb(142, 154, 160))
+                            setTextColor(Color.rgb(165, 186, 202))
                             textSize = 8.6f
                             typeface = Typeface.DEFAULT_BOLD
                             includeFontPadding = false
@@ -843,22 +1140,19 @@ class HomeScreenView @JvmOverloads constructor(
                     }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                         leftMargin = dp(12)
                     })
+                })
 
-                    addView(TextView(context).apply {
-                        text = "LIVE"
-                        gravity = Gravity.CENTER
-                        setTextColor(Color.rgb(8, 16, 7))
-                        textSize = 7.2f
-                        letterSpacing = 0.06f
-                        typeface = Typeface.DEFAULT_BOLD
-                        includeFontPadding = false
-                        background = GradientDrawable().apply {
-                            cornerRadius = dp(12).toFloat()
-                            setColor(primary)
-                        }
-                    }, LinearLayout.LayoutParams(dp(42), dp(20)).apply {
+                addView(LinearLayout(context).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(hostMiniChip(context, "BLUEPRINT"))
+                    addView(hostMiniChip(context, "AUTO SYNC"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(24)).apply {
                         leftMargin = dp(8)
                     })
+                    addView(hostMiniChip(context, if (icon == HostIconView.Icon.TROPHY) "FIXTURE AI" else "SCORE FLOW"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(24)).apply {
+                        leftMargin = dp(8)
+                    })
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(24)).apply {
+                    topMargin = dp(18)
                 })
 
                 addView(LinearLayout(context).apply {
@@ -877,30 +1171,52 @@ class HomeScreenView @JvmOverloads constructor(
                         })
                     }
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(24)
+                    topMargin = dp(18)
                 })
 
                 addView(LinearLayout(context).apply {
                     gravity = Gravity.CENTER
-                    elevation = dp(4).toFloat()
+                    elevation = 0f
+                    isClickable = onClick != null
+                    isFocusable = onClick != null
+                    onClick?.let { setOnClickListener { it() } }
                     background = GradientDrawable().apply {
-                        cornerRadius = dp(9).toFloat()
-                        setColor(primary)
-                        setStroke(dp(1), Color.rgb(231, 255, 111))
+                        cornerRadius = dp(13).toFloat()
+                        orientation = GradientDrawable.Orientation.LEFT_RIGHT
+                        colors = intArrayOf(Color.rgb(193, 255, 0), Color.rgb(218, 255, 35))
+                        setStroke(dp(1), Color.rgb(238, 255, 105))
                     }
                     addView(TextView(context).apply {
                         text = "$buttonLabel  ->"
                         gravity = Gravity.CENTER
                         setTextColor(Color.rgb(8, 16, 7))
                         textSize = 10f
-                        letterSpacing = 0.05f
+                        letterSpacing = 0.08f
                         typeface = Typeface.DEFAULT_BOLD
                         includeFontPadding = false
-                    })
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52)).apply {
-                    topMargin = dp(30)
+                    topMargin = dp(24)
                 })
             }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        }
+    }
+
+    private fun hostMiniChip(context: Context, label: String): View {
+        return TextView(context).apply {
+            text = label
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(185, 215, 255))
+            textSize = 7.2f
+            letterSpacing = 0.07f
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            setPadding(dp(10), 0, dp(10), 0)
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(Color.argb(88, 5, 22, 48))
+                setStroke(dp(1), Color.argb(105, 0, 108, 255))
+            }
         }
     }
 
@@ -912,7 +1228,7 @@ class HomeScreenView @JvmOverloads constructor(
             }, LinearLayout.LayoutParams(dp(13), dp(13)))
             addView(TextView(context).apply {
                 text = label
-                setTextColor(Color.rgb(220, 229, 230))
+                setTextColor(Color.rgb(224, 235, 242))
                 textSize = 7.6f
                 typeface = Typeface.DEFAULT_BOLD
                 includeFontPadding = false
@@ -934,7 +1250,7 @@ class HomeScreenView @JvmOverloads constructor(
                 setStroke(dp(1), Color.argb(36, 255, 255, 255))
             }
             addView(HostIconView(context, HostIconView.Icon.SHIELD).apply {
-                setTint(primary)
+                setTint(Color.WHITE)
             }, LinearLayout.LayoutParams(dp(25), dp(25)))
             addView(TextView(context).apply {
                 text = "HOST SESSIONS ARE SECURED AND SYNCED\nTO GLOBAL LEADERBOARDS."
@@ -3424,27 +3740,34 @@ class HomeScreenView @JvmOverloads constructor(
         private val path = Path()
         private var baseShader: Shader? = null
         private var greenGlow: Shader? = null
-        private var lightGlow: Shader? = null
+        private var blueTopGlow: Shader? = null
+        private var blueSweepGlow: Shader? = null
 
         override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
             super.onSizeChanged(w, h, oldw, oldh)
             if (w <= 0 || h <= 0) return
             baseShader = LinearGradient(
                 0f, 0f, w.toFloat(), h.toFloat(),
-                intArrayOf(Color.rgb(0, 9, 17), Color.rgb(2, 11, 24), Color.rgb(0, 5, 12)),
-                floatArrayOf(0f, 0.52f, 1f),
+                intArrayOf(Color.rgb(0, 13, 27), Color.rgb(2, 9, 22), Color.rgb(0, 5, 12)),
+                floatArrayOf(0f, 0.46f, 1f),
                 Shader.TileMode.CLAMP
             )
             greenGlow = RadialGradient(
-                w * 0.42f, h * 0.88f, w * 0.54f,
-                intArrayOf(Color.argb(28, 193, 255, 0), Color.argb(10, 193, 255, 0), Color.TRANSPARENT),
+                w * 0.5f, h * 1.02f, w * 0.78f,
+                intArrayOf(Color.argb(76, 193, 255, 0), Color.argb(26, 193, 255, 0), Color.TRANSPARENT),
+                floatArrayOf(0f, 0.48f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            blueTopGlow = RadialGradient(
+                w * 0.48f, h * 0.0f, w * 0.92f,
+                intArrayOf(Color.argb(112, 0, 210, 255), Color.argb(38, 0, 126, 255), Color.TRANSPARENT),
                 floatArrayOf(0f, 0.42f, 1f),
                 Shader.TileMode.CLAMP
             )
-            lightGlow = RadialGradient(
-                w * 0.5f, h * 0.08f, w * 0.72f,
-                intArrayOf(Color.argb(18, 170, 220, 255), Color.argb(7, 193, 255, 0), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.35f, 1f),
+            blueSweepGlow = RadialGradient(
+                w * 0.94f, h * 0.18f, w * 0.62f,
+                intArrayOf(Color.argb(70, 0, 126, 255), Color.argb(20, 0, 210, 255), Color.TRANSPARENT),
+                floatArrayOf(0f, 0.45f, 1f),
                 Shader.TileMode.CLAMP
             )
         }
@@ -3457,7 +3780,9 @@ class HomeScreenView @JvmOverloads constructor(
 
             paint.shader = baseShader
             canvas.drawRect(0f, 0f, w, h, paint)
-            paint.shader = lightGlow
+            paint.shader = blueTopGlow
+            canvas.drawRect(0f, 0f, w, h, paint)
+            paint.shader = blueSweepGlow
             canvas.drawRect(0f, 0f, w, h, paint)
             paint.shader = greenGlow
             canvas.drawRect(0f, 0f, w, h, paint)
@@ -3465,23 +3790,135 @@ class HomeScreenView @JvmOverloads constructor(
 
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 0.7f * d
-            paint.color = Color.argb(18, 193, 255, 0)
+            paint.color = Color.argb(28, 193, 255, 0)
             val baseline = h * 0.76f
-            repeat(7) { i ->
-                val y = baseline + i * 18f * d
-                canvas.drawLine(w * 0.08f, y, w * 0.92f, y, paint)
+            repeat(9) { i ->
+                val y = baseline + i * 16f * d
+                canvas.drawLine(w * 0.04f, y, w * 0.96f, y, paint)
             }
-            repeat(6) { i ->
-                val x = w * (0.16f + i * 0.14f)
-                canvas.drawLine(x, h * 0.62f, w * 0.5f + (x - w * 0.5f) * 0.34f, h * 0.96f, paint)
+            repeat(9) { i ->
+                val x = w * (0.06f + i * 0.11f)
+                canvas.drawLine(x, h * 0.64f, w * 0.5f + (x - w * 0.5f) * 0.24f, h * 0.98f, paint)
             }
 
-            paint.color = Color.argb(18, 210, 235, 255)
+            paint.color = Color.argb(36, 0, 210, 255)
+            repeat(5) { i ->
+                val y = h * (0.12f + i * 0.045f)
+                canvas.drawLine(w * 0.08f, y, w * 0.92f, y + 8f * d, paint)
+            }
+
+            paint.color = Color.argb(34, 210, 235, 255)
             path.reset()
-            path.moveTo(w * 0.08f, h * 0.2f)
+            path.moveTo(w * 0.08f, h * 0.22f)
             path.lineTo(w * 0.5f, h * 0.02f)
-            path.lineTo(w * 0.92f, h * 0.2f)
+            path.lineTo(w * 0.92f, h * 0.22f)
             canvas.drawPath(path, paint)
+            paint.style = Paint.Style.FILL
+        }
+    }
+
+    private class HostHeroBackgroundView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        private val rect = RectF()
+        private val srcRect = Rect()
+        private val path = Path()
+        private val imageBitmap: Bitmap? = BitmapFactory.decodeResource(resources, R.drawable.cricket_choosesports)
+        private var baseShader: Shader? = null
+        private var blueCore: Shader? = null
+        private var greenEdge: Shader? = null
+        private var blackOverlay: Shader? = null
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            if (w <= 0 || h <= 0) return
+            baseShader = LinearGradient(
+                0f, 0f, w.toFloat(), h.toFloat(),
+                intArrayOf(Color.argb(238, 5, 25, 44), Color.argb(232, 6, 14, 31), Color.argb(238, 3, 10, 20)),
+                floatArrayOf(0f, 0.56f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            blueCore = RadialGradient(
+                w * 0.5f, h * 0.08f, w * 0.62f,
+                intArrayOf(Color.argb(118, 0, 210, 255), Color.argb(34, 0, 126, 255), Color.TRANSPARENT),
+                floatArrayOf(0f, 0.42f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            greenEdge = RadialGradient(
+                w * 0.5f, h * 1.08f, w * 0.64f,
+                intArrayOf(Color.argb(58, 193, 255, 0), Color.argb(14, 193, 255, 0), Color.TRANSPARENT),
+                floatArrayOf(0f, 0.48f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            blackOverlay = LinearGradient(
+                0f, 0f, w.toFloat(), h.toFloat(),
+                intArrayOf(Color.argb(235, 0, 0, 0), Color.argb(150, 0, 0, 0), Color.argb(222, 0, 0, 0)),
+                floatArrayOf(0f, 0.48f, 1f),
+                Shader.TileMode.CLAMP
+            )
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            val w = width.toFloat()
+            val h = height.toFloat()
+            if (w <= 0f || h <= 0f) return
+            val d = resources.displayMetrics.density
+            val radius = 22f * d
+            rect.set(0f, 0f, w, h)
+
+            paint.style = Paint.Style.FILL
+            val save = canvas.save()
+            path.reset()
+            path.addRoundRect(rect, radius, radius, Path.Direction.CW)
+            canvas.clipPath(path)
+            val bitmap = imageBitmap
+            if (bitmap != null && bitmap.width > 0 && bitmap.height > 0) {
+                val viewRatio = w / h
+                val imageRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+                if (imageRatio > viewRatio) {
+                    val srcWidth = (bitmap.height * viewRatio).toInt().coerceAtLeast(1)
+                    val left = ((bitmap.width - srcWidth) / 2).coerceAtLeast(0)
+                    srcRect.set(left, 0, (left + srcWidth).coerceAtMost(bitmap.width), bitmap.height)
+                } else {
+                    val srcHeight = (bitmap.width / viewRatio).toInt().coerceAtLeast(1)
+                    val top = ((bitmap.height - srcHeight) / 2).coerceAtLeast(0)
+                    srcRect.set(0, top, bitmap.width, (top + srcHeight).coerceAtMost(bitmap.height))
+                }
+                canvas.drawBitmap(bitmap, srcRect, rect, imagePaint)
+            } else {
+                paint.shader = baseShader
+                canvas.drawRoundRect(rect, radius, radius, paint)
+            }
+            paint.shader = blackOverlay
+            canvas.drawRoundRect(rect, radius, radius, paint)
+            paint.shader = blueCore
+            canvas.drawRoundRect(rect, radius, radius, paint)
+            paint.shader = greenEdge
+            canvas.drawRoundRect(rect, radius, radius, paint)
+            paint.shader = null
+            canvas.restoreToCount(save)
+
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.7f * d
+            paint.color = Color.argb(34, 0, 210, 255)
+            repeat(8) { i ->
+                val y = h * (0.18f + i * 0.075f)
+                canvas.drawLine(w * 0.08f, y, w * 0.92f, y + 10f * d, paint)
+            }
+            paint.color = Color.argb(32, 193, 255, 0)
+            repeat(7) { i ->
+                val x = w * (0.12f + i * 0.13f)
+                canvas.drawLine(x, h * 0.62f, w * 0.5f + (x - w * 0.5f) * 0.36f, h * 0.98f, paint)
+            }
+
+            path.reset()
+            path.moveTo(w * 0.17f, h * 0.2f)
+            path.lineTo(w * 0.5f, h * 0.05f)
+            path.lineTo(w * 0.83f, h * 0.2f)
+            paint.strokeWidth = 1f * d
+            paint.color = Color.argb(60, 215, 250, 255)
+            canvas.drawPath(path, paint)
+
             paint.style = Paint.Style.FILL
         }
     }
@@ -3489,21 +3926,29 @@ class HomeScreenView @JvmOverloads constructor(
     private class HostCardBackgroundView(context: Context) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val rect = RectF()
+        private val path = Path()
         private var baseShader: Shader? = null
         private var cornerGlow: Shader? = null
+        private var blueGlow: Shader? = null
 
         override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
             super.onSizeChanged(w, h, oldw, oldh)
             if (w <= 0 || h <= 0) return
             baseShader = LinearGradient(
                 0f, 0f, w.toFloat(), h.toFloat(),
-                intArrayOf(Color.argb(235, 5, 24, 21), Color.argb(232, 10, 18, 38), Color.argb(235, 6, 12, 24)),
-                floatArrayOf(0f, 0.58f, 1f),
+                intArrayOf(Color.rgb(8, 28, 58), Color.rgb(5, 10, 17), Color.rgb(8, 28, 58)),
+                floatArrayOf(0f, 0.52f, 1f),
                 Shader.TileMode.CLAMP
             )
             cornerGlow = RadialGradient(
                 0f, 0f, w * 0.62f,
-                intArrayOf(Color.argb(40, 193, 255, 0), Color.argb(14, 193, 255, 0), Color.TRANSPARENT),
+                intArrayOf(Color.argb(74, 0, 210, 255), Color.argb(18, 0, 108, 255), Color.TRANSPARENT),
+                floatArrayOf(0f, 0.42f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            blueGlow = RadialGradient(
+                w * 0.9f, h * 0.05f, w * 0.72f,
+                intArrayOf(Color.argb(96, 0, 108, 255), Color.argb(28, 0, 108, 255), Color.TRANSPARENT),
                 floatArrayOf(0f, 0.42f, 1f),
                 Shader.TileMode.CLAMP
             )
@@ -3520,34 +3965,50 @@ class HomeScreenView @JvmOverloads constructor(
             paint.style = Paint.Style.FILL
             paint.shader = baseShader
             canvas.drawRoundRect(rect, radius, radius, paint)
+            paint.shader = blueGlow
+            canvas.drawRoundRect(rect, radius, radius, paint)
             paint.shader = cornerGlow
             canvas.drawRoundRect(rect, radius, radius, paint)
             paint.shader = null
-
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 1f * d
-            paint.color = Color.argb(95, 193, 255, 0)
-            canvas.drawRoundRect(rect, radius, radius, paint)
-
-            paint.strokeWidth = 0.6f * d
-            paint.color = Color.argb(18, 210, 235, 255)
-            val step = 28f * d
-            var x = -w * 0.2f
-            while (x < w * 1.2f) {
-                canvas.drawLine(x, h * 0.15f, x + w * 0.32f, h * 0.92f, paint)
-                x += step
-            }
-            var y = h * 0.22f
-            while (y < h * 0.9f) {
-                canvas.drawLine(w * 0.06f, y, w * 0.94f, y + 10f * d, paint)
-                y += step
-            }
             paint.style = Paint.Style.FILL
         }
     }
 
+    private class HostCardAccentView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        private val path = Path()
+
+        override fun onDraw(canvas: Canvas) {
+            val w = width.toFloat()
+            val h = height.toFloat()
+            if (w <= 0f || h <= 0f) return
+            val d = resources.displayMetrics.density
+
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1.6f * d
+            paint.color = Color.argb(150, 255, 255, 255)
+            canvas.drawLine(18f * d, 16f * d, 58f * d, 16f * d, paint)
+            canvas.drawLine(18f * d, 16f * d, 18f * d, 48f * d, paint)
+
+            paint.color = Color.argb(110, 255, 255, 255)
+            canvas.drawLine(w - 18f * d, h - 16f * d, w - 62f * d, h - 16f * d, paint)
+            canvas.drawLine(w - 18f * d, h - 16f * d, w - 18f * d, h - 48f * d, paint)
+
+            paint.strokeWidth = 0.8f * d
+            paint.color = Color.argb(40, 130, 178, 255)
+            path.reset()
+            path.moveTo(w * 0.58f, h * 0.08f)
+            path.lineTo(w * 0.94f, h * 0.22f)
+            path.lineTo(w * 0.78f, h * 0.38f)
+            canvas.drawPath(path, paint)
+        }
+    }
+
     private class NavIconView(context: Context, private val icon: Icon) : View(context) {
-        enum class Icon { HOME, BARS, COMPASS, USERS, CART, PLUS }
+        enum class Icon { HOME, BARS, COMPASS, USERS, CART, PLUS, TROPHY }
 
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             strokeCap = Paint.Cap.ROUND
@@ -3625,6 +4086,17 @@ class HomeScreenView @JvmOverloads constructor(
                     paint.strokeWidth = 2.4f * d
                     canvas.drawLine(w * 0.5f, h * 0.24f, w * 0.5f, h * 0.76f, paint)
                     canvas.drawLine(w * 0.24f, h * 0.5f, w * 0.76f, h * 0.5f, paint)
+                }
+                Icon.TROPHY -> {
+                    rect.set(w * 0.31f, h * 0.22f, w * 0.69f, h * 0.53f)
+                    canvas.drawRoundRect(rect, 3f * d, 3f * d, paint)
+                    rect.set(w * 0.16f, h * 0.26f, w * 0.35f, h * 0.5f)
+                    canvas.drawArc(rect, 270f, -165f, false, paint)
+                    rect.set(w * 0.65f, h * 0.26f, w * 0.84f, h * 0.5f)
+                    canvas.drawArc(rect, 270f, 165f, false, paint)
+                    canvas.drawLine(w * 0.5f, h * 0.53f, w * 0.5f, h * 0.72f, paint)
+                    canvas.drawLine(w * 0.38f, h * 0.72f, w * 0.62f, h * 0.72f, paint)
+                    canvas.drawLine(w * 0.29f, h * 0.82f, w * 0.71f, h * 0.82f, paint)
                 }
             }
         }

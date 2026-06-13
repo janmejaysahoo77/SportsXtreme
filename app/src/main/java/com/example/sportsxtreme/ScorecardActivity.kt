@@ -655,17 +655,84 @@ private fun WinPredictorPanel(match: MatchDetail) {
 
 @Composable
 private fun ScorecardTab(match: MatchDetail) {
-    SectionPanel("${match.leftName} BATTING") {
-        TableHeader("BATTER", "R", "B", "SR")
-        ScoreLine("A. Kumar", "54", "31", "174.1", Accent)
-        ScoreLine("R. Singh", "28", "21", "133.3", Color.White)
-        ScoreLine("M. Das", "17", "12", "141.6", Color.White)
+    var selectedTeamTab by remember { mutableIntStateOf(0) }
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.055f)),
+        horizontalArrangement = Arrangement.Center
+    ) {
+        val leftSelected = selectedTeamTab == 0
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (leftSelected) Accent.copy(alpha = 0.15f) else Color.Transparent)
+                .clickable { selectedTeamTab = 0 }
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(match.leftName, color = if (leftSelected) Accent else Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        }
+        
+        val rightSelected = selectedTeamTab == 1
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (rightSelected) Accent.copy(alpha = 0.15f) else Color.Transparent)
+                .clickable { selectedTeamTab = 1 }
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(match.rightName, color = if (rightSelected) Accent else Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        }
     }
-    SectionPanel("${match.rightName} BOWLING") {
-        TableHeader("BOWLER", "O", "R", "W")
-        ScoreLine("K. Roy", "4.0", "29", "2", CyanLine)
-        ScoreLine("D. Sen", "3.4", "26", "1", Color.White)
-        ScoreLine("P. Malik", "4.0", "34", "1", Color.White)
+    
+    Spacer(Modifier.height(14.dp))
+
+    if (selectedTeamTab == 0) {
+        SectionPanel("${match.leftName} BATTING") {
+            TableHeader("BATTER", "R", "B", "SR")
+            ThinRule()
+            ScoreLine("A. Kumar", "54", "31", "174.1", Accent)
+            ThinRule()
+            ScoreLine("R. Singh", "28", "21", "133.3", Color.White)
+            ThinRule()
+            ScoreLine("M. Das", "17", "12", "141.6", Color.White)
+        }
+        Spacer(Modifier.height(14.dp))
+        SectionPanel("${match.rightName} BOWLING") {
+            TableHeader("BOWLER", "O", "R", "W")
+            ThinRule()
+            ScoreLine("K. Roy", "4.0", "29", "2", CyanLine)
+            ThinRule()
+            ScoreLine("D. Sen", "3.4", "26", "1", Color.White)
+            ThinRule()
+            ScoreLine("P. Malik", "4.0", "34", "1", Color.White)
+        }
+    } else {
+        SectionPanel("${match.rightName} BATTING") {
+            TableHeader("BATTER", "R", "B", "SR")
+            ThinRule()
+            ScoreLine("P. Patel", "42", "28", "150.0", Accent)
+            ThinRule()
+            ScoreLine("S. Yadav", "31", "24", "129.1", Color.White)
+            ThinRule()
+            ScoreLine("K. Sharma", "12", "9", "133.3", Color.White)
+        }
+        Spacer(Modifier.height(14.dp))
+        SectionPanel("${match.leftName} BOWLING") {
+            TableHeader("BOWLER", "O", "R", "W")
+            ThinRule()
+            ScoreLine("J. Bumrah", "4.0", "24", "2", CyanLine)
+            ThinRule()
+            ScoreLine("M. Siraj", "3.1", "30", "1", Color.White)
+            ThinRule()
+            ScoreLine("H. Pandya", "4.0", "38", "1", Color.White)
+        }
     }
 }
 
@@ -1276,29 +1343,29 @@ private fun InfoRow(label: String, value: String) {
 
 @Composable
 private fun TableHeader(first: String, second: String, third: String, fourth: String) {
-    Row(Modifier.fillMaxWidth().padding(bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(first, color = SoftText, fontSize = 6.6.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.9f))
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(first, color = SoftText, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.9f))
         listOf(second, third, fourth).forEach {
-            Text(it, color = SoftText, fontSize = 6.6.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End, modifier = Modifier.weight(0.7f))
+            Text(it, color = SoftText, fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End, modifier = Modifier.weight(0.7f))
         }
     }
 }
 
 @Composable
 private fun ScoreLine(name: String, a: String, b: String, c: String, color: Color) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(name, color = color, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.9f))
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(name, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.9f))
         listOf(a, b, c).forEach {
-            Text(it, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End, modifier = Modifier.weight(0.7f))
+            Text(it, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End, modifier = Modifier.weight(0.7f))
         }
     }
 }
 
 @Composable
 private fun CommentaryLine(over: String, text: String, color: Color) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Text(over, color = color, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(38.dp))
-        Text(text, color = Color(0xFFD7E2DF), fontSize = 9.sp, fontWeight = FontWeight.Bold, lineHeight = 12.sp, modifier = Modifier.weight(1f))
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Text(over, color = color, fontSize = 13.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(46.dp))
+        Text(text, color = Color(0xFFD7E2DF), fontSize = 13.sp, fontWeight = FontWeight.Bold, lineHeight = 18.sp, modifier = Modifier.weight(1f))
     }
 }
 
