@@ -12,6 +12,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SportsXtreme">
         <activity
+            android:name=".QRForPlayerAddingActivity"
+            android:exported="false" />
+        <activity
+            android:name=".AddPlayerByMobileNumberActivity"
+            android:exported="false" />
+        <activity
+            android:name=".AddPlayerActivity"
+            android:exported="false" />
+        <activity
             android:name=".ViewDetailsScreenWhileStartMatch"
             android:exported="false" />
         <activity

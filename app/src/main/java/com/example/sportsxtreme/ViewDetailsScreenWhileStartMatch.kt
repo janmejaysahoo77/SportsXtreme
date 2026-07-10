@@ -1,5 +1,6 @@
 package com.example.sportsxtreme
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -46,7 +47,10 @@ class ViewDetailsScreenWhileStartMatch : ComponentActivity() {
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         setContent {
-            ViewDetailsStartMatchScreen(onBack = { finish() })
+            ViewDetailsStartMatchScreen(
+                onBack = { finish() },
+                onAddPlayer = { startActivity(Intent(this, AddPlayerActivity::class.java)) }
+            )
         }
     }
 }
@@ -59,7 +63,7 @@ private val DetailsStroke = Color(0xFF25314A)
 private val DetailsMuted = Color(0xFFADB8BD)
 
 @Composable
-private fun ViewDetailsStartMatchScreen(onBack: () -> Unit) {
+private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -99,7 +103,7 @@ private fun ViewDetailsStartMatchScreen(onBack: () -> Unit) {
                 Spacer(Modifier.weight(1f))
             }
         }
-        BottomActions(Modifier.align(Alignment.BottomCenter))
+        BottomActions(Modifier.align(Alignment.BottomCenter), onAddPlayer = onAddPlayer)
     }
 }
 
@@ -245,7 +249,7 @@ private fun MemberCard(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun BottomActions(modifier: Modifier = Modifier) {
+private fun BottomActions(modifier: Modifier = Modifier, onAddPlayer: () -> Unit) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -271,7 +275,8 @@ private fun BottomActions(modifier: Modifier = Modifier) {
                 .weight(1.2f)
                 .height(50.dp)
                 .clip(RoundedCornerShape(9.dp))
-                .background(DetailsAccent),
+                .background(DetailsAccent)
+                .clickable(onClick = onAddPlayer),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
