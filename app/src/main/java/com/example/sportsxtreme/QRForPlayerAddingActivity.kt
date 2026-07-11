@@ -38,18 +38,15 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
 
 class QRForPlayerAddingActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        applySportsXtremeWindowStyle()
         setContent {
             QRForPlayerAddingScreen(onClose = { finish() })
         }
@@ -241,7 +238,7 @@ private fun InstructionText(modifier: Modifier = Modifier) {
         lineHeight = 24.sp,
         fontWeight = FontWeight.Medium,
         modifier = modifier.fillMaxWidth(),
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        textAlign = TextAlign.Center
     )
 }
 

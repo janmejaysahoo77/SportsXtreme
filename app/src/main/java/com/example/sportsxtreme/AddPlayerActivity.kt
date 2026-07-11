@@ -38,18 +38,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
 
 class AddPlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        applySportsXtremeWindowStyle()
         setContent {
             AddPlayerScreen(
                 onBack = { finish() },
+                onContinue = { },
                 onAddByMobileNumber = {
                     startActivity(Intent(this, AddPlayerByMobileNumberActivity::class.java))
                 },
@@ -69,7 +66,12 @@ private val AddPlayerStroke = Color(0xFF26354B)
 private val AddPlayerMuted = Color(0xFFB7C2C1)
 
 @Composable
-private fun AddPlayerScreen(onBack: () -> Unit, onAddByMobileNumber: () -> Unit, onScanQrCode: () -> Unit) {
+private fun AddPlayerScreen(
+    onBack: () -> Unit,
+    onContinue: () -> Unit,
+    onAddByMobileNumber: () -> Unit,
+    onScanQrCode: () -> Unit
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -132,7 +134,7 @@ private fun AddPlayerScreen(onBack: () -> Unit, onAddByMobileNumber: () -> Unit,
                         .height(45.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(AddPlayerAccent)
-                        .clickable { finishAddPlayer() },
+                        .clickable(onClick = onContinue),
                     contentAlignment = Alignment.Center
                 ) {
                     Text("CONTINUE", color = Color(0xFF111604), fontSize = 13.sp, fontWeight = FontWeight.Black)
@@ -141,8 +143,6 @@ private fun AddPlayerScreen(onBack: () -> Unit, onAddByMobileNumber: () -> Unit,
         }
     }
 }
-
-private fun finishAddPlayer() = Unit
 
 @Composable
 private fun AddPlayerTopBar(onBack: () -> Unit) {
@@ -183,8 +183,20 @@ private fun InvitePlayerCard(modifier: Modifier = Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             AddPlayerIconBubble { ShareIcon(Modifier.size(27.dp), Color(0xFF111604)) }
             Column(modifier = Modifier.padding(start = 14.dp).weight(1f)) {
-                Text("Invite Player", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black, maxLines = 1)
-                Text("Send an invite link to join SportsXtreme.", color = AddPlayerMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(
+                    "Invite Player",
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1
+                )
+                Text(
+                    "Send an invite link to join SportsXtreme.",
+                    color = AddPlayerMuted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
             }
             ChevronIcon(Modifier.size(20.dp), AddPlayerMuted)
         }
@@ -219,7 +231,14 @@ private fun AddMethodCard(
     ) {
         AddPlayerIconBubble(icon)
         Column(modifier = Modifier.padding(start = 14.dp).weight(1f)) {
-            Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                title,
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Text(subtitle, color = AddPlayerMuted, fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold)
         }
         ChevronIcon(Modifier.size(20.dp), AddPlayerMuted)

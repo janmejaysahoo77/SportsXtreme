@@ -66,8 +66,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
 
 class ScorecardActivity : ComponentActivity() {
 
@@ -86,12 +84,9 @@ class ScorecardActivity : ComponentActivity() {
         const val EXTRA_NOTE = "scorecard.extra.NOTE"
     }
 
-    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        applySportsXtremeWindowStyle()
 
         setContent {
             ScorecardScreen(match = readMatch(), onBack = { finish() })

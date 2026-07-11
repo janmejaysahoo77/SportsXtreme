@@ -45,15 +45,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
 
 class SelectTeamAorBActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        applySportsXtremeWindowStyle()
         val teamSlot = intent.getStringExtra(EXTRA_TEAM_SLOT)?.takeIf { it == "B" } ?: "A"
         setContent {
             SelectTeamAScreen(
@@ -452,7 +448,7 @@ private fun TeamRow(initials: String, title: String, subtitle: String, selected:
             Text(subtitle, color = if (selected) TeamAAccent else TeamAMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, maxLines = 1)
         }
         Text(
-            "View Details",
+            "Add Playing Team",
             color = Color(0xFFC9D0FF),
             fontSize = 11.sp,
             fontWeight = FontWeight.Black,

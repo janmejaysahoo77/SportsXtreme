@@ -1,6 +1,7 @@
 package com.example.sportsxtreme
 
 import android.content.Intent
+import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -116,6 +117,13 @@ class HomeScreenView @JvmOverloads constructor(
         drawerLayout.openDrawer(GravityCompat.START)
     }
 
+    @Suppress("DEPRECATION")
+    private fun openProfileScreen() {
+        drawerLayout.closeDrawer(GravityCompat.START)
+        context.startActivity(Intent(context, MyProfileViewOfSportsXtreme::class.java))
+        (context as? Activity)?.overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
+    }
+
     private fun createDrawerContent(context: Context): View {
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -129,9 +137,12 @@ class HomeScreenView @JvmOverloads constructor(
                 setPadding(dp(20), dp(40), dp(20), dp(20))
                 
                 // Profile row
-                addView(LinearLayout(context).apply {
+                val profileRow = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { openProfileScreen() }
 
                     addView(FrameLayout(context).apply {
                         // Colored Circle
@@ -162,7 +173,8 @@ class HomeScreenView @JvmOverloads constructor(
                             setColor(Color.rgb(40, 45, 50))
                         }
                     }, LinearLayout.LayoutParams(dp(28), dp(28)))
-                })
+                }
+                addView(profileRow)
                 
                 // Name
                 addView(TextView(context).apply {
@@ -171,6 +183,9 @@ class HomeScreenView @JvmOverloads constructor(
                     textSize = 20f
                     typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
                     includeFontPadding = false
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { openProfileScreen() }
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                     topMargin = dp(16)
                 })
@@ -614,19 +629,11 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun createCommunityContent(context: Context): View {
-        return ComposeView(context).apply {
-            setContent {
-                CommunityScreen(onMenuClick = { openDrawer() })
-            }
-        }
+        return createComingSoon(context, navItems[3])
     }
 
     private fun createLeaderboardContent(context: Context): View {
-        return ComposeView(context).apply {
-            setContent {
-                LeaderboardScreen(onMenuClick = { openDrawer() })
-            }
-        }
+        return createComingSoon(context, navItems[4])
     }
 
     fun refreshAfterResume() {

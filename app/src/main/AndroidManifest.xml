@@ -12,6 +12,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SportsXtreme">
         <activity
+            android:name=".MyProfileViewOfSportsXtreme"
+            android:exported="false" />
+        <activity
             android:name=".QRForPlayerAddingActivity"
             android:exported="false" />
         <activity
@@ -22,6 +25,18 @@
             android:exported="false" />
         <activity
             android:name=".ViewDetailsScreenWhileStartMatch"
+            android:exported="false" />
+        <activity
+            android:name=".PlayersListFinalActivity"
+            android:exported="false" />
+        <activity
+            android:name=".MatchDetailsJustBeforeMatchActivity"
+            android:exported="false" />
+        <activity
+            android:name=".TossActivity"
+            android:exported="false" />
+        <activity
+            android:name=".StartInnings"
             android:exported="false" />
         <activity
             android:name=".SelectTeamAorBActivity"
