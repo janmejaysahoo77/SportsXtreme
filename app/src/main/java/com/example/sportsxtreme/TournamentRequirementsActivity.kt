@@ -54,13 +54,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import kotlin.math.PI
 import kotlin.math.sin
 
 class TournamentRequirementsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applySportsXtremeWindowStyle()
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         setContent {
             TournamentRequirementsScreen(onBack = { finish() })
         }

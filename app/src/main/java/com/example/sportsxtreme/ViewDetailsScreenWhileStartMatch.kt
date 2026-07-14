@@ -37,16 +37,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 
 class ViewDetailsScreenWhileStartMatch : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applySportsXtremeWindowStyle()
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         setContent {
             ViewDetailsStartMatchScreen(
                 onBack = { finish() },
-                onAddPlayer = { startActivity(Intent(this, AddPlayerActivity::class.java)) },
-                onNext = { startActivity(Intent(this, PlayersListFinalActivity::class.java)) }
+                onAddPlayer = { startActivity(Intent(this, AddPlayerActivity::class.java)) }
             )
         }
     }
@@ -60,7 +63,7 @@ private val DetailsStroke = Color(0xFF25314A)
 private val DetailsMuted = Color(0xFFADB8BD)
 
 @Composable
-private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> Unit, onNext: () -> Unit) {
+private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -96,18 +99,11 @@ private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> U
                         Text("Total 1", color = DetailsAccent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-                SquadSelectionContent(
-                    modifier = Modifier.padding(top = 15.dp),
-                    onAddPlayer = onAddPlayer
-                )
+                MemberCard(Modifier.padding(top = 15.dp))
                 Spacer(Modifier.weight(1f))
             }
         }
-        BottomActions(
-            modifier = Modifier.align(Alignment.BottomCenter),
-            onAddPlayer = onAddPlayer,
-            onNext = onNext
-        )
+        BottomActions(Modifier.align(Alignment.BottomCenter), onAddPlayer = onAddPlayer)
     }
 }
 
@@ -253,138 +249,7 @@ private fun MemberCard(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SquadSelectionContent(modifier: Modifier = Modifier, onAddPlayer: () -> Unit) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        SearchPlayerBox()
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 15.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "AVAILABLE PLAYERS",
-                color = DetailsMuted,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                "+ ADD PLAYER",
-                color = DetailsAccent,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.clickable(onClick = onAddPlayer)
-            )
-        }
-        Text(
-            "Choose players participating in this match.",
-            color = DetailsMuted,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 18.dp)
-        )
-        SelectablePlayerCard(
-            modifier = Modifier.padding(top = 16.dp),
-            name = "Janaman Gana",
-            subtitle = "Captain - Batsman",
-            selected = true
-        )
-    }
-}
-
-@Composable
-private fun SearchPlayerBox() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(44.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFF0B1523))
-            .border(1.dp, Color(0xFF24324D), RoundedCornerShape(10.dp))
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        SearchIcon(Modifier.size(18.dp), Color(0xFF8EA0BA))
-        Text(
-            "Quick search",
-            color = Color(0xFF9EABC2),
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 10.dp)
-        )
-    }
-}
-
-@Composable
-private fun SelectablePlayerCard(
-    modifier: Modifier = Modifier,
-    name: String,
-    subtitle: String,
-    selected: Boolean
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(72.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(DetailsCard)
-            .border(
-                1.dp,
-                if (selected) DetailsAccent else Color(0xFF17243A),
-                RoundedCornerShape(10.dp)
-            )
-            .padding(horizontal = 13.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box {
-            Box(
-                modifier = Modifier
-                    .size(50.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            listOf(Color(0xFF304E37), Color(0xFF111D20)),
-                            radius = 68f
-                        )
-                    )
-                    .border(1.dp, Color(0xFF314254), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                PlayerSilhouette(Modifier.size(34.dp))
-            }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(18.dp)
-                    .clip(CircleShape)
-                    .background(if (selected) DetailsAccent else DetailsStroke),
-                contentAlignment = Alignment.Center
-            ) {
-                CheckIcon(Modifier.size(10.dp), Color(0xFF111604))
-            }
-        }
-        Column(modifier = Modifier.padding(start = 13.dp).weight(1f)) {
-            Text(name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(modifier = Modifier.padding(top = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(DetailsAccent)
-                )
-                Text(subtitle, color = DetailsMuted, fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 7.dp))
-            }
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text("0", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black)
-            Text("MAT", color = DetailsMuted, fontSize = 9.sp, fontWeight = FontWeight.Black)
-        }
-    }
-}
-
-@Composable
-private fun BottomActions(modifier: Modifier = Modifier, onAddPlayer: () -> Unit, onNext: () -> Unit) {
+private fun BottomActions(modifier: Modifier = Modifier, onAddPlayer: () -> Unit) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -398,13 +263,12 @@ private fun BottomActions(modifier: Modifier = Modifier, onAddPlayer: () -> Unit
                 .height(50.dp)
                 .clip(RoundedCornerShape(9.dp))
                 .background(Color(0xFF111826))
-                .border(1.dp, DetailsStroke, RoundedCornerShape(9.dp))
-                .clickable(onClick = onAddPlayer),
+                .border(1.dp, DetailsStroke, RoundedCornerShape(9.dp)),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AddPersonIcon(Modifier.size(18.dp), Color.White)
-            Text("Add Player", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 10.dp))
+            PersonIcon(Modifier.size(17.dp), Color.White)
+            Text("Team Profile", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 11.dp))
         }
         Row(
             modifier = Modifier
@@ -412,12 +276,12 @@ private fun BottomActions(modifier: Modifier = Modifier, onAddPlayer: () -> Unit
                 .height(50.dp)
                 .clip(RoundedCornerShape(9.dp))
                 .background(DetailsAccent)
-                .clickable(onClick = onNext),
+                .clickable(onClick = onAddPlayer),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("NEXT", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            NextArrowIcon(Modifier.padding(start = 9.dp).size(17.dp), Color(0xFF111604))
+            AddPersonIcon(Modifier.size(18.dp), Color(0xFF111604))
+            Text("Add Player", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
         }
     }
 }
@@ -497,42 +361,6 @@ private fun KebabIcon(modifier: Modifier, tint: Color) {
         repeat(3) { index ->
             drawCircle(tint, radius = size.minDimension * 0.055f, center = Offset(size.width * 0.5f, size.height * (0.32f + index * 0.18f)))
         }
-    }
-}
-
-@Composable
-private fun SearchIcon(modifier: Modifier, tint: Color) {
-    Canvas(modifier) {
-        val stroke = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
-        drawCircle(tint, radius = size.minDimension * 0.28f, center = Offset(size.width * 0.42f, size.height * 0.42f), style = stroke)
-        drawLine(tint, Offset(size.width * 0.62f, size.height * 0.62f), Offset(size.width * 0.82f, size.height * 0.82f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-    }
-}
-
-@Composable
-private fun CheckIcon(modifier: Modifier, tint: Color) {
-    Canvas(modifier) {
-        val stroke = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round)
-        val path = Path().apply {
-            moveTo(size.width * 0.2f, size.height * 0.52f)
-            lineTo(size.width * 0.42f, size.height * 0.72f)
-            lineTo(size.width * 0.82f, size.height * 0.28f)
-        }
-        drawPath(path, tint, style = stroke)
-    }
-}
-
-@Composable
-private fun NextArrowIcon(modifier: Modifier, tint: Color) {
-    Canvas(modifier) {
-        val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.2f, size.height * 0.5f), Offset(size.width * 0.78f, size.height * 0.5f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        val path = Path().apply {
-            moveTo(size.width * 0.56f, size.height * 0.28f)
-            lineTo(size.width * 0.78f, size.height * 0.5f)
-            lineTo(size.width * 0.56f, size.height * 0.72f)
-        }
-        drawPath(path, tint, style = stroke)
     }
 }
 

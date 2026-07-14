@@ -1,42 +1,26 @@
 package com.example.sportsxtreme
 
-import android.content.Intent
 import android.os.Bundle
-import androidx.activity.compose.setContent
 import androidx.activity.ComponentActivity
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 
 class ShoppingActivity : ComponentActivity() {
 
+    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applySportsXtremeWindowStyle()
-        setContent {
-            XtremeSectionScreen(
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        setContentView(
+            XtremeSectionView(
+                context = this,
                 title = getString(R.string.str_shopping),
                 bodyText = getString(R.string.str_shopping),
-                selectedMode = XtremeSectionMode.CART,
-                useCartLogo = true,
-                actions = XtremeSectionActions(
-                    openSports = { openSportsXtreme() },
-                    openMedia = { openXtremeMedia() }
-                )
+                selectedMode = XtremeSectionView.SectionMode.CART,
+                useCartLogo = true
             )
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun openSportsXtreme() {
-        startActivity(Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        })
-        overridePendingTransition(R.anim.slide_in_left, R.anim.slide_out_right)
-        finish()
-    }
-
-    @Suppress("DEPRECATION")
-    private fun openXtremeMedia() {
-        startActivity(Intent(this, XtremeMediaActivity::class.java))
-        overridePendingTransition(R.anim.slide_in_left, R.anim.slide_out_right)
-        finish()
+        )
     }
 }
