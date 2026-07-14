@@ -72,7 +72,7 @@ class HomeScreenView @JvmOverloads constructor(
     private val muted = Color.rgb(130, 145, 142)
     private val navItems = listOf(
         NavItem("Home", NavIconView.Icon.HOME),
-        NavItem("Stats", NavIconView.Icon.BARS),
+        NavItem("My Cricket", NavIconView.Icon.BARS),
         NavItem("Host", NavIconView.Icon.PLUS),
         NavItem("Community", NavIconView.Icon.USERS),
         NavItem("Leaderboard", NavIconView.Icon.TROPHY)
@@ -604,6 +604,7 @@ class HomeScreenView @JvmOverloads constructor(
         val view = cachedTabs.getOrPut(index) {
             when (index) {
                 0 -> createHomeContent(context)
+                1 -> createMyCricketContent(context)
                 2 -> createHostContent(context)
                 3 -> createCommunityContent(context)
                 4 -> createLeaderboardContent(context)
@@ -617,6 +618,17 @@ class HomeScreenView @JvmOverloads constructor(
         return ComposeView(context).apply {
             setContent {
                 CommunityScreen(onMenuClick = { openDrawer() })
+            }
+        }
+    }
+
+    private fun createMyCricketContent(context: Context): View {
+        return ComposeView(context).apply {
+            setContent {
+                MyCricketScreen(
+                    onMenuClick = { openDrawer() },
+                    onStartMatch = { context.startActivity(Intent(context, StartMatchActivity::class.java)) }
+                )
             }
         }
     }

@@ -21,6 +21,21 @@
             android:name=".AddPlayerActivity"
             android:exported="false" />
         <activity
+            android:name=".FinalSquadActivity"
+            android:exported="false" />
+        <activity
+            android:name=".StartMatchPreviewActivity"
+            android:exported="false" />
+        <activity
+            android:name=".TossActivity"
+            android:exported="false" />
+        <activity
+            android:name=".FinalPageBeforeScoringActivity"
+            android:exported="false" />
+        <activity
+            android:name=".MainScoringActivity"
+            android:exported="false" />
+        <activity
             android:name=".ViewDetailsScreenWhileStartMatch"
             android:exported="false" />
         <activity

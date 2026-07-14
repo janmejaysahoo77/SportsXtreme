@@ -452,7 +452,7 @@ private fun TeamRow(initials: String, title: String, subtitle: String, selected:
             Text(subtitle, color = if (selected) TeamAAccent else TeamAMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, maxLines = 1)
         }
         Text(
-            "View Details",
+            "Add Playing Team",
             color = Color(0xFFC9D0FF),
             fontSize = 11.sp,
             fontWeight = FontWeight.Black,

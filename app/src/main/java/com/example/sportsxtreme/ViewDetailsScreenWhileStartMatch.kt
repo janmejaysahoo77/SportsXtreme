@@ -18,8 +18,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -49,7 +51,8 @@ class ViewDetailsScreenWhileStartMatch : ComponentActivity() {
         setContent {
             ViewDetailsStartMatchScreen(
                 onBack = { finish() },
-                onAddPlayer = { startActivity(Intent(this, AddPlayerActivity::class.java)) }
+                onAddPlayer = { startActivity(Intent(this, AddPlayerActivity::class.java)) },
+                onNext = { startActivity(Intent(this, FinalSquadActivity::class.java)) }
             )
         }
     }
@@ -63,7 +66,7 @@ private val DetailsStroke = Color(0xFF25314A)
 private val DetailsMuted = Color(0xFFADB8BD)
 
 @Composable
-private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> Unit) {
+private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> Unit, onNext: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -78,32 +81,15 @@ private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> U
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 7.dp, vertical = 21.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 11.dp, vertical = 21.dp)
             ) {
                 TeamSummaryCard()
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 31.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Team Members", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
-                    Box(
-                        modifier = Modifier
-                            .height(29.dp)
-                            .clip(RoundedCornerShape(15.dp))
-                            .background(Color(0xFF3C5316))
-                            .padding(horizontal = 14.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Total 1", color = DetailsAccent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                MemberCard(Modifier.padding(top = 15.dp))
-                Spacer(Modifier.weight(1f))
+                AvailablePlayersSection(onAddPlayer = onAddPlayer)
+                Spacer(Modifier.height(95.dp))
             }
         }
-        BottomActions(Modifier.align(Alignment.BottomCenter), onAddPlayer = onAddPlayer)
+        BottomActions(Modifier.align(Alignment.BottomCenter), onAddPlayer = onAddPlayer, onNext = onNext)
     }
 }
 
@@ -189,73 +175,143 @@ private fun TeamSummaryCard() {
     }
 }
 
+private data class StartPlayer(
+    val name: String,
+    val initials: String,
+    val playedLastMatch: Boolean,
+    val selected: Boolean,
+    val matches: Int,
+    val color: Color
+)
+
 @Composable
-private fun MemberCard(modifier: Modifier = Modifier) {
+private fun AvailablePlayersSection(onAddPlayer: () -> Unit) {
+    val players = listOf(
+        StartPlayer("ANSHU Gita", "AG", playedLastMatch = true, selected = true, matches = 0, color = Color(0xFF3B2430)),
+        StartPlayer("ASHWINI Gita", "AG", playedLastMatch = true, selected = false, matches = 0, color = Color(0xFF4D3220)),
+        StartPlayer("Abhimanyu Majhi", "AM", playedLastMatch = true, selected = true, matches = 0, color = Color(0xFF154453)),
+        StartPlayer("Raj Kumar", "RK", playedLastMatch = false, selected = false, matches = 12, color = Color(0xFF362530))
+    )
+
+    SearchBox(Modifier.padding(top = 18.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 15.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("AVAILABLE PLAYERS", color = Color(0xFF97A9BA), fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+        Row(
+            modifier = Modifier.clickable(onClick = onAddPlayer),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("+", color = DetailsAccent, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            Text(" ADD PLAYER", color = DetailsAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+        }
+    }
+    Text(
+        "Choose players participating in this match.",
+        color = Color(0xFF9CA8B7),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(top = 23.dp)
+    )
+    Column(
+        modifier = Modifier.padding(top = 15.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        players.forEach { player ->
+            PlayerSelectionRow(player = player)
+        }
+    }
+}
+
+@Composable
+private fun SearchBox(modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(86.dp)
+            .height(43.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF0E1726))
+            .border(1.dp, DetailsStroke, RoundedCornerShape(10.dp))
+            .padding(horizontal = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SearchIcon(Modifier.size(18.dp), Color(0xFF8192AB))
+        Text("Quick search", color = Color(0xFF91A0B5), fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
+    }
+}
+
+@Composable
+private fun PlayerSelectionRow(player: StartPlayer) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(70.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(DetailsCard)
-            .border(1.dp, Color(0xFF39521B), RoundedCornerShape(10.dp))
-            .padding(horizontal = 15.dp),
+            .border(if (player.selected) 1.5.dp else 0.dp, if (player.selected) DetailsAccent else Color.Transparent, RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box {
             Box(
                 modifier = Modifier
-                    .size(56.dp)
+                    .size(45.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            listOf(Color(0xFF304E37), Color(0xFF111D20)),
-                            radius = 68f
-                        )
-                    )
-                    .border(2.dp, DetailsAccent, CircleShape),
+                    .background(Brush.radialGradient(listOf(player.color.copy(alpha = 0.95f), Color(0xFF101820)), radius = 54f))
+                    .border(1.dp, Color(0xFF364158), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                PlayerSilhouette(Modifier.size(38.dp))
+                PlayerAvatar(Modifier.size(36.dp), player.initials)
             }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .size(25.dp)
-                    .clip(CircleShape)
-                    .background(DetailsAccent),
-                contentAlignment = Alignment.Center
-            ) {
-                ShieldIcon(Modifier.size(13.dp), Color(0xFF111604))
-            }
-        }
-        Column(modifier = Modifier.padding(start = 15.dp).weight(1f)) {
-            Text("Janaman Gana", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(modifier = Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (player.selected) {
                 Box(
                     modifier = Modifier
-                        .height(16.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Color(0xFF354D11))
-                        .padding(horizontal = 7.dp),
+                        .align(Alignment.TopEnd)
+                        .size(14.dp)
+                        .clip(CircleShape)
+                        .background(DetailsAccent),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("CAPTAIN", color = DetailsAccent, fontSize = 8.sp, fontWeight = FontWeight.Black)
+                    CheckIcon(Modifier.size(9.dp), Color(0xFF111604))
                 }
-                Text("• Batsman", color = DetailsMuted, fontSize = 13.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 10.dp))
             }
         }
-        KebabIcon(Modifier.size(20.dp), Color.White)
+        Column(modifier = Modifier.padding(start = 14.dp).weight(1f)) {
+            Text(player.name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(modifier = Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(5.dp)
+                        .clip(CircleShape)
+                        .background(if (player.playedLastMatch) DetailsAccent else Color(0xFF708199))
+                )
+                Text(
+                    if (player.playedLastMatch) "Played last match" else "Available",
+                    color = Color(0xFF9EACBB),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(player.matches.toString(), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+            Text("MAT", color = Color(0xFF8392A8), fontSize = 8.sp, fontWeight = FontWeight.Black)
+        }
     }
 }
 
 @Composable
-private fun BottomActions(modifier: Modifier = Modifier, onAddPlayer: () -> Unit) {
+private fun BottomActions(modifier: Modifier = Modifier, onAddPlayer: () -> Unit, onNext: () -> Unit) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .background(DetailsBg)
-            .padding(horizontal = 7.dp, vertical = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 11.dp, vertical = 13.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             modifier = Modifier
@@ -263,25 +319,25 @@ private fun BottomActions(modifier: Modifier = Modifier, onAddPlayer: () -> Unit
                 .height(50.dp)
                 .clip(RoundedCornerShape(9.dp))
                 .background(Color(0xFF111826))
-                .border(1.dp, DetailsStroke, RoundedCornerShape(9.dp)),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            PersonIcon(Modifier.size(17.dp), Color.White)
-            Text("Team Profile", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 11.dp))
-        }
-        Row(
-            modifier = Modifier
-                .weight(1.2f)
-                .height(50.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .background(DetailsAccent)
+                .border(1.dp, DetailsStroke, RoundedCornerShape(9.dp))
                 .clickable(onClick = onAddPlayer),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AddPersonIcon(Modifier.size(18.dp), Color(0xFF111604))
-            Text("Add Player", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
+            AddPersonIcon(Modifier.size(18.dp), Color.White)
+            Text("Add Player", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 9.dp))
+        }
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .height(50.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(DetailsAccent)
+                .clickable(onClick = onNext),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Next", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -343,6 +399,40 @@ private fun ShieldIcon(modifier: Modifier, tint: Color) {
             close()
         }
         drawPath(path, tint, style = stroke)
+    }
+}
+
+@Composable
+private fun SearchIcon(modifier: Modifier, tint: Color) {
+    Canvas(modifier) {
+        val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+        drawCircle(tint, radius = size.minDimension * 0.28f, center = Offset(size.width * 0.42f, size.height * 0.42f), style = stroke)
+        drawLine(tint, Offset(size.width * 0.62f, size.height * 0.62f), Offset(size.width * 0.84f, size.height * 0.84f), strokeWidth = stroke.width, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun CheckIcon(modifier: Modifier, tint: Color) {
+    Canvas(modifier) {
+        val stroke = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round)
+        val path = Path().apply {
+            moveTo(size.width * 0.2f, size.height * 0.52f)
+            lineTo(size.width * 0.42f, size.height * 0.72f)
+            lineTo(size.width * 0.82f, size.height * 0.28f)
+        }
+        drawPath(path, tint, style = stroke)
+    }
+}
+
+@Composable
+private fun PlayerAvatar(modifier: Modifier, initials: String) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawCircle(Color(0xFF1E2A2D), radius = size.minDimension * 0.48f)
+            drawCircle(Color(0xFFD0B190), radius = size.minDimension * 0.16f, center = Offset(size.width * 0.5f, size.height * 0.28f))
+            drawRoundRect(Color(0xFF273C57), topLeft = Offset(size.width * 0.24f, size.height * 0.48f), size = Size(size.width * 0.52f, size.height * 0.36f))
+        }
+        Text(initials, color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black)
     }
 }
 
