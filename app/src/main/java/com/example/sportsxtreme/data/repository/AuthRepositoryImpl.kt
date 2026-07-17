@@ -4,6 +4,7 @@ import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.remote.auth.AuthDataSource
 import com.example.sportsxtreme.domain.model.User
 import com.example.sportsxtreme.domain.repository.AuthRepository
+import com.google.firebase.auth.GoogleAuthProvider
 
 class AuthRepositoryImpl(
     private val authDataSource: AuthDataSource = AuthDataSource()
@@ -18,6 +19,15 @@ class AuthRepositoryImpl(
         return result.fold(
             onSuccess = { user -> Resource.Success(user) },
             onFailure = { error -> Resource.Error(error.message ?: "Signup failed") }
+        )
+    }
+
+    override suspend fun signupWithGoogle(idToken: String): Resource<User> {
+        val credential = GoogleAuthProvider.getCredential(idToken, null)
+        val result = authDataSource.signupWithCredential(credential)
+        return result.fold(
+            onSuccess = { user -> Resource.Success(user) },
+            onFailure = { error -> Resource.Error(error.message ?: "Google signup failed") }
         )
     }
 }

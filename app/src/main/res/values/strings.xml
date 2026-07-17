@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">SportsXtreme</string>
+    <string name="default_web_client_id" translatable="false">896267230604-egaaibb3i3ven1bs99a2to47mf29qucq.apps.googleusercontent.com</string>
     <string name="str_madanpurbhubaneswar">Madanpur,Bhubaneswar</string>
     <string name="str_xtrememedia">XtremeMedia</string>
     <string name="str_xtremecart">XtremeCart</string>

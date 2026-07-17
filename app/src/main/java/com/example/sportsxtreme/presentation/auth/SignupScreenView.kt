@@ -46,6 +46,14 @@ import android.widget.ScrollView
 import android.widget.Space
 import android.widget.TextView
 import android.widget.Toast
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -72,8 +80,10 @@ class SignupScreenView @JvmOverloads constructor(
     private lateinit var confirmPasswordInput: EditText
     private lateinit var errorMessageView: TextView
     private lateinit var createAccountButton: TextView
+    private lateinit var googleSignupButton: LinearLayout
     private val authRepository = AuthRepositoryImpl()
     private val signupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val credentialManager = CredentialManager.create(context)
     private var isSignupLoading = false
 
     init {
@@ -237,6 +247,56 @@ class SignupScreenView @JvmOverloads constructor(
         }
     }
 
+    private fun handleGoogleSignup(context: Context) {
+        if (isSignupLoading) return
+
+        val serverClientId = googleServerClientId(context)
+        if (serverClientId.isNullOrBlank()) {
+            showError("Google signup needs a Firebase web client ID. Add SHA keys in Firebase, download google-services.json again, then rebuild.")
+            return
+        }
+
+        setLoading(true, googleLoading = true)
+        signupScope.launch {
+            try {
+                val googleIdOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(serverClientId)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
+                val result = credentialManager.getCredential(context, request)
+                val credential = result.credential
+
+                if (credential is CustomCredential &&
+                    credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                ) {
+                    val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                    when (val authResult = authRepository.signupWithGoogle(googleCredential.idToken)) {
+                        is Resource.Success -> {
+                            showError(null)
+                            (context as? MainActivity)?.showSportSelectionScreen()
+                        }
+                        is Resource.Error -> showError(authResult.message ?: "Google signup failed")
+                        is Resource.Loading -> Unit
+                    }
+                } else {
+                    showError("Google signup did not return a valid account.")
+                }
+            } catch (error: GetCredentialCancellationException) {
+                showError(null)
+            } catch (error: GetCredentialException) {
+                showError(error.message ?: "Google signup failed")
+            } catch (error: GoogleIdTokenParsingException) {
+                showError("Google signup response could not be read.")
+            } finally {
+                setLoading(false)
+            }
+        }
+    }
+
     private fun validateSignup(name: String, email: String, password: String, confirmPassword: String): String? {
         return when {
             name.isBlank() -> "Name is required"
@@ -247,11 +307,21 @@ class SignupScreenView @JvmOverloads constructor(
         }
     }
 
-    private fun setLoading(loading: Boolean) {
+    private fun googleServerClientId(context: Context): String? {
+        val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+        return if (resId != 0) context.getString(resId) else null
+    }
+
+    private fun setLoading(loading: Boolean, googleLoading: Boolean = false) {
         isSignupLoading = loading
         createAccountButton.isEnabled = !loading
         createAccountButton.alpha = if (loading) 0.72f else 1f
         createAccountButton.text = if (loading) "CREATING..." else context.getString(R.string.str_create_account)
+        googleSignupButton.isEnabled = !loading
+        googleSignupButton.alpha = if (loading) 0.72f else 1f
+        if (googleLoading) {
+            createAccountButton.text = context.getString(R.string.str_create_account)
+        }
     }
 
     private fun showError(message: String?) {
@@ -287,7 +357,12 @@ class SignupScreenView @JvmOverloads constructor(
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            addView(socialButton(context, "GOOGLE", R.drawable.googleicon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+            googleSignupButton = socialButton(context, "GOOGLE", R.drawable.googleicon).apply {
+                setOnClickListener {
+                    handleGoogleSignup(context)
+                }
+            }
+            addView(googleSignupButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
                 rightMargin = dp(6)
             })
             addView(socialButton(context, "FACEBOOK", R.drawable.facebook_icon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
