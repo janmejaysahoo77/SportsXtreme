@@ -13,12 +13,17 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.content.Intent
 import android.os.Bundle
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Image
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,10 +41,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -48,6 +56,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -74,10 +85,11 @@ class FinalPageBeforeScoringActivity : ComponentActivity() {
 
 private val InningsAccent = Color(0xFFC1FF00)
 private val InningsBg = Color(0xFF020A15)
-private val InningsPanel = Color(0xFF07101A)
-private val InningsCard = Color(0xFF0B1523)
-private val InningsStroke = Color(0xFF25314A)
+private val InningsPanel = Color(0xFF07111D)
+private val InningsCard = Color(0xFF0A1725)
+private val InningsStroke = Color(0xFF2B3950)
 private val InningsMuted = Color(0xFFAAB6C4)
+private val InningsGold = Color(0xFFFFD36A)
 
 @Composable
 private fun FinalPageBeforeScoringScreen(onBack: () -> Unit, onOpenSelection: () -> Unit, onStartScoring: () -> Unit) {
@@ -86,8 +98,14 @@ private fun FinalPageBeforeScoringScreen(onBack: () -> Unit, onOpenSelection: ()
             .fillMaxSize()
             .background(InningsBg)
             .drawBehind {
-                drawCircle(Color(0x101B5BFF), radius = size.width * 0.62f, center = Offset(size.width * 0.62f, size.height * 0.2f))
-                drawCircle(Color(0x151C3F14), radius = size.width * 0.6f, center = Offset(size.width * 0.3f, size.height * 0.48f))
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF071625), Color(0xFF020A15), Color(0xFF03050B))
+                    )
+                )
+                drawCircle(Color(0x1EFFD36A), radius = size.width * 0.58f, center = Offset(size.width * 0.85f, size.height * 0.14f))
+                drawCircle(Color(0x2214D8A6), radius = size.width * 0.48f, center = Offset(size.width * 0.04f, size.height * 0.5f))
+                drawCircle(Color(0x171B5BFF), radius = size.width * 0.56f, center = Offset(size.width * 0.72f, size.height * 0.7f))
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -103,18 +121,30 @@ private fun FinalPageBeforeScoringScreen(onBack: () -> Unit, onOpenSelection: ()
                     modifier = Modifier.padding(top = 15.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    PlayerPickCard("SELECT STRIKER", selected = false, modifier = Modifier.weight(1f), onClick = onOpenSelection) {
-                        BatterIcon(Modifier.size(86.dp), Color(0xFFE4F5C7))
-                    }
-                    PlayerPickCard("SELECT NON-STRIKER", selected = false, modifier = Modifier.weight(1f), onClick = onOpenSelection) {
-                        NonStrikerIcon(Modifier.size(86.dp), Color(0xFF8FE5FF))
-                    }
+                    PlayerPickCard(
+                        label = "SELECT STRIKER",
+                        imageRes = R.drawable.nonstriker,
+                        selected = false,
+                        modifier = Modifier.weight(1f),
+                        onClick = onOpenSelection
+                    )
+                    PlayerPickCard(
+                        label = "SELECT NON-STRIKER",
+                        imageRes = R.drawable.striker,
+                        selected = false,
+                        modifier = Modifier.weight(1f),
+                        onClick = onOpenSelection
+                    )
                 }
                 InningsSectionTitle("BOWLING - BHU", Modifier.padding(top = 33.dp))
                 Row(modifier = Modifier.padding(top = 15.dp)) {
-                    PlayerPickCard("SELECT BOWLER", selected = true, modifier = Modifier.width(166.dp), onClick = onOpenSelection) {
-                        BowlerIcon(Modifier.size(92.dp), InningsAccent)
-                    }
+                    PlayerPickCard(
+                        label = "SELECT BOWLER",
+                        imageRes = R.drawable.choosebowler,
+                        selected = true,
+                        modifier = Modifier.width(166.dp),
+                        onClick = onOpenSelection
+                    )
                     Spacer(Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(150.dp))
@@ -138,7 +168,11 @@ private fun InningsTopBar(onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .height(66.dp)
-            .background(InningsPanel)
+            .background(
+                Brush.horizontalGradient(
+                    listOf(Color(0xFF06111D), Color(0xFF0B1A28), Color(0xFF07101A))
+                )
+            )
             .padding(horizontal = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -170,36 +204,69 @@ private fun InningsSectionTitle(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PlayerPickCard(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit, icon: @Composable () -> Unit) {
+private fun PlayerPickCard(label: String, imageRes: Int, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 1.055f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 420f),
+        label = "pick-card-pop"
+    )
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (pressed || selected) 0.48f else 0.18f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 260f),
+        label = "pick-card-glow"
+    )
+
     Column(
         modifier = modifier
             .height(194.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(InningsCard)
-            .border(if (selected) 1.5.dp else 1.dp, if (selected) InningsAccent else InningsStroke, RoundedCornerShape(6.dp))
-            .clickable(onClick = onClick)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(if (pressed || selected) 18.dp else 9.dp, RoundedCornerShape(8.dp), clip = false)
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF13283A), InningsCard, Color(0xFF050D17))
+                )
+            )
+            .border(if (selected) 1.6.dp else 1.dp, if (selected) InningsAccent else InningsStroke, RoundedCornerShape(8.dp))
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
                 .size(132.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(Color(0xFF061A26))
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF071827))
+                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
                 .drawBehind {
-                    drawCircle(InningsAccent.copy(alpha = 0.18f), radius = size.width * 0.58f, center = Offset(size.width * 0.5f, size.height * 0.5f))
+                    drawCircle(InningsAccent.copy(alpha = glowAlpha), radius = size.width * 0.62f, center = Offset(size.width * 0.5f, size.height * 0.52f))
+                    drawCircle(InningsGold.copy(alpha = 0.15f), radius = size.width * 0.34f, center = Offset(size.width * 0.28f, size.height * 0.2f))
                 },
             contentAlignment = Alignment.Center
         ) {
-            icon()
+            Image(
+                painter = painterResource(imageRes),
+                contentDescription = label,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(7.dp)
+                    .clip(RoundedCornerShape(7.dp)),
+                contentScale = ContentScale.Crop
+            )
         }
         Text(
             label,
-            color = if (selected) InningsAccent else Color.White,
+            color = if (selected) InningsAccent else Color(0xFFF6FAFF),
             fontSize = 11.sp,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 16.dp)
+            letterSpacing = 1.2.sp,
+            modifier = Modifier.padding(top = 16.dp, start = 6.dp, end = 6.dp)
         )
     }
 }
@@ -224,7 +291,11 @@ private fun BottomStartBar(modifier: Modifier = Modifier, onStartScoring: () -> 
         modifier = modifier
             .fillMaxWidth()
             .height(82.dp)
-            .background(InningsPanel)
+            .background(
+                Brush.horizontalGradient(
+                    listOf(Color(0xFF07111D), Color(0xFF0E1C2B), Color(0xFF07111D))
+                )
+            )
             .border(1.dp, Color(0xFF111E33))
             .padding(horizontal = 11.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -235,7 +306,7 @@ private fun BottomStartBar(modifier: Modifier = Modifier, onStartScoring: () -> 
                 .width(194.dp)
                 .height(50.dp)
                 .clip(RoundedCornerShape(7.dp))
-                .background(InningsAccent)
+                .background(Brush.horizontalGradient(listOf(InningsAccent, InningsGold)))
                 .clickable(onClick = onStartScoring),
             contentAlignment = Alignment.Center
         ) {

@@ -15,10 +15,16 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,10 +41,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -46,6 +59,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -83,8 +97,8 @@ private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> U
             .fillMaxSize()
             .background(DetailsBg)
             .drawBehind {
-                drawCircle(Color(0x101B5BFF), radius = size.width * 0.62f, center = Offset(size.width * 0.52f, size.height * 0.18f))
-                drawCircle(Color(0x161C3F14), radius = size.width * 0.5f, center = Offset(size.width * 0.5f, size.height * 0.34f))
+                drawCircle(Color(0x251B5BFF), radius = size.width * 0.62f, center = Offset(size.width * 0.52f, size.height * 0.18f))
+                drawCircle(Color(0x20C1FF00), radius = size.width * 0.5f, center = Offset(size.width * 0.5f, size.height * 0.34f))
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -131,16 +145,17 @@ private fun TeamSummaryCard() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .bounceClick()
             .height(130.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(DetailsCard)
-            .border(1.dp, DetailsStroke, RoundedCornerShape(10.dp))
+            .shadow(20.dp, RoundedCornerShape(14.dp), clip = false)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF152238), Color(0xFF09101C))))
             .drawBehind {
                 drawLine(
-                    brush = Brush.horizontalGradient(listOf(Color.Transparent, DetailsAccent.copy(alpha = 0.7f), Color.Transparent)),
-                    start = Offset(size.width * 0.18f, size.height),
+                    brush = Brush.horizontalGradient(listOf(Color.Transparent, DetailsAccent.copy(alpha = 0.5f), Color.Transparent)),
+                    start = Offset(size.width * 0.1f, size.height),
                     end = Offset(size.width * 0.9f, size.height),
-                    strokeWidth = 1.5.dp.toPx()
+                    strokeWidth = 2.dp.toPx()
                 )
             }
             .padding(horizontal = 22.dp),
@@ -242,11 +257,11 @@ private fun SearchBox(modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(43.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFF0E1726))
-            .border(1.dp, DetailsStroke, RoundedCornerShape(10.dp))
-            .padding(horizontal = 13.dp),
+            .height(48.dp)
+            .shadow(12.dp, RoundedCornerShape(12.dp), clip = false)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF0B1322))
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         SearchIcon(Modifier.size(18.dp), Color(0xFF8192AB))
@@ -259,11 +274,12 @@ private fun PlayerSelectionRow(player: StartPlayer) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(70.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(DetailsCard)
-            .border(if (player.selected) 1.5.dp else 0.dp, if (player.selected) DetailsAccent else Color.Transparent, RoundedCornerShape(10.dp))
-            .padding(horizontal = 12.dp),
+            .bounceClick()
+            .height(76.dp)
+            .shadow(if (player.selected) 16.dp else 8.dp, RoundedCornerShape(14.dp), spotColor = if (player.selected) DetailsAccent.copy(alpha = 0.6f) else Color.Black, clip = false)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.horizontalGradient(listOf(Color(0xFF101929), Color(0xFF0A101C))))
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box {
@@ -320,35 +336,36 @@ private fun BottomActions(modifier: Modifier = Modifier, onAddPlayer: () -> Unit
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(DetailsBg)
-            .padding(horizontal = 11.dp, vertical = 13.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6020A15), DetailsBg)))
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Row(
             modifier = Modifier
                 .weight(1f)
-                .height(50.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .background(Color(0xFF111826))
-                .border(1.dp, DetailsStroke, RoundedCornerShape(9.dp))
-                .clickable(onClick = onAddPlayer),
+                .bounceClick(onAddPlayer)
+                .height(56.dp)
+                .shadow(12.dp, RoundedCornerShape(14.dp), clip = false)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF1A263D), Color(0xFF0C1322)))),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AddPersonIcon(Modifier.size(18.dp), Color.White)
-            Text("Add Player", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 9.dp))
+            AddPersonIcon(Modifier.size(20.dp), Color.White)
+            Text("Add Player", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 10.dp))
         }
         Row(
             modifier = Modifier
                 .weight(1f)
-                .height(50.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .background(DetailsAccent)
-                .clickable(onClick = onNext),
+                .bounceClick(onNext)
+                .height(56.dp)
+                .shadow(20.dp, RoundedCornerShape(14.dp), spotColor = DetailsAccent, clip = false)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Brush.linearGradient(listOf(DetailsAccent, Color(0xFF98CC00)))),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Next", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black)
+            Text("Next", color = Color(0xFF111604), fontSize = 16.sp, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -483,4 +500,26 @@ private fun AddPersonIcon(modifier: Modifier, tint: Color) {
         drawLine(tint, Offset(size.width * 0.68f, size.height * 0.38f), Offset(size.width * 0.68f, size.height * 0.72f), strokeWidth = stroke.width, cap = StrokeCap.Round)
         drawLine(tint, Offset(size.width * 0.51f, size.height * 0.55f), Offset(size.width * 0.85f, size.height * 0.55f), strokeWidth = stroke.width, cap = StrokeCap.Round)
     }
+}
+
+fun Modifier.bounceClick(onClick: (() -> Unit)? = null) = composed {
+    var isPressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "scale"
+    )
+    this
+        .scale(scale)
+        .pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                isPressed = true
+                val up = waitForUpOrCancellation()
+                isPressed = false
+                if (up != null && onClick != null) {
+                    onClick()
+                }
+            }
+        }
 }

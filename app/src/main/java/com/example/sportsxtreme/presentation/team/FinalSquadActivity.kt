@@ -31,23 +31,40 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -82,8 +99,13 @@ private fun FinalSquadScreen(onBack: () -> Unit, onNext: () -> Unit) {
             .fillMaxSize()
             .background(SquadBg)
             .drawBehind {
-                drawCircle(Color(0x101B5BFF), radius = size.width * 0.65f, center = Offset(size.width * 0.52f, size.height * 0.2f))
-                drawCircle(Color(0x151C3F14), radius = size.width * 0.55f, center = Offset(size.width * 0.55f, size.height * 0.42f))
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(SquadAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
+                    )
+                )
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -97,22 +119,25 @@ private fun FinalSquadScreen(onBack: () -> Unit, onNext: () -> Unit) {
                 SquadPlayerCard(
                     name = "ANSHU Gita",
                     role = "Batsman",
-                    tag = "C",
-                    selected = true,
+                    isCaptain = true,
+                    isViceCaptain = false,
+                    isWicketKeeper = false,
                     modifier = Modifier.padding(top = 22.dp)
                 )
                 SquadPlayerCard(
                     name = "Abhimanyu Majhi",
                     role = "All Rounder",
-                    tag = "VC",
-                    selected = true,
+                    isCaptain = false,
+                    isViceCaptain = true,
+                    isWicketKeeper = false,
                     modifier = Modifier.padding(top = 12.dp)
                 )
                 SquadPlayerCard(
                     name = "Raj Kumar",
                     role = "Wicket Keeper",
-                    tag = "WK",
-                    selected = false,
+                    isCaptain = false,
+                    isViceCaptain = false,
+                    isWicketKeeper = true,
                     modifier = Modifier.padding(top = 12.dp)
                 )
                 Spacer(Modifier.height(110.dp))
@@ -127,19 +152,19 @@ private fun FinalSquadScreen(onBack: () -> Unit, onNext: () -> Unit) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(SquadBg)
-                .padding(horizontal = 12.dp, vertical = 13.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, SquadBg, SquadBg)))
+                .padding(horizontal = 16.dp, vertical = 20.dp)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(SquadAccent)
-                    .clickable(onClick = onNext),
+                    .height(64.dp)
+                    .bounceClick(onNext)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SquadAccent),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Next", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text("Next", color = Color(0xFF111604), fontSize = 18.sp, fontWeight = FontWeight.Black)
             }
         }
     }
@@ -155,7 +180,7 @@ private fun FinalSquadTopBar(onBack: () -> Unit) {
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        SquadArrow(Modifier.size(25.dp).clickable(onClick = onBack), Color.White)
+        SquadArrow(Modifier.size(25.dp).bounceClick(onBack), Color.White)
         Text(
             "Final Squad",
             color = Color.White,
@@ -181,11 +206,6 @@ private fun FinalSquadHeader() {
             modifier = Modifier.weight(1f),
             maxLines = 1
         )
-        SquadRoleButton("C", selected = true)
-        Spacer(Modifier.width(8.dp))
-        SquadRoleButton("VC", selected = false)
-        Spacer(Modifier.width(8.dp))
-        SquadRoleButton("WK", selected = false)
     }
 }
 
@@ -193,65 +213,74 @@ private fun FinalSquadHeader() {
 private fun SquadRoleButton(text: String, selected: Boolean) {
     Box(
         modifier = Modifier
-            .size(39.dp)
+            .size(38.dp)
+            .bounceClick()
             .clip(CircleShape)
-            .background(if (selected) SquadAccent else SquadCard)
-            .border(1.dp, if (selected) SquadAccent else SquadStroke, CircleShape),
+            .background(if (selected) SquadAccent else Color.Transparent)
+            .border(1.dp, if (selected) Color.Transparent else Color(0xFF25314A), CircleShape),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text,
-            color = if (selected) Color(0xFF111604) else Color.White,
-            fontSize = if (text.length == 1) 13.sp else 11.sp,
+            color = if (selected) Color(0xFF111604) else SquadMuted,
+            fontSize = if (text.length == 1) 14.sp else 11.sp,
             fontWeight = FontWeight.Black
         )
     }
 }
 
 @Composable
-private fun SquadPlayerCard(name: String, role: String, tag: String, selected: Boolean, modifier: Modifier = Modifier) {
+private fun SquadPlayerCard(name: String, role: String, isCaptain: Boolean, isViceCaptain: Boolean, isWicketKeeper: Boolean, modifier: Modifier = Modifier) {
+    val isSelected = isCaptain || isViceCaptain || isWicketKeeper
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(76.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(SquadCard)
-            .border(if (selected) 1.5.dp else 1.dp, if (selected) SquadAccent else SquadStroke, RoundedCornerShape(10.dp))
-            .padding(horizontal = 13.dp),
+            .height(96.dp)
+            .bounceClick()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF111A29))
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(Brush.radialGradient(listOf(Color(0xFF315A43), Color(0xFF101820)), radius = 62f))
-                .border(1.dp, Color(0xFF3A465D), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            SquadPersonIcon(Modifier.size(31.dp))
-        }
-        Column(modifier = Modifier.padding(start = 13.dp).weight(1f)) {
-            Text(name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(modifier = Modifier.padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(contentAlignment = Alignment.TopEnd) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(Brush.radialGradient(listOf(Color(0xFF1A2840), Color(0xFF101820)), radius = 62f)),
+                contentAlignment = Alignment.Center
+            ) {
+                SquadPersonIcon(Modifier.size(36.dp))
+            }
+            if (isSelected) {
                 Box(
                     modifier = Modifier
-                        .size(5.dp)
+                        .size(16.dp)
                         .clip(CircleShape)
                         .background(SquadAccent)
-                )
-                Text(role, color = SquadMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 5.dp))
+                        .border(1.5.dp, Color(0xFF111A29), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("v", color = Color(0xFF111604), fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 2.dp))
+                }
             }
         }
-        Box(
-            modifier = Modifier
-                .height(27.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(if (selected) Color(0xFF344C12) else Color(0xFF111826))
-                .border(1.dp, if (selected) Color(0xFF58751E) else SquadStroke, RoundedCornerShape(14.dp))
-                .padding(horizontal = 12.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(tag, color = if (selected) SquadAccent else SquadMuted, fontSize = 10.sp, fontWeight = FontWeight.Black)
+        Column(modifier = Modifier.padding(start = 16.dp).weight(1f)) {
+            Text(name, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(modifier = Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (isSelected) SquadAccent else Color(0xFF555B66))
+                )
+                Text("Played last match", color = SquadMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp))
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            SquadRoleButton("C", selected = isCaptain)
+            SquadRoleButton("VC", selected = isViceCaptain)
+            SquadRoleButton("WK", selected = isWicketKeeper)
         }
     }
 }
@@ -260,13 +289,13 @@ private fun SquadPlayerCard(name: String, role: String, tag: String, selected: B
 private fun CameraFloatingButton(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .size(54.dp)
+            .size(64.dp)
+            .bounceClick()
             .clip(CircleShape)
-            .background(SquadCard)
-            .border(1.5.dp, SquadAccent, CircleShape),
+            .background(SquadAccent),
         contentAlignment = Alignment.Center
     ) {
-        SquadCameraIcon(Modifier.size(25.dp), SquadAccent)
+        SquadCameraIcon(Modifier.size(32.dp), Color.White)
     }
 }
 
@@ -311,5 +340,44 @@ private fun SquadPersonIcon(modifier: Modifier) {
             size = Size(size.width * 0.52f, size.height * 0.34f),
             cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
         )
+    }
+}
+
+fun Modifier.bounceClick(onClick: (() -> Unit)? = null) = composed {
+    var isPressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "scale"
+    )
+    this
+        .scale(scale)
+        .pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                isPressed = true
+                val up = waitForUpOrCancellation()
+                isPressed = false
+                if (up != null && onClick != null) {
+                    onClick()
+                }
+            }
+        }
+}
+
+fun Modifier.pureNeonGlow(color: Color, radius: androidx.compose.ui.unit.Dp = 16.dp, cornerRadius: androidx.compose.ui.unit.Dp = 12.dp, isCircle: Boolean = false) = this.drawBehind {
+    if (color == Color.Transparent) return@drawBehind
+    val paint = androidx.compose.ui.graphics.Paint().apply {
+        this.color = color
+        this.asFrameworkPaint().apply {
+            maskFilter = android.graphics.BlurMaskFilter(radius.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
+        }
+    }
+    drawIntoCanvas { canvas ->
+        if (isCircle) {
+            canvas.drawCircle(center, size.width / 2f, paint)
+        } else {
+            canvas.drawRoundRect(0f, 0f, size.width, size.height, cornerRadius.toPx(), cornerRadius.toPx(), paint)
+        }
     }
 }

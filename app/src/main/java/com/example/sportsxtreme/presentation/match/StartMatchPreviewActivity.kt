@@ -17,7 +17,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,12 +33,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -52,6 +56,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -73,6 +78,7 @@ class StartMatchPreviewActivity : ComponentActivity() {
 }
 
 private val PreviewAccent = Color(0xFFC1FF00)
+private val NeonYellow = Color(0xFFFFD600)
 private val PreviewBg = Color(0xFF020A15)
 private val PreviewPanel = Color(0xFF07101A)
 private val PreviewCard = Color(0xFF0B1523)
@@ -88,7 +94,6 @@ private fun StartMatchPreviewScreen(onBack: () -> Unit, onContinue: () -> Unit) 
             .background(PreviewBg)
             .drawBehind {
                 drawCircle(Color(0x101B5BFF), radius = size.width * 0.68f, center = Offset(size.width * 0.72f, size.height * 0.18f))
-                drawCircle(Color(0x121C3F14), radius = size.width * 0.66f, center = Offset(size.width * 0.2f, size.height * 0.75f))
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -97,8 +102,8 @@ private fun StartMatchPreviewScreen(onBack: () -> Unit, onContinue: () -> Unit) 
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 7.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(15.dp)
+                    .padding(horizontal = 14.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 MatchHeroCard()
                 MatchInformation()
@@ -106,28 +111,29 @@ private fun StartMatchPreviewScreen(onBack: () -> Unit, onContinue: () -> Unit) 
                 BallTypeSection()
                 AdvancedSettingsCard()
                 ScheduleMatchSection()
-                Spacer(Modifier.height(82.dp))
+                Spacer(Modifier.height(100.dp))
             }
         }
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(PreviewBg)
-                .padding(horizontal = 7.dp, vertical = 10.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, PreviewBg, PreviewBg)))
+                .padding(horizontal = 14.dp, vertical = 14.dp)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .height(58.dp)
+                    .pureNeonGlow(PreviewAccent.copy(alpha = 0.8f), 24.dp, 12.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(PreviewAccent)
                     .clickable(onClick = onContinue),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("CONTINUE TO TOSS", color = Color(0xFF111604), fontSize = 12.sp, fontWeight = FontWeight.Black)
-                Text("  ->", color = Color(0xFF111604), fontSize = 13.sp, fontWeight = FontWeight.Black)
+                Text("CONTINUE TO TOSS", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text("  ->", color = Color(0xFF111604), fontSize = 16.sp, fontWeight = FontWeight.Black)
             }
         }
     }
@@ -138,22 +144,22 @@ private fun PreviewTopBar(onBack: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(45.dp)
+            .height(58.dp)
             .background(PreviewPanel)
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        PreviewArrow(Modifier.size(23.dp).clickable(onClick = onBack), Color.White)
+        PreviewArrow(Modifier.size(28.dp).clickable(onClick = onBack), Color.White)
         Text(
             "Start A Match",
             color = Color.White,
-            fontSize = 18.sp,
+            fontSize = 22.sp,
             fontStyle = FontStyle.Italic,
             fontWeight = FontWeight.Black,
-            modifier = Modifier.padding(start = 12.dp).weight(1f),
+            modifier = Modifier.padding(start = 16.dp).weight(1f),
             maxLines = 1
         )
-        PreviewInfoIcon(Modifier.size(19.dp), Color.White)
+        PreviewInfoIcon(Modifier.size(22.dp), Color.White)
     }
 }
 
@@ -162,45 +168,58 @@ private fun MatchHeroCard() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(154.dp)
-            .clip(RoundedCornerShape(11.dp))
+            .height(220.dp)
+            .pureNeonGlow(NeonYellow.copy(alpha = 0.75f), 26.dp, 18.dp)
+            .clip(RoundedCornerShape(18.dp))
             .background(
                 Brush.radialGradient(
                     colors = listOf(Color(0xFF142238), PreviewCard),
-                    radius = 360f,
-                    center = Offset(180f, 70f)
+                    radius = 440f,
+                    center = Offset(180f, 80f)
                 )
             )
-            .border(1.dp, Color(0xFF3E5B1B), RoundedCornerShape(11.dp))
-            .padding(horizontal = 19.dp, vertical = 12.dp),
+            .drawBehind {
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            NeonYellow.copy(alpha = 0.22f),
+                            NeonYellow.copy(alpha = 0.09f),
+                            Color.Transparent
+                        ),
+                        center = Offset(size.width / 2f, size.height * 0.65f),
+                        radius = size.width * 0.6f
+                    )
+                )
+            }
+            .padding(horizontal = 28.dp, vertical = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
-                .height(19.dp)
-                .clip(RoundedCornerShape(11.dp))
+                .height(24.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xFF101B2A))
-                .border(1.dp, PreviewStroke, RoundedCornerShape(11.dp))
-                .padding(horizontal = 22.dp),
+                .padding(horizontal = 24.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text("SUMMER CHAMPIONSHIP 2026", color = Color(0xFFE7D264), fontSize = 7.sp, fontWeight = FontWeight.Black)
+            Text("SUMMER CHAMPIONSHIP 2026", color = Color(0xFFE7D264), fontSize = 9.sp, fontWeight = FontWeight.Black)
         }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 15.dp),
+                .padding(top = 18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             HeroTeam("DW", "Dipesh\nWarrior 69", "12 PLAYERS", Modifier.weight(1f))
             Box(
                 modifier = Modifier
-                    .size(30.dp)
+                    .size(52.dp)
+                    .pureNeonGlow(PreviewAccent.copy(alpha = 1f), 32.dp, 0.dp, isCircle = true)
                     .clip(CircleShape)
                     .background(PreviewAccent),
                 contentAlignment = Alignment.Center
             ) {
-                Text("VS", color = Color(0xFF111604), fontSize = 9.sp, fontWeight = FontWeight.Black)
+                Text("VS", color = Color(0xFF111604), fontSize = 16.sp, fontWeight = FontWeight.Black)
             }
             HeroTeam("BH", "Bhu", "12 PLAYERS", Modifier.weight(1f))
         }
@@ -212,28 +231,27 @@ private fun HeroTeam(initials: String, name: String, players: String, modifier: 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .size(58.dp)
+                .size(84.dp)
                 .clip(CircleShape)
-                .background(Brush.radialGradient(listOf(Color(0xFF111D35), Color(0xFF070D18)), radius = 80f))
-                .border(1.5.dp, PreviewAccent, CircleShape),
+                .background(Brush.radialGradient(listOf(Color(0xFF111D35), Color(0xFF070D18)), radius = 100f)),
             contentAlignment = Alignment.Center
         ) {
-            Text(initials, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            Text(initials, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
         }
         Text(
             name,
             color = Color.White,
-            fontSize = 11.sp,
-            lineHeight = 13.sp,
+            fontSize = 15.sp,
+            lineHeight = 18.sp,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 7.dp),
+            modifier = Modifier.padding(top = 10.dp),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
-        Row(modifier = Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            PreviewPeopleIcon(Modifier.size(10.dp), PreviewMuted)
-            Text(players, color = PreviewMuted, fontSize = 7.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 4.dp))
+        Row(modifier = Modifier.padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            PreviewPeopleIcon(Modifier.size(14.dp), PreviewMuted)
+            Text(players, color = PreviewMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 4.dp))
         }
     }
 }
@@ -249,9 +267,9 @@ private fun MatchInformation() {
 @Composable
 private fun SectionHeader(title: String, subtitle: String? = null) {
     Column {
-        Text(title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+        Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black)
         if (subtitle != null) {
-            Text(subtitle, color = PreviewMuted, fontSize = 8.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp))
+            Text(subtitle, color = PreviewMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 5.dp))
         }
     }
 }
@@ -261,21 +279,21 @@ private fun InfoGrid() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .pureNeonGlow(NeonYellow.copy(alpha = 0.65f), 18.dp, 14.dp)
+            .clip(RoundedCornerShape(14.dp))
             .background(PreviewCard)
-            .border(1.dp, Color(0xFF3E5B1B), RoundedCornerShape(10.dp))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(9.dp)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             MatchInfoTile("Limited Overs", "FORMAT", selected = true, modifier = Modifier.weight(1f)) {
-                PreviewBallIcon(Modifier.size(17.dp), PreviewAccent)
+                PreviewBallIcon(Modifier.size(20.dp), PreviewAccent)
             }
             MatchInfoTile("Test Match", null, selected = false, modifier = Modifier.weight(1f)) {
-                PreviewStumpsIcon(Modifier.size(16.dp), PreviewMuted)
+                PreviewStumpsIcon(Modifier.size(19.dp), PreviewMuted)
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             MatchInfoTile("20", "TOTAL OVERS", selected = false, modifier = Modifier.weight(1f))
             MatchInfoTile("4", "OVERS/BOWLER", selected = false, modifier = Modifier.weight(1f))
         }
@@ -286,21 +304,20 @@ private fun InfoGrid() {
 private fun MatchInfoTile(title: String, label: String?, selected: Boolean, modifier: Modifier = Modifier, icon: @Composable (() -> Unit)? = null) {
     Column(
         modifier = modifier
-            .height(62.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .height(88.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(if (selected) Color(0xFF172513) else Color(0xFF111B2B))
-            .border(1.dp, if (selected) PreviewAccent else PreviewStroke, RoundedCornerShape(8.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.Center
     ) {
         if (icon != null) {
             icon()
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(8.dp))
         } else if (label != null) {
-            Text(label, color = PreviewMuted, fontSize = 6.sp, fontWeight = FontWeight.Black)
-            Spacer(Modifier.height(5.dp))
+            Text(label, color = PreviewMuted, fontSize = 9.sp, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(6.dp))
         }
-        Text(title, color = Color.White, fontSize = if (title.length <= 3) 18.sp else 9.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        Text(title, color = Color.White, fontSize = if (title.length <= 3) 24.sp else 12.sp, fontWeight = FontWeight.Black, maxLines = 1)
     }
 }
 
@@ -308,20 +325,20 @@ private fun MatchInfoTile(title: String, label: String?, selected: Boolean, modi
 private fun MatchVenue() {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PreviewPinIcon(Modifier.size(14.dp), Color(0xFFFF5F9E))
-            Text(" Match Venue", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+            PreviewPinIcon(Modifier.size(16.dp), Color(0xFFFF5F9E))
+            Text(" Match Venue", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
         }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .pureNeonGlow(NeonYellow.copy(alpha = 0.65f), 18.dp, 12.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(PreviewCard)
-                .border(1.dp, Color(0xFF3E5B1B), RoundedCornerShape(10.dp))
-                .padding(9.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            VenueField("CITY / TOWN", "Bhubaneswar") { PreviewPinIcon(Modifier.size(15.dp), PreviewAccent) }
-            VenueField("GROUND NAME", "IIT Bhubaneswar") { PreviewGroundIcon(Modifier.size(15.dp), PreviewAccent) }
+            VenueField("CITY / TOWN", "Bhubaneswar") { PreviewPinIcon(Modifier.size(18.dp), PreviewAccent) }
+            VenueField("GROUND NAME", "IIT Bhubaneswar") { PreviewGroundIcon(Modifier.size(18.dp), PreviewAccent) }
         }
     }
 }
@@ -331,17 +348,16 @@ private fun VenueField(label: String, value: String, icon: @Composable () -> Uni
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(42.dp)
-            .clip(RoundedCornerShape(7.dp))
+            .height(66.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF111B2B))
-            .border(1.dp, PreviewStroke, RoundedCornerShape(7.dp))
-            .padding(horizontal = 11.dp),
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         icon()
-        Column(modifier = Modifier.padding(start = 10.dp)) {
-            Text(label, color = PreviewMuted, fontSize = 6.sp, fontWeight = FontWeight.Black)
-            Text(value, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        Column(modifier = Modifier.padding(start = 14.dp)) {
+            Text(label, color = PreviewMuted, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            Text(value, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1)
         }
     }
 }
@@ -349,36 +365,40 @@ private fun VenueField(label: String, value: String, icon: @Composable () -> Uni
 @Composable
 private fun BallTypeSection() {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Ball Type", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+        Text("Ball Type", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .pureNeonGlow(NeonYellow.copy(alpha = 0.65f), 18.dp, 12.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(PreviewCard)
-                .border(1.dp, PreviewStroke, RoundedCornerShape(10.dp))
-                .padding(9.dp),
-            horizontalArrangement = Arrangement.spacedBy(9.dp)
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            BallTypeCard("TENNIS", Color(0xFFD5FF1C), selected = true, modifier = Modifier.weight(1f))
-            BallTypeCard("LEATHER", Color(0xFF7A201E), selected = false, modifier = Modifier.weight(1f))
-            BallTypeCard("OTHER", Color(0xFFC65528), selected = false, modifier = Modifier.weight(1f))
+            BallTypeCard("TENNIS", R.drawable.tennisball, selected = true, modifier = Modifier.weight(1f))
+            BallTypeCard("LEATHER", R.drawable.leatherball, selected = false, modifier = Modifier.weight(1f))
+            BallTypeCard("OTHER", R.drawable.otherball, selected = false, modifier = Modifier.weight(1f))
         }
     }
 }
 
 @Composable
-private fun BallTypeCard(title: String, color: Color, selected: Boolean, modifier: Modifier = Modifier) {
+private fun BallTypeCard(title: String, imageRes: Int, selected: Boolean, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
-            .height(60.dp)
-            .clip(RoundedCornerShape(7.dp))
-            .background(if (selected) Color(0xFF172513) else Color(0xFF111B2B))
-            .border(1.dp, if (selected) PreviewAccent else PreviewStroke, RoundedCornerShape(7.dp)),
+            .height(92.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) Color(0xFF172513) else Color(0xFF111B2B)),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        PreviewCricketBall(Modifier.size(27.dp), color)
-        Text(title, color = if (selected) PreviewAccent else PreviewMuted, fontSize = 7.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 4.dp))
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .paint(painterResource(id = imageRes), contentScale = ContentScale.Fit)
+        )
+        Text(title, color = if (selected) PreviewAccent else PreviewMuted, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 6.dp))
     }
 }
 
@@ -387,19 +407,19 @@ private fun AdvancedSettingsCard() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(55.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .height(84.dp)
+            .pureNeonGlow(NeonYellow.copy(alpha = 0.65f), 18.dp, 14.dp)
+            .clip(RoundedCornerShape(14.dp))
             .background(PreviewCard)
-            .border(1.dp, Color(0xFF3E5B1B), RoundedCornerShape(10.dp))
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        PreviewGearIcon(Modifier.size(17.dp), PreviewAccent)
-        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
-            Text("Advanced Settings", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
-            Text("DRS, Powerplay, Strike & Streaming", color = PreviewMuted, fontSize = 6.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp))
+        PreviewGearIcon(Modifier.size(26.dp), PreviewAccent)
+        Column(modifier = Modifier.padding(start = 16.dp).weight(1f)) {
+            Text("Advanced Settings", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            Text("Pitch, Powerplays, Officials & Streaming", color = PreviewMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 5.dp))
         }
-        Text("v", color = PreviewMuted, fontSize = 13.sp, fontWeight = FontWeight.Black)
+        Text("v", color = PreviewMuted, fontSize = 20.sp, fontWeight = FontWeight.Black)
     }
 }
 
@@ -407,32 +427,32 @@ private fun AdvancedSettingsCard() {
 private fun ScheduleMatchSection() {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PreviewCalendarIcon(Modifier.size(14.dp), PreviewAccent)
-            Text(" Schedule Match", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+            PreviewCalendarIcon(Modifier.size(16.dp), PreviewAccent)
+            Text(" Schedule Match", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
         }
-        Text("For matches not starting immediately", color = PreviewMuted, fontSize = 8.sp, fontWeight = FontWeight.Medium)
+        Text("For matches not starting immediately", color = PreviewMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .pureNeonGlow(NeonYellow.copy(alpha = 0.65f), 18.dp, 12.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(PreviewCard)
-                .border(1.dp, Color(0xFF3E5B1B), RoundedCornerShape(10.dp))
-                .padding(9.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            ScheduleField("MATCH DATE", "03 June 2026") { PreviewCalendarIcon(Modifier.size(16.dp), PreviewAccent) }
-            ScheduleField("MATCH TIME", "08:00 PM") { PreviewClockIcon(Modifier.size(16.dp), PreviewAccent) }
+            ScheduleField("MATCH DATE", "03 June 2026") { PreviewCalendarIcon(Modifier.size(20.dp), PreviewAccent) }
+            ScheduleField("MATCH TIME", "08:00 PM") { PreviewClockIcon(Modifier.size(20.dp), PreviewAccent) }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(7.dp))
+                    .height(46.dp)
+                    .clip(RoundedCornerShape(8.dp))
                     .background(Color(0xFF102019)),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                PreviewCheckCircle(Modifier.size(14.dp), PreviewAccent)
-                Text(" CONFIRM SCHEDULE", color = PreviewAccent, fontSize = 8.sp, fontWeight = FontWeight.Black)
+                PreviewCheckCircle(Modifier.size(18.dp), PreviewAccent)
+                Text(" CONFIRM SCHEDULE", color = PreviewAccent, fontSize = 11.sp, fontWeight = FontWeight.Black)
             }
         }
     }
@@ -443,18 +463,18 @@ private fun ScheduleField(label: String, value: String, icon: @Composable () -> 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .clip(RoundedCornerShape(7.dp))
+            .height(56.dp)
+            .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFF111B2B))
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         icon()
-        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
-            Text(label, color = PreviewMuted, fontSize = 6.sp, fontWeight = FontWeight.Black)
-            Text(value, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black)
+        Column(modifier = Modifier.padding(start = 14.dp).weight(1f)) {
+            Text(label, color = PreviewMuted, fontSize = 9.sp, fontWeight = FontWeight.Black)
+            Text(value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
         }
-        Text(">", color = PreviewMuted, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        Text(">", color = PreviewMuted, fontSize = 18.sp, fontWeight = FontWeight.Black)
     }
 }
 
@@ -586,5 +606,22 @@ private fun PreviewCheckCircle(modifier: Modifier, tint: Color) {
             lineTo(size.width * 0.7f, size.height * 0.38f)
         }
         drawPath(path, tint, style = stroke)
+    }
+}
+
+fun Modifier.pureNeonGlow(color: Color, radius: androidx.compose.ui.unit.Dp = 16.dp, cornerRadius: androidx.compose.ui.unit.Dp = 12.dp, isCircle: Boolean = false) = this.drawBehind {
+    if (color == Color.Transparent) return@drawBehind
+    val paint = Paint().apply {
+        this.color = color
+        this.asFrameworkPaint().apply {
+            maskFilter = android.graphics.BlurMaskFilter(radius.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
+        }
+    }
+    drawIntoCanvas { canvas ->
+        if (isCircle) {
+            canvas.drawCircle(center, size.width / 2f, paint)
+        } else {
+            canvas.drawRoundRect(0f, 0f, size.width, size.height, cornerRadius.toPx(), cornerRadius.toPx(), paint)
+        }
     }
 }
