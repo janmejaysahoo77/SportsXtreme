@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "896267230604",
+    "project_id": "sportsxtreme-95fbb",
+    "storage_bucket": "sportsxtreme-95fbb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:896267230604:android:cd478f030b84b9b1da4aa9",
+        "android_client_info": {
+          "package_name": "com.example.sportsxtreme"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCaX-hTBiadVwPAXvXKbIHjF-jy2lmp-t8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

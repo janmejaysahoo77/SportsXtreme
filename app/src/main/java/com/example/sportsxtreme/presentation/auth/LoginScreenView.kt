@@ -210,7 +210,7 @@ class LoginScreenView @JvmOverloads constructor(
             addView(socialButton(context, "GOOGLE", R.drawable.googleicon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
                 rightMargin = dp(6)
             })
-            addView(socialButton(context, "APPLE", null), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+            addView(socialButton(context, "FACEBOOK", R.drawable.facebook_icon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
                 leftMargin = dp(6)
             })
         }

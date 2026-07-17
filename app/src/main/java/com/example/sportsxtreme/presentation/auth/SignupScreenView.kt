@@ -1,6 +1,8 @@
 package com.example.sportsxtreme.presentation.auth
 
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.common.Resource
+import com.example.sportsxtreme.data.repository.AuthRepositoryImpl
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -32,6 +34,7 @@ import android.text.method.PasswordTransformationMethod
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.util.AttributeSet
+import android.util.Patterns
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -43,6 +46,11 @@ import android.widget.ScrollView
 import android.widget.Space
 import android.widget.TextView
 import android.widget.Toast
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -62,6 +70,11 @@ class SignupScreenView @JvmOverloads constructor(
     private lateinit var phoneInput: EditText
     private lateinit var passwordInput: EditText
     private lateinit var confirmPasswordInput: EditText
+    private lateinit var errorMessageView: TextView
+    private lateinit var createAccountButton: TextView
+    private val authRepository = AuthRepositoryImpl()
+    private val signupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var isSignupLoading = false
 
     init {
         isFocusable = true
@@ -117,6 +130,8 @@ class SignupScreenView @JvmOverloads constructor(
             transformationMethod = PasswordTransformationMethod.getInstance()
         }
 
+        errorMessageView = errorMessage(context)
+        content.addView(errorMessageView, fullWidthParams(bottom = dp(8)))
         content.addView(primaryButton(context), fullWidthParams(top = dp(10), bottom = dp(16), height = dp(52)))
         content.addView(divider(context), fullWidthParams(bottom = dp(16), height = dp(18)))
         content.addView(socialRow(context), fullWidthParams(bottom = dp(22), height = dp(44)))
@@ -165,6 +180,7 @@ class SignupScreenView @JvmOverloads constructor(
 
     private fun primaryButton(context: Context): TextView {
         return TextView(context).apply {
+            createAccountButton = this
             text = context.getString(R.string.str_create_account)
             gravity = Gravity.CENTER
             setTextColor(onPrimary)
@@ -176,9 +192,71 @@ class SignupScreenView @JvmOverloads constructor(
                 setColor(primaryFixed)
             }
             setOnClickListener {
-                (context as? MainActivity)?.showSportSelectionScreen()
+                handleSignup(context)
             }
         }
+    }
+
+    private fun errorMessage(context: Context): TextView {
+        return TextView(context).apply {
+            visibility = View.GONE
+            setTextColor(Color.rgb(255, 112, 112))
+            textSize = 11f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            includeFontPadding = false
+        }
+    }
+
+    private fun handleSignup(context: Context) {
+        if (isSignupLoading) return
+
+        val name = fullNameInput.text.toString().trim()
+        val email = emailInput.text.toString().trim()
+        val password = passwordInput.text.toString()
+        val confirmPassword = confirmPasswordInput.text.toString()
+
+        val validationError = validateSignup(name, email, password, confirmPassword)
+        if (validationError != null) {
+            showError(validationError)
+            return
+        }
+
+        setLoading(true)
+        signupScope.launch {
+            when (val result = authRepository.signup(name, email, password)) {
+                is Resource.Success -> {
+                    showError(null)
+                    (context as? MainActivity)?.showSportSelectionScreen()
+                }
+                is Resource.Error -> {
+                    showError(result.message ?: "Signup failed")
+                }
+                is Resource.Loading -> Unit
+            }
+            setLoading(false)
+        }
+    }
+
+    private fun validateSignup(name: String, email: String, password: String, confirmPassword: String): String? {
+        return when {
+            name.isBlank() -> "Name is required"
+            !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> "Enter a valid email"
+            password.length < 6 -> "Password must be at least 6 characters"
+            password != confirmPassword -> "Passwords do not match"
+            else -> null
+        }
+    }
+
+    private fun setLoading(loading: Boolean) {
+        isSignupLoading = loading
+        createAccountButton.isEnabled = !loading
+        createAccountButton.alpha = if (loading) 0.72f else 1f
+        createAccountButton.text = if (loading) "CREATING..." else context.getString(R.string.str_create_account)
+    }
+
+    private fun showError(message: String?) {
+        errorMessageView.text = message.orEmpty()
+        errorMessageView.visibility = if (message.isNullOrBlank()) View.GONE else View.VISIBLE
     }
 
     private fun divider(context: Context): View {
@@ -212,7 +290,7 @@ class SignupScreenView @JvmOverloads constructor(
             addView(socialButton(context, "GOOGLE", R.drawable.googleicon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
                 rightMargin = dp(6)
             })
-            addView(socialButton(context, "APPLE", null), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+            addView(socialButton(context, "FACEBOOK", R.drawable.facebook_icon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
                 leftMargin = dp(6)
             })
         }
@@ -305,6 +383,11 @@ class SignupScreenView @JvmOverloads constructor(
 
     private fun dp(value: Int): Int {
         return (value * resources.displayMetrics.density + 0.5f).toInt()
+    }
+
+    override fun onDetachedFromWindow() {
+        signupScope.cancel()
+        super.onDetachedFromWindow()
     }
 
     private class BackgroundLayer(context: Context) : View(context) {
