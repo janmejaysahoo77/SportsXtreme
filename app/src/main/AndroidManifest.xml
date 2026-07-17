@@ -12,70 +12,70 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SportsXtreme">
         <activity
-            android:name=".QRForPlayerAddingActivity"
+            android:name=".presentation.team.QRForPlayerAddingActivity"
             android:exported="false" />
         <activity
-            android:name=".ProfileActivity"
+            android:name=".presentation.profile.ProfileActivity"
             android:exported="false" />
         <activity
-            android:name=".AddPlayerByMobileNumberActivity"
+            android:name=".presentation.team.AddPlayerByMobileNumberActivity"
             android:exported="false" />
         <activity
-            android:name=".AddPlayerActivity"
+            android:name=".presentation.team.AddPlayerActivity"
             android:exported="false" />
         <activity
-            android:name=".FinalSquadActivity"
+            android:name=".presentation.team.FinalSquadActivity"
             android:exported="false" />
         <activity
-            android:name=".StartMatchPreviewActivity"
+            android:name=".presentation.match.StartMatchPreviewActivity"
             android:exported="false" />
         <activity
-            android:name=".TossActivity"
+            android:name=".presentation.match.TossActivity"
             android:exported="false" />
         <activity
-            android:name=".FinalPageBeforeScoringActivity"
+            android:name=".presentation.scoring.FinalPageBeforeScoringActivity"
             android:exported="false" />
         <activity
-            android:name=".MainScoringActivity"
+            android:name=".presentation.scoring.MainScoringActivity"
             android:exported="false" />
         <activity
-            android:name=".ViewDetailsScreenWhileStartMatch"
+            android:name=".presentation.match.ViewDetailsScreenWhileStartMatch"
             android:exported="false" />
         <activity
-            android:name=".SelectTeamAorBActivity"
+            android:name=".presentation.match.SelectTeamAorBActivity"
             android:exported="false" />
         <activity
-            android:name=".SelectPlayingTeamsActivity"
+            android:name=".presentation.match.SelectPlayingTeamsActivity"
             android:exported="false" />
         <activity
-            android:name=".StartMatchActivity"
+            android:name=".presentation.match.StartMatchActivity"
             android:exported="false" />
         <activity
-            android:name=".LeagueTournamentFlowActivity"
+            android:name=".presentation.tournament.LeagueTournamentFlowActivity"
             android:exported="false" />
         <activity
-            android:name=".LeagueMatchSetupActivity"
+            android:name=".presentation.tournament.LeagueMatchSetupActivity"
             android:exported="false" />
         <activity
-            android:name=".TournamentRequirementsActivity"
+            android:name=".presentation.tournament.TournamentRequirementsActivity"
             android:exported="false" />
         <activity
-            android:name=".TournamentRegistrationActivity"
+            android:name=".presentation.tournament.TournamentRegistrationActivity"
             android:exported="false" />
         <activity
-            android:name=".ShoppingActivity"
+            android:name=".presentation.store.ShoppingActivity"
             android:exported="false" />
         <activity
-            android:name=".ScorecardActivity"
+            android:name=".presentation.scoring.ScorecardActivity"
             android:exported="false" />
         <activity
-            android:name=".ViewAllScoreCardActivity"
+            android:name=".presentation.scoring.ViewAllScoreCardActivity"
             android:exported="false" />
         <activity
-            android:name=".XtremeMediaActivity"
+            android:name=".presentation.media.XtremeMediaActivity"
             android:exported="false" />
         <activity
-            android:name=".MainActivity"
+            android:name=".presentation.auth.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.SportsXtreme.Splash">
             <intent-filter>
