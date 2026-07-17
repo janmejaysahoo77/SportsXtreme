@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -72,6 +73,7 @@ private val ScoringBlue = Color(0xFF00D2FF)
 @Composable
 private fun MainScoringScreen(onBack: () -> Unit) {
     var showActions by remember { mutableStateOf(false) }
+    var wagonRun by remember { mutableStateOf<Int?>(null) }
 
     Box(
         modifier = Modifier
@@ -98,8 +100,8 @@ private fun MainScoringScreen(onBack: () -> Unit) {
                 BowlerStatusCard()
                 CurrentOverCard()
                 LastBallChip()
-                RunPad()
-                Spacer(Modifier.height(if (showActions) 305.dp else 54.dp))
+                RunPad(onRunClick = { wagonRun = it })
+                Spacer(Modifier.height(if (showActions) 305.dp else if (wagonRun != null) 390.dp else 54.dp))
             }
         }
         MoreActionsBar(
@@ -111,6 +113,13 @@ private fun MainScoringScreen(onBack: () -> Unit) {
             AdvancedOptionsSheet(
                 modifier = Modifier.align(Alignment.BottomCenter),
                 onClose = { showActions = false }
+            )
+        }
+        wagonRun?.let { runs ->
+            WagonWheelBottomSheet(
+                runs = runs,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                onClose = { wagonRun = null }
             )
         }
     }
@@ -305,7 +314,7 @@ private fun LastBallChip() {
 }
 
 @Composable
-private fun RunPad() {
+private fun RunPad(onRunClick: (Int) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         listOf(
             listOf("0", "1", "2"),
@@ -315,7 +324,16 @@ private fun RunPad() {
         ).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { label ->
-                    ScoreKey(label, Modifier.weight(1f))
+                    val run = label.substringBefore("\n").toIntOrNull()
+                    ScoreKey(
+                        label = label,
+                        modifier = Modifier.weight(1f),
+                        onClick = if (run != null && run in 0..6 && run != 5) {
+                            { onRunClick(run) }
+                        } else {
+                            null
+                        }
+                    )
                 }
             }
         }
@@ -323,7 +341,7 @@ private fun RunPad() {
 }
 
 @Composable
-private fun ScoreKey(label: String, modifier: Modifier = Modifier) {
+private fun ScoreKey(label: String, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val isFour = label.startsWith("4")
     val isSix = label.startsWith("6")
     val isOut = label == "OUT"
@@ -338,13 +356,99 @@ private fun ScoreKey(label: String, modifier: Modifier = Modifier) {
             .height(42.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(ScoringCard)
-            .border(if (border == Color.Transparent) 0.dp else 1.dp, border, RoundedCornerShape(8.dp)),
+            .border(if (border == Color.Transparent) 0.dp else 1.dp, border, RoundedCornerShape(8.dp))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center
     ) {
         val parts = label.split("\n")
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(parts[0], color = when { isFour -> ScoringBlue; isSix -> ScoringAccent; isOut -> Color(0xFFFFB0B0); else -> Color.White }, fontSize = if (parts[0].length == 1) 20.sp else 11.sp, fontWeight = FontWeight.Black)
             if (parts.size > 1) Text(parts[1], color = if (isFour) ScoringBlue else ScoringAccent, fontSize = 6.sp, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun WagonWheelBottomSheet(runs: Int, modifier: Modifier = Modifier, onClose: () -> Unit) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(390.dp)
+            .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+            .background(Color(0xFFF6F6F6))
+            .padding(top = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(34.dp)
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Text("X", color = Color(0xFF1B2024), fontSize = 22.sp, fontWeight = FontWeight.Medium, modifier = Modifier.clickable(onClick = onClose))
+            Column(modifier = Modifier.padding(start = 18.dp).weight(1f)) {
+                Text("Yy", color = Color(0xFFB5B5B5), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("$runs Runs", color = Color(0xFF008E55), fontSize = 12.sp, fontWeight = FontWeight.Black)
+            }
+            Text("Skip Match", color = Color(0xFF5E5E5E), fontSize = 12.sp, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline, modifier = Modifier.padding(end = 18.dp))
+            Text("Skip Ball", color = Color(0xFF5E5E5E), fontSize = 12.sp, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
+        }
+        WagonWheel(modifier = Modifier.size(330.dp))
+    }
+}
+
+@Composable
+private fun WagonWheel(modifier: Modifier = Modifier) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val radius = size.minDimension * 0.49f
+            val center = Offset(size.width / 2f, size.height / 2f)
+
+            drawCircle(
+                brush = Brush.verticalGradient(
+                    listOf(Color(0xFF617E8B), Color(0xFF0A161D), Color(0xFF000000)),
+                    startY = center.y - radius,
+                    endY = center.y + radius
+                ),
+                radius = radius,
+                center = center
+            )
+            drawArc(Color(0xFF48B94C), 0f, 360f, true, topLeft = Offset(center.x - radius * 0.77f, center.y - radius * 0.77f), size = Size(radius * 1.54f, radius * 1.54f))
+            drawCircle(Color(0x5535C846), radius = radius * 0.53f, center = center)
+            drawCircle(Color.Transparent, radius = radius * 0.28f, center = center, style = Stroke(width = 1.dp.toPx()))
+
+            repeat(8) { index ->
+                val angle = Math.toRadians((index * 45 - 90).toDouble())
+                val end = Offset(
+                    (center.x + kotlin.math.cos(angle) * radius).toFloat(),
+                    (center.y + kotlin.math.sin(angle) * radius).toFloat()
+                )
+                drawLine(Color(0xCFE5EEF0), center, end, strokeWidth = 1.dp.toPx())
+            }
+            drawCircle(Color(0x88DDE9E8), radius = radius * 0.72f, center = center, style = Stroke(width = 1.dp.toPx()))
+            drawCircle(Color(0x88DDE9E8), radius = radius * 0.28f, center = center, style = Stroke(width = 1.dp.toPx()))
+            drawLine(
+                color = Color(0xFFFFD96A),
+                start = center,
+                end = Offset(center.x, center.y + radius * 0.16f),
+                strokeWidth = 8.dp.toPx(),
+                cap = StrokeCap.Square
+            )
+        }
+        Text("Off", color = Color(0x3348D860), fontSize = 30.sp, fontWeight = FontWeight.Black, modifier = Modifier.offset(x = (-68).dp, y = 20.dp))
+        Text("Leg", color = Color(0x3348D860), fontSize = 28.sp, fontWeight = FontWeight.Black, modifier = Modifier.offset(x = 72.dp, y = 20.dp))
+        listOf(
+            Triple((-54).dp, (-122).dp, "0"),
+            Triple(54.dp, (-122).dp, "0"),
+            Triple((-130).dp, (-44).dp, "0"),
+            Triple(130.dp, (-44).dp, "0"),
+            Triple((-130).dp, 62.dp, "0"),
+            Triple(130.dp, 62.dp, "0"),
+            Triple((-54).dp, 138.dp, "0"),
+            Triple(54.dp, 138.dp, "0")
+        ).forEach { (x, y, label) ->
+            Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.offset(x = x, y = y))
         }
     }
 }

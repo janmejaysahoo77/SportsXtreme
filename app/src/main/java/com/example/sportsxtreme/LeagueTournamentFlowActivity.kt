@@ -5,8 +5,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -40,8 +41,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -75,7 +77,7 @@ private val FlowMuted = Color(0xFF9AA9A6)
 
 @Composable
 private fun LeagueTournamentFlowScreen(onBack: () -> Unit, onContinue: () -> Unit) {
-    var advancedOpen by remember { mutableStateOf(true) }
+    var advancedOpen by remember { mutableStateOf(false) }
     var qualifiers by remember {
         mutableStateOf(
             listOf(
@@ -90,48 +92,56 @@ private fun LeagueTournamentFlowScreen(onBack: () -> Unit, onContinue: () -> Uni
         )
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(FlowBg)
-            .drawBehind {
-                drawCircle(Color(0x26264112), radius = size.width * 0.82f, center = Offset(size.width * 0.96f, size.height * 0.13f))
-                drawCircle(Color(0x151E72FF), radius = size.width * 0.62f, center = Offset(size.width * 0.08f, size.height * 0.72f))
-            }
+            .drawBehind { drawFlowBackground() }
     ) {
-        FlowTopBar(onBack)
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 11.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                "Choose the stages that will be used in this league tournament.",
-                color = FlowMuted,
-                fontSize = 9.sp,
-                lineHeight = 12.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            TournamentHeaderCard()
-            SectionLabel("RECOMMENDED STAGES", "MOST LEAGUE TOURNAMENTS FOLLOW THIS STRUCTURE")
-            RecommendedStageList()
-            TournamentFlowPreview()
-            AdvancedStagesCard(
-                expanded = advancedOpen,
-                options = qualifiers,
-                onToggleExpanded = { advancedOpen = !advancedOpen },
-                onToggleOption = { index ->
-                    qualifiers = qualifiers.mapIndexed { optionIndex, option ->
-                        if (optionIndex == index) option.copy(selected = !option.selected) else option
+            FlowTopBar(onBack)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    "Choose the stages that will be used in this league tournament.",
+                    color = FlowMuted,
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                TournamentHeaderCard()
+                SectionLabel("RECOMMENDED STAGES", "MOST LEAGUE TOURNAMENTS FOLLOW THIS STRUCTURE")
+                RecommendedStageList()
+                TournamentFlowPreview()
+                AdvancedStagesCard(
+                    expanded = advancedOpen,
+                    options = qualifiers,
+                    onToggleExpanded = { advancedOpen = !advancedOpen },
+                    onToggleOption = { index ->
+                        qualifiers = qualifiers.mapIndexed { optionIndex, option ->
+                            if (optionIndex == index) option.copy(selected = !option.selected) else option
+                        }
                     }
-                }
-            )
-            InfoNote("Tournament stages generate rankings, standings and progression automatically based on real-time data entry.")
-            ContinueFlowButton(onContinue)
+                )
+                InfoNote("Tournament stages generate rankings, standings and progression automatically based on real-time data entry.")
+                ContinueFlowButton(onContinue)
+            }
         }
     }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFlowBackground() {
+    drawRect(Brush.verticalGradient(listOf(Color(0xFF02060B), Color(0xFF07101A), Color(0xFF02060B))))
+    drawCircle(Color(0x20264112), radius = size.width * 0.78f, center = Offset(size.width * 0.96f, size.height * 0.13f))
+    drawCircle(Color(0x141E72FF), radius = size.width * 0.56f, center = Offset(size.width * 0.06f, size.height * 0.72f))
 }
 
 @Composable
@@ -139,7 +149,7 @@ private fun FlowTopBar(onBack: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(45.dp)
+            .height(56.dp)
             .background(FlowPanel)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -148,13 +158,13 @@ private fun FlowTopBar(onBack: () -> Unit) {
         Text(
             "League Tournament Flow",
             color = Color.White,
-            fontSize = 16.sp,
+            fontSize = 20.sp,
             fontWeight = FontWeight.Black,
             modifier = Modifier.padding(start = 13.dp).weight(1f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-        HelpCircle(Modifier.size(20.dp))
+        HelpCircle(Modifier.size(22.dp))
     }
 }
 
@@ -163,34 +173,65 @@ private fun TournamentHeaderCard() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(96.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .height(136.dp)
+            .drawBehind {
+                drawRoundRect(
+                    color = Color.Black.copy(alpha = 0.46f),
+                    topLeft = Offset(0f, 10.dp.toPx()),
+                    size = Size(size.width, size.height),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(14.dp.toPx(), 14.dp.toPx())
+                )
+                drawRoundRect(
+                    color = FlowAccent.copy(alpha = 0.12f),
+                    topLeft = Offset(0f, 3.dp.toPx()),
+                    size = Size(size.width, size.height),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(14.dp.toPx(), 14.dp.toPx())
+                )
+            }
+            .shadow(22.dp, RoundedCornerShape(14.dp), clip = false)
+            .clip(RoundedCornerShape(14.dp))
             .background(FlowCardAlt)
-            .border(1.dp, Color(0xFF50612A), RoundedCornerShape(10.dp))
-            .padding(9.dp),
+            .drawBehind {
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.22f),
+                    radius = size.width * 0.34f,
+                    center = Offset(size.width * 1.02f, -size.height * 0.08f)
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.12f),
+                    radius = size.width * 0.48f,
+                    center = Offset(size.width * 0.94f, size.height * 0.02f)
+                )
+                drawCircle(
+                    color = FlowAccent.copy(alpha = 0.1f),
+                    radius = size.width * 0.42f,
+                    center = Offset(size.width * 0.88f, size.height * 0.18f)
+                )
+            }
+            .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .width(5.dp)
-                .height(72.dp)
+                .width(6.dp)
+                .height(104.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(FlowAccent)
         )
-        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
-            Text("Dubai Premier League", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        Column(modifier = Modifier.padding(start = 13.dp).weight(1f)) {
+            Text("Dubai Premier League", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black, maxLines = 1)
             Box(
                 modifier = Modifier
-                    .padding(top = 3.dp)
-                    .clip(RoundedCornerShape(3.dp))
+                    .padding(top = 5.dp)
+                    .clip(RoundedCornerShape(4.dp))
                     .background(FlowAccent)
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
             ) {
-                Text("ACTIVE SEASON 2024", color = Color(0xFF111604), fontSize = 6.5.sp, fontWeight = FontWeight.Black)
+                Text("ACTIVE SEASON 2024", color = Color(0xFF111604), fontSize = 8.8.sp, fontWeight = FontWeight.Black)
             }
             Row(
-                modifier = Modifier.padding(top = 15.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.padding(top = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(17.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 HeaderMetric("Dubai", FlowGlyph.PIN)
@@ -200,12 +241,15 @@ private fun TournamentHeaderCard() {
         }
         Box(
             modifier = Modifier
-                .size(34.dp)
+                .size(44.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF1C2D11)),
+                .background(Color.White.copy(alpha = 0.1f))
+                .drawBehind {
+                    drawCircle(FlowAccent.copy(alpha = 0.2f), radius = size.minDimension * 0.7f)
+                },
             contentAlignment = Alignment.Center
         ) {
-            FlowGlyphIcon(FlowGlyph.SHARE, Modifier.size(18.dp), FlowAccent)
+            FlowGlyphIcon(FlowGlyph.SHARE, Modifier.size(22.dp), FlowAccent)
         }
     }
 }
@@ -214,45 +258,51 @@ private fun TournamentHeaderCard() {
 private fun HeaderMetric(text: String, glyph: FlowGlyph) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         FlowGlyphIcon(glyph, Modifier.size(12.dp), FlowAccent)
-        Text(text, color = Color.White, fontSize = 7.5.sp, lineHeight = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 4.dp))
+        Text(text, color = Color.White, fontSize = 10.sp, lineHeight = 10.5.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 5.dp))
     }
 }
 
 @Composable
 private fun SectionLabel(title: String, subtitle: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(title, color = Color(0xFFB8C4C0), fontSize = 9.sp, fontWeight = FontWeight.Black)
-        Text(subtitle, color = Color(0xFF7F8E8A), fontSize = 6.5.sp, fontWeight = FontWeight.Black)
+        Text(title, color = Color(0xFFB8C4C0), fontSize = 13.sp, fontWeight = FontWeight.Black)
+        Text(subtitle, color = Color(0xFF7F8E8A), fontSize = 8.sp, fontWeight = FontWeight.Black)
     }
 }
 
 @Composable
 private fun RecommendedStageList() {
-    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        StageRow(
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        StageCard(
             title = "League Stage",
             badge = "REQUIRED",
             description = "Every team plays against every other team and earns points.",
             glyph = FlowGlyph.LEAGUE,
+            iconRes = R.drawable.tournamentlogo,
             active = true
         )
-        StageRow(
+        StageCard(
             title = "Semi Final",
             description = "Top teams qualify for knockout matches.",
             glyph = FlowGlyph.FLAME,
+            iconRes = R.drawable.otherball,
             active = true
         )
-        StageRow(
+        StageCard(
             title = "Final",
             description = "Championship match to determine the winner.",
             glyph = FlowGlyph.TROPHY,
+            iconRes = R.drawable.finalicon,
             active = true
         )
-        StageRow(
+        StageCard(
             title = "Third Place Match",
             badge = "OPTIONAL",
             description = "Semi-final losers compete for third position.",
             glyph = FlowGlyph.MEDAL,
+            iconRes = null,
             active = true,
             muted = true
         )
@@ -260,35 +310,59 @@ private fun RecommendedStageList() {
 }
 
 @Composable
-private fun StageRow(title: String, description: String, glyph: FlowGlyph, active: Boolean, badge: String? = null, muted: Boolean = false) {
+private fun StageCard(
+    title: String,
+    description: String,
+    glyph: FlowGlyph,
+    iconRes: Int?,
+    active: Boolean,
+    badge: String? = null,
+    muted: Boolean = false
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(62.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .height(76.dp)
+            .shadow(16.dp, RoundedCornerShape(12.dp), clip = false)
+            .clip(RoundedCornerShape(12.dp))
             .background(if (muted) Color(0xFF132131) else FlowCard)
-            .border(1.dp, if (active && !muted) Color(0xFF48602C) else FlowStroke, RoundedCornerShape(8.dp))
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconFrame(glyph, muted)
-        Column(modifier = Modifier.padding(start = 11.dp).weight(1f)) {
+        Box(
+            modifier = Modifier
+                .size(58.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (muted) Color(0xFF1C2A35) else Color(0xFF172235)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (iconRes != null) {
+                Image(
+                    painter = painterResource(iconRes),
+                    contentDescription = title,
+                    modifier = Modifier.size(40.dp)
+                )
+            } else {
+                FlowGlyphIcon(glyph, Modifier.size(34.dp), Color(0xFF6E7C85))
+            }
+        }
+        Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, maxLines = 1)
+                Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1)
                 badge?.let { StageBadge(it) }
             }
             Text(
                 description,
                 color = if (muted) Color(0xFF7F8C91) else FlowMuted,
-                fontSize = 7.sp,
-                lineHeight = 9.sp,
+                fontSize = 9.2.sp,
+                lineHeight = 11.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = 4.dp),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
         }
-        CheckMarkBox(checked = active, enabled = !muted)
+        CheckMarkBox(checked = active, enabled = true)
     }
 }
 
@@ -311,8 +385,7 @@ private fun IconFrame(glyph: FlowGlyph, muted: Boolean = false) {
         modifier = Modifier
             .size(42.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(if (muted) Color(0xFF1C2A35) else Color(0xFF172235))
-            .border(1.dp, Color(0xFF263755), RoundedCornerShape(8.dp)),
+            .background(if (muted) Color(0xFF1C2A35) else Color(0xFF172235)),
         contentAlignment = Alignment.Center
     ) {
         FlowGlyphIcon(glyph, Modifier.size(24.dp), if (muted) Color(0xFF6E7C85) else FlowAccent)
@@ -324,46 +397,119 @@ private fun TournamentFlowPreview() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(126.dp)
-            .clip(RoundedCornerShape(9.dp))
+            .height(170.dp)
+            .shadow(18.dp, RoundedCornerShape(14.dp), clip = false)
+            .clip(RoundedCornerShape(14.dp))
             .background(
                 Brush.verticalGradient(
                     listOf(Color(0xFF121B2B), Color(0xFF08111F))
                 )
             )
-            .border(1.dp, FlowStroke, RoundedCornerShape(9.dp))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 11.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("TOURNAMENT FLOW", color = Color(0xFF97A4AA), fontSize = 7.sp, fontWeight = FontWeight.Black)
-        Text("VISUAL PREVIEW", color = Color(0xFF475566), fontSize = 5.5.sp, fontWeight = FontWeight.Black)
+        Text("TOURNAMENT FLOW", color = Color(0xFF97A4AA), fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+        Text("VISUAL PREVIEW", color = Color(0xFF475566), fontSize = 7.4.sp, fontWeight = FontWeight.Black)
         Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-            Canvas(Modifier.fillMaxWidth().height(58.dp)) {
-                val y = size.height * 0.5f
+            Canvas(Modifier.fillMaxWidth().height(100.dp)) {
+                val y = 42.dp.toPx()
                 val start = size.width * 0.12f
                 val mid = size.width * 0.5f
                 val end = size.width * 0.88f
-                drawLine(FlowAccent, Offset(start, y), Offset(end, y), strokeWidth = 2.2.dp.toPx(), cap = StrokeCap.Round)
-                listOf(start, mid, end).forEach { x ->
-                    drawCircle(Color(0x3FC1FF00), radius = 27.dp.toPx(), center = Offset(x, y))
-                    drawCircle(FlowAccent, radius = 20.dp.toPx(), center = Offset(x, y), style = Stroke(width = 2.dp.toPx()))
-                    drawCircle(Color(0xFF122019), radius = 15.dp.toPx(), center = Offset(x, y))
-                }
+                drawLine(FlowAccent.copy(alpha = 0.12f), Offset(start, y), Offset(end, y), strokeWidth = 8.dp.toPx(), cap = StrokeCap.Round)
+                drawLine(FlowAccent.copy(alpha = 0.38f), Offset(start, y), Offset(end, y), strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
+                drawLine(FlowAccent, Offset(start, y), Offset(end, y), strokeWidth = 1.8.dp.toPx(), cap = StrokeCap.Round)
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                PreviewNode("LEAGUE", FlowGlyph.LEAGUE)
-                PreviewNode("SEMI", FlowGlyph.FLAME)
-                PreviewNode("FINAL", FlowGlyph.TROPHY)
+                PreviewNode("LEAGUE", R.drawable.tournamentlogo)
+                PreviewNode("SEMI", R.drawable.otherball)
+                PreviewNode("FINAL", R.drawable.finalicon)
             }
         }
     }
 }
 
 @Composable
-private fun PreviewNode(label: String, glyph: FlowGlyph) {
+private fun PreviewNode(label: String, iconRes: Int) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        FlowGlyphIcon(glyph, Modifier.size(24.dp), if (glyph == FlowGlyph.FLAME) Color(0xFFFF6D2E) else FlowAccent)
-        Text(label, color = Color.White, fontSize = 6.5.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 17.dp))
+        Box(
+            modifier = Modifier.size(82.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val center = Offset(size.width * 0.5f, size.height * 0.5f)
+                val maxGlow = size.minDimension * 0.48f
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.16f),
+                            FlowAccent.copy(alpha = 0.30f),
+                            FlowAccent.copy(alpha = 0.12f),
+                            Color.Transparent
+                        ),
+                        center = center,
+                        radius = maxGlow
+                    ),
+                    radius = maxGlow,
+                    center = center
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            FlowAccent.copy(alpha = 0.34f),
+                            FlowAccent.copy(alpha = 0.08f),
+                            Color.Transparent
+                        ),
+                        center = center,
+                        radius = size.minDimension * 0.62f
+                    ),
+                    radius = size.minDimension * 0.62f,
+                    center = center
+                )
+                drawCircle(FlowAccent.copy(alpha = 0.18f), radius = size.minDimension * 0.36f, center = center, style = Stroke(width = 10.dp.toPx()))
+                drawCircle(FlowAccent.copy(alpha = 0.56f), radius = size.minDimension * 0.33f, center = center, style = Stroke(width = 4.dp.toPx()))
+                drawCircle(Color.White.copy(alpha = 0.32f), radius = size.minDimension * 0.31f, center = center, style = Stroke(width = 1.1.dp.toPx()))
+                drawCircle(Color(0xFF0B1410), radius = size.minDimension * 0.27f, center = center)
+                drawArc(
+                    Color.White.copy(alpha = 0.72f),
+                    startAngle = -80f,
+                    sweepAngle = 48f,
+                    useCenter = false,
+                    topLeft = Offset(size.width * 0.2f, size.height * 0.2f),
+                    size = Size(size.width * 0.6f, size.height * 0.6f),
+                    style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round)
+                )
+                drawArc(
+                    FlowAccent.copy(alpha = 0.8f),
+                    startAngle = 132f,
+                    sweepAngle = 64f,
+                    useCenter = false,
+                    topLeft = Offset(size.width * 0.18f, size.height * 0.18f),
+                    size = Size(size.width * 0.64f, size.height * 0.64f),
+                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF101923))
+                    .drawBehind {
+                        drawCircle(FlowAccent.copy(alpha = 0.22f), radius = size.minDimension * 0.62f)
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(iconRes),
+                    contentDescription = label,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        }
+        Text(label, color = Color.White, fontSize = 9.5.sp, fontWeight = FontWeight.Black)
     }
 }
 
@@ -377,38 +523,80 @@ private fun AdvancedStagesCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(9.dp))
-            .background(FlowCard)
-            .border(1.dp, FlowStroke, RoundedCornerShape(9.dp))
-            .padding(11.dp)
+            .shadow(18.dp, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 8.dp, bottomEnd = 8.dp), clip = false)
+            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 8.dp, bottomEnd = 8.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xF20C1624), Color(0xF2070D16))
+                )
+            )
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)
     ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .width(38.dp)
+                .height(3.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(Color(0xFF26394E))
+        )
+        Spacer(Modifier.height(7.dp))
         Row(
             modifier = Modifier.fillMaxWidth().clickable(onClick = onToggleExpanded),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Advanced Tournament Stages", color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Black)
-                Text("FOR IPL-STYLE AND PROFESSIONAL TOURNAMENTS", color = Color(0xFF8E9AA5), fontSize = 6.3.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 3.dp))
+                Text("Advanced Tournament Stages", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text("FOR IPL-STYLE AND PROFESSIONAL TOURNAMENTS", color = Color(0xFF8E9AA5), fontSize = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 2.dp))
             }
             FlowChevron(Modifier.size(16.dp), expanded)
         }
         if (expanded) {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                options.take(3).forEachIndexed { index, option ->
-                    AdvancedOptionRow(option, onClick = { onToggleOption(index) })
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    options.drop(3).forEachIndexed { index, option ->
-                        MiniOptionChip(
-                            option = option,
-                            modifier = Modifier.weight(1f),
-                            onClick = { onToggleOption(index + 3) }
-                        )
+                options.chunked(2).forEachIndexed { rowIndex, rowItems ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        rowItems.forEachIndexed { columnIndex, option ->
+                            val index = rowIndex * 2 + columnIndex
+                            BottomSheetOptionRow(
+                                option = option,
+                                modifier = Modifier.weight(1f),
+                                onClick = { onToggleOption(index) }
+                            )
+                        }
+                        if (rowItems.size == 1) {
+                            Spacer(Modifier.weight(1f))
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BottomSheetOptionRow(option: FlowOption, modifier: Modifier, onClick: () -> Unit) {
+    Row(
+        modifier = modifier
+            .height(46.dp)
+            .shadow(7.dp, RoundedCornerShape(8.dp), clip = false)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (option.selected) Color(0xFF17291D) else Color(0xFF111C2A))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FlowGlyphIcon(FlowGlyph.DOT, Modifier.size(8.dp), Color(0xFFFFA63C))
+        Text(
+            option.title,
+            color = Color.White,
+            fontSize = 10.2.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.padding(start = 8.dp).weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        CheckMarkBox(checked = option.selected, enabled = true, small = true)
     }
 }
 
@@ -431,16 +619,16 @@ private fun AdvancedOptionRow(option: FlowOption, onClick: () -> Unit) {
 private fun MiniOptionChip(option: FlowOption, modifier: Modifier, onClick: () -> Unit) {
     Row(
         modifier = modifier
-            .height(25.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(Color(0xFF142033))
-            .border(1.dp, Color(0xFF2B3B54), RoundedCornerShape(6.dp))
+            .height(38.dp)
+            .shadow(6.dp, RoundedCornerShape(8.dp), clip = false)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (option.selected) Color(0xFF1A2C20) else Color(0xFF111C2A))
             .clickable(onClick = onClick)
-            .padding(horizontal = 5.dp),
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         FlowGlyphIcon(FlowGlyph.DOT, Modifier.size(9.dp), Color(0xFFFFA63C))
-        Text(option.title, color = Color.White, fontSize = 6.5.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp).weight(1f))
+        Text(option.title, color = Color.White, fontSize = 7.5.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp).weight(1f))
         CheckMarkBox(checked = option.selected, enabled = true, small = true)
     }
 }
@@ -451,14 +639,14 @@ private fun InfoNote(text: String) {
         modifier = Modifier
             .fillMaxWidth()
             .height(54.dp)
+            .shadow(10.dp, RoundedCornerShape(8.dp), clip = false)
             .clip(RoundedCornerShape(8.dp))
-            .background(FlowCard)
-            .border(1.dp, FlowStroke, RoundedCornerShape(8.dp))
+            .background(Color(0xB20A111B))
             .padding(horizontal = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         InfoGlyph(Modifier.size(15.dp))
-        Text(text, color = Color(0xFFAEBBB8), fontSize = 8.sp, lineHeight = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 9.dp))
+        Text(text, color = Color(0xFFAEBBB8), fontSize = 9.sp, lineHeight = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 9.dp).weight(1f))
     }
 }
 
@@ -467,13 +655,14 @@ private fun ContinueFlowButton(onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .height(54.dp)
+            .shadow(12.dp, RoundedCornerShape(10.dp), clip = false)
+            .clip(RoundedCornerShape(8.dp))
             .background(FlowAccent)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text("CONTINUE", color = Color(0xFF111604), fontSize = 10.sp, fontWeight = FontWeight.Black)
+        Text("CONTINUE", color = Color(0xFF111604), fontSize = 12.sp, fontWeight = FontWeight.Black)
     }
 }
 

@@ -23,7 +23,8 @@ class XtremeSectionView(
     private val bodyText: String,
     private val selectedMode: SectionMode,
     private val logoRes: Int? = null,
-    private val useCartLogo: Boolean = false
+    private val useCartLogo: Boolean = false,
+    private val bodyContent: ((Context) -> View)? = null
 ) : FrameLayout(context) {
 
     enum class SectionMode { SPORTS, MEDIA, CART }
@@ -41,14 +42,19 @@ class XtremeSectionView(
             orientation = LinearLayout.VERTICAL
             addView(topBar(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(FrameLayout(context).apply {
-                addView(TextView(context).apply {
-                    text = bodyText
-                    gravity = Gravity.CENTER
-                    setTextColor(Color.WHITE)
-                    textSize = 28f
-                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
-                    includeFontPadding = false
-                }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+                val customBody = bodyContent?.invoke(context)
+                if (customBody != null) {
+                    addView(customBody, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+                } else {
+                    addView(TextView(context).apply {
+                        text = bodyText
+                        gravity = Gravity.CENTER
+                        setTextColor(Color.WHITE)
+                        textSize = 28f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                        includeFontPadding = false
+                    }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+                }
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         }
     }

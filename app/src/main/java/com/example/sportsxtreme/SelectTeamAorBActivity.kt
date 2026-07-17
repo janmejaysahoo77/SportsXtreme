@@ -4,18 +4,29 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,18 +38,22 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -74,35 +89,71 @@ private val TeamAAccent = Color(0xFFC1FF00)
 private val TeamABg = Color(0xFF070D18)
 private val TeamAPanel = Color(0xFF090F1C)
 private val TeamACard = Color(0xFF151B28)
-private val TeamAStroke = Color(0xFF2D3548)
 private val TeamAMuted = Color(0xFFAAB3B8)
 
 @Composable
 private fun SelectTeamAScreen(teamSlot: String, onBack: () -> Unit, onDone: () -> Unit, onViewDetails: () -> Unit) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    var swipeAmount by remember { mutableStateOf(0f) }
+    var previousTab by remember { mutableIntStateOf(0) }
+
+    fun switchTab(tab: Int) {
+        if (tab != selectedTab) {
+            previousTab = selectedTab
+            selectedTab = tab
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(TeamABg)
+            .drawBehind {
+                drawRect(Brush.verticalGradient(listOf(Color(0xFF020712), Color(0xFF081323), Color(0xFF030712))))
+            }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             SelectTeamATopBar(title = if (selectedTab == 0) "Select team $teamSlot" else "Add Team", onBack = onBack)
-            TeamATabs(selectedTab = selectedTab, onSelectTab = { selectedTab = it })
+            TeamATabs(selectedTab = selectedTab, onSelectTab = { switchTab(it) })
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { swipeAmount = 0f },
+                            onHorizontalDrag = { _, dragAmount -> swipeAmount += dragAmount },
+                            onDragEnd = {
+                                if (swipeAmount < -70f && selectedTab == 0) switchTab(1)
+                                if (swipeAmount > 70f && selectedTab == 1) switchTab(0)
+                                swipeAmount = 0f
+                            },
+                            onDragCancel = { swipeAmount = 0f }
+                        )
+                    }
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 14.dp, vertical = if (selectedTab == 0) 23.dp else 17.dp),
-                verticalArrangement = Arrangement.spacedBy(if (selectedTab == 0) 18.dp else 12.dp)
+                    .padding(horizontal = 12.dp, vertical = if (selectedTab == 0) 16.dp else 14.dp),
+                verticalArrangement = Arrangement.spacedBy(if (selectedTab == 0) 14.dp else 13.dp)
             ) {
-                if (selectedTab == 0) {
-                    TournamentTeamsContent(
-                        onAddTeams = { selectedTab = 1 },
-                        onViewDetails = onViewDetails
-                    )
-                } else {
-                    AddTeamContent()
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = {
+                        val forward = targetState > previousTab
+                        val enter = slideInHorizontally(animationSpec = tween(260)) { width -> if (forward) width else -width } + fadeIn(tween(180))
+                        val exit = slideOutHorizontally(animationSpec = tween(260)) { width -> if (forward) -width else width } + fadeOut(tween(140))
+                        (enter togetherWith exit).using(SizeTransform(clip = false))
+                    },
+                    label = "team-tab-content"
+                ) { tab ->
+                    Column(verticalArrangement = Arrangement.spacedBy(if (tab == 0) 14.dp else 13.dp)) {
+                        if (tab == 0) {
+                            TournamentTeamsContent(
+                                onAddTeams = { switchTab(1) },
+                                onViewDetails = onViewDetails
+                            )
+                        } else {
+                            AddTeamContent()
+                        }
+                    }
                 }
                 Spacer(Modifier.height(92.dp))
             }
@@ -111,19 +162,20 @@ private fun SelectTeamAScreen(teamSlot: String, onBack: () -> Unit, onDone: () -
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(TeamABg)
-                .padding(horizontal = 14.dp, vertical = 11.dp)
+                .background(Color(0xE6070D18))
+                .padding(horizontal = 12.dp, vertical = 11.dp)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(51.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(TeamAAccent)
+                    .height(56.dp)
+                    .shadow(20.dp, RoundedCornerShape(12.dp), clip = false)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Brush.horizontalGradient(listOf(TeamAAccent, Color(0xFF9BFF00))))
                     .clickable(onClick = onDone),
                 contentAlignment = Alignment.Center
             ) {
-                Text(if (selectedTab == 0) "DONE" else "Add Team", color = Color(0xFF111604), fontSize = 14.sp, fontWeight = FontWeight.Black)
+                Text(if (selectedTab == 0) "DONE" else "ADD TEAM", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black)
             }
         }
     }
@@ -134,8 +186,8 @@ private fun SelectTeamATopBar(title: String, onBack: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp)
-            .background(TeamAPanel)
+            .height(60.dp)
+            .background(Color(0xE6090F1C))
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -143,9 +195,10 @@ private fun SelectTeamATopBar(title: String, onBack: () -> Unit) {
         Text(
             title,
             color = Color.White,
-            fontSize = 20.sp,
+            fontSize = 22.sp,
+            fontStyle = FontStyle.Italic,
             fontWeight = FontWeight.Black,
-            modifier = Modifier.padding(start = 26.dp).weight(1f),
+            modifier = Modifier.padding(start = 20.dp).weight(1f),
             maxLines = 1
         )
         TeamAQrIcon(Modifier.size(25.dp), Color.White)
@@ -158,8 +211,8 @@ private fun TeamATabs(selectedTab: Int, onSelectTab: (Int) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(44.dp)
-            .background(TeamAPanel)
+            .height(50.dp)
+            .background(Color(0xE6090F1C))
     ) {
         Row(
             modifier = Modifier
@@ -168,35 +221,51 @@ private fun TeamATabs(selectedTab: Int, onSelectTab: (Int) -> Unit) {
                 .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                "Tournament teams",
-                color = if (selectedTab == 0) Color.White else TeamAMuted,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.clickable { onSelectTab(0) }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                Text(
+                    "Tournament teams",
+                    color = if (selectedTab == 0) Color.White else TeamAMuted,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.clickable { onSelectTab(0) }
+                )
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                Text(
+                    "Add Teams",
+                    color = if (selectedTab == 1) Color.White else TeamAMuted,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.clickable { onSelectTab(1) }
+                )
+            }
+        }
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .padding(horizontal = 14.dp)
+        ) {
+            val tabWidth = maxWidth / 2
+            val targetStart = if (selectedTab == 0) 0.dp else tabWidth
+            val animatedStart by animateDpAsState(
+                targetValue = targetStart,
+                animationSpec = tween(240),
+                label = "team-tab-underline-offset"
             )
-            Text(
-                "Add Teams",
-                color = if (selectedTab == 1) TeamAAccent else TeamAMuted,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Black,
+            Box(
                 modifier = Modifier
-                    .padding(start = 34.dp)
-                    .clickable { onSelectTab(1) }
+                    .offset(x = animatedStart)
+                    .width(if (selectedTab == 0) 118.dp else 78.dp)
+                    .height(3.dp)
+                    .background(TeamAAccent)
             )
         }
         Box(
             modifier = Modifier
-                .padding(start = if (selectedTab == 0) 14.dp else 119.dp)
-                .width(if (selectedTab == 0) 107.dp else 72.dp)
-                .height(3.dp)
-                .background(TeamAAccent)
-        )
-        Box(
-            modifier = Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(TeamAStroke)
+                .background(Color(0xFF172033))
         )
     }
 }
@@ -228,15 +297,15 @@ private fun SearchBox() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(53.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .background(TeamACard)
-            .border(1.dp, TeamAStroke, RoundedCornerShape(9.dp))
+            .height(58.dp)
+            .shadow(14.dp, RoundedCornerShape(14.dp), clip = false)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.horizontalGradient(listOf(Color(0xFF111A29), Color(0xFF0C1726))))
             .padding(horizontal = 17.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         TeamASearchIcon(Modifier.size(22.dp), TeamAMuted)
-        Text("Quick search", color = TeamAMuted, fontSize = 16.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 13.dp))
+        Text("Quick search teams", color = TeamAMuted, fontSize = 16.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 13.dp))
     }
 }
 
@@ -246,21 +315,22 @@ private fun LeagueHeader(onAddTeams: () -> Unit) {
         Text(
             "League Matches",
             color = Color.White,
-            fontSize = 20.sp,
+            fontSize = 22.sp,
             fontStyle = FontStyle.Italic,
             fontWeight = FontWeight.Black,
             modifier = Modifier.weight(1f)
         )
         Box(
             modifier = Modifier
-                .height(22.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(TeamAAccent)
+                .height(30.dp)
+                .shadow(10.dp, RoundedCornerShape(8.dp), clip = false)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Brush.horizontalGradient(listOf(TeamAAccent, Color(0xFF98FF00))))
                 .clickable(onClick = onAddTeams)
                 .padding(horizontal = 17.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text("ADD TEAMS", color = Color(0xFF111604), fontSize = 10.sp, fontWeight = FontWeight.Black)
+            Text("ADD TEAMS", color = Color(0xFF111604), fontSize = 10.5.sp, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -268,16 +338,17 @@ private fun LeagueHeader(onAddTeams: () -> Unit) {
 @Composable
 private fun AddTeamContent() {
     Column {
-        Text("Create Team", color = Color.White, fontSize = 31.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        Text("Create Team", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Black, maxLines = 1)
         Text(
             "Add a new team to this tournament by\nentering the details below.",
             color = Color(0xFFC8D5D8),
-            fontSize = 9.sp,
-            lineHeight = 12.sp,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(top = 5.dp)
         )
     }
+    AddTeamHeroCard()
     TeamLogoUpload()
     TeamFormCard()
     JoinPlayerRow()
@@ -285,23 +356,66 @@ private fun AddTeamContent() {
 }
 
 @Composable
-private fun TeamLogoUpload() {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
+private fun AddTeamHeroCard() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(92.dp)
+            .shadow(16.dp, RoundedCornerShape(16.dp), clip = false)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Brush.horizontalGradient(listOf(Color(0xFF111D2F), Color(0xFF132414))))
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(84.dp)
+                .size(56.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(TeamAAccent),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("+", color = Color(0xFF111604), fontSize = 32.sp, fontWeight = FontWeight.Black)
+        }
+        Column(modifier = Modifier.padding(start = 13.dp).weight(1f)) {
+            Text("New Team Profile", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Text("Logo, captain and city setup", color = Color(0xFFBFCBD0), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text("DRAFT", color = TeamAAccent, fontSize = 9.sp, fontWeight = FontWeight.Black)
+            Text("READY", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 3.dp))
+        }
+    }
+}
+
+@Composable
+private fun TeamLogoUpload() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(104.dp)
+            .shadow(14.dp, RoundedCornerShape(16.dp), clip = false)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF101827))
+            .padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column {
+            Text("Team Logo", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+            Text("Optional identity badge", color = TeamAMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+        }
+        Box(
+            modifier = Modifier
+                .size(78.dp)
                 .drawDottedCircle(),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                TeamACameraIcon(Modifier.size(19.dp), TeamAAccent)
+                TeamACameraIcon(Modifier.size(20.dp), TeamAAccent)
                 Text(
-                    "Upload Team Logo\n(Optional)",
+                    "UPLOAD",
                     color = TeamAAccent,
-                    fontSize = 6.5.sp,
+                    fontSize = 7.5.sp,
                     lineHeight = 8.sp,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
@@ -339,11 +453,11 @@ private fun TeamFormCard() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF101827))
-            .border(1.dp, Color(0xFF50612A), RoundedCornerShape(8.dp))
-            .padding(horizontal = 13.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .shadow(16.dp, RoundedCornerShape(14.dp), clip = false)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.verticalGradient(listOf(Color(0xFF111C2D), Color(0xFF0B1322))))
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         TeamInputField("Team Name *", "Enter team name")
         TeamInputField("City / Town *", "Enter city or town")
@@ -355,17 +469,17 @@ private fun TeamFormCard() {
 @Composable
 private fun TeamInputField(label: String, placeholder: String) {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text(label, color = TeamAAccent, fontSize = 8.sp, fontWeight = FontWeight.Black)
+        Text(label, color = TeamAAccent, fontSize = 9.sp, fontWeight = FontWeight.Black)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(35.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFF313847))
-                .padding(horizontal = 10.dp),
+                .height(42.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF1C2636))
+                .padding(horizontal = 12.dp),
             contentAlignment = Alignment.CenterStart
         ) {
-            Text(placeholder, color = Color(0xFFC5CBD0), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            Text(placeholder, color = Color(0xFFC5CBD0), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -379,7 +493,12 @@ private fun JoinPlayerRow() {
         Box(
             modifier = Modifier
                 .size(17.dp)
-                .border(1.5.dp, TeamAAccent, RoundedCornerShape(1.dp))
+                .clip(RoundedCornerShape(3.dp))
+                .background(Color(0xFF172719))
+                .drawBehind {
+                    val stroke = Stroke(width = 1.5.dp.toPx())
+                    drawRoundRect(TeamAAccent, style = stroke, cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx(), 3.dp.toPx()))
+                }
         )
         Column(modifier = Modifier.padding(start = 9.dp)) {
             Text("Join this team as a player", color = TeamAAccent, fontSize = 9.sp, fontWeight = FontWeight.Black)
@@ -393,10 +512,10 @@ private fun AddTeamInfoCard() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(61.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .height(70.dp)
+            .shadow(14.dp, RoundedCornerShape(12.dp), clip = false)
+            .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFF101827))
-            .border(1.dp, Color(0xFF50612A), RoundedCornerShape(6.dp))
             .padding(horizontal = 17.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -417,22 +536,25 @@ private fun TeamRow(initials: String, title: String, subtitle: String, selected:
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(74.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(TeamACard)
-            .border(if (selected) 2.dp else 1.dp, if (selected) TeamAAccent else TeamAStroke, RoundedCornerShape(10.dp))
+            .height(88.dp)
+            .shadow(if (selected) 18.dp else 12.dp, RoundedCornerShape(14.dp), clip = false)
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                if (selected) Brush.horizontalGradient(listOf(Color(0xFF16270E), Color(0xFF101B2A)))
+                else Brush.horizontalGradient(listOf(Color(0xFF111B2A), Color(0xFF0D1624)))
+            )
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box {
             Box(
                 modifier = Modifier
-                    .size(50.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(color),
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Brush.linearGradient(listOf(color, color.copy(alpha = 0.55f)))),
                 contentAlignment = Alignment.Center
             ) {
-                Text(initials, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Text(initials, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
             }
             if (selected) {
                 Box(
@@ -448,13 +570,13 @@ private fun TeamRow(initials: String, title: String, subtitle: String, selected:
             }
         }
         Column(modifier = Modifier.padding(start = 13.dp).weight(1f)) {
-            Text(title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = if (selected) TeamAAccent else TeamAMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = if (selected) TeamAAccent else TeamAMuted, fontSize = 11.sp, fontWeight = FontWeight.Black, maxLines = 1)
         }
         Text(
             "Add Playing Team",
             color = Color(0xFFC9D0FF),
-            fontSize = 11.sp,
+            fontSize = 11.5.sp,
             fontWeight = FontWeight.Black,
             modifier = Modifier.clickable(onClick = onViewDetails)
         )

@@ -132,6 +132,12 @@ class HomeScreenView @JvmOverloads constructor(
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        drawerLayout.closeDrawer(GravityCompat.START)
+                        context.startActivity(Intent(context, ProfileActivity::class.java))
+                    }
 
                     addView(FrameLayout(context).apply {
                         // Colored Circle

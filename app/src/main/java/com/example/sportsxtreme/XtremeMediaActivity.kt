@@ -2,6 +2,7 @@ package com.example.sportsxtreme
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.platform.ComposeView
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 
@@ -19,7 +20,14 @@ class XtremeMediaActivity : ComponentActivity() {
                 title = getString(R.string.str_xtrememedia),
                 selectedMode = XtremeSectionView.SectionMode.MEDIA,
                 logoRes = R.drawable.xtrememediaicon,
-                bodyText = getString(R.string.str_xtrememedia)
+                bodyText = getString(R.string.str_xtrememedia),
+                bodyContent = { context ->
+                    ComposeView(context).apply {
+                        setContent {
+                            XtremeMediaScreen()
+                        }
+                    }
+                }
             )
         )
     }
