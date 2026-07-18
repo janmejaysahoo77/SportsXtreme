@@ -32,12 +32,14 @@ class MainActivity : ComponentActivity() {
         Onboarding,
         Signup,
         Login,
+        OtpVerification,
         SportSelection,
         Home
     }
 
     private var isCustomSplashReady = false
     private var homeScreenView: HomeScreenView? = null
+    private var pendingOtpContact = ""
     private var currentScreen by mutableStateOf(Screen.Splash)
 
     @Suppress("DEPRECATION")
@@ -48,6 +50,10 @@ class MainActivity : ComponentActivity() {
         splashScreen.setKeepOnScreenCondition { !isCustomSplashReady }
 
         super.onCreate(savedInstanceState)
+        if (intent.getStringExtra(EXTRA_START_DESTINATION) == DESTINATION_SPORT_SELECTION) {
+            isCustomSplashReady = true
+            currentScreen = Screen.SportSelection
+        }
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
@@ -101,6 +107,13 @@ class MainActivity : ComponentActivity() {
                 }
             )
 
+            Screen.OtpVerification -> AndroidView(
+                factory = { context ->
+                    homeScreenView = null
+                    OtpVerificationScreenView(context, pendingOtpContact)
+                }
+            )
+
             Screen.SportSelection -> AndroidView(
                 factory = { context ->
                     homeScreenView = null
@@ -134,6 +147,12 @@ class MainActivity : ComponentActivity() {
         currentScreen = Screen.Login
     }
 
+    fun showOtpVerificationScreen(contact: String) {
+        homeScreenView = null
+        pendingOtpContact = contact
+        currentScreen = Screen.OtpVerification
+    }
+
     fun showSportSelectionScreen() {
         homeScreenView = null
         currentScreen = Screen.SportSelection
@@ -157,5 +176,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         homeScreenView?.refreshAfterResume()
+    }
+
+    companion object {
+        const val EXTRA_START_DESTINATION = "extra_start_destination"
+        const val DESTINATION_SPORT_SELECTION = "sport_selection"
     }
 }

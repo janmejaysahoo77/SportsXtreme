@@ -12,6 +12,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SportsXtreme">
         <activity
+            android:name=".presentation.auth.PhooneNumberAfterGoogleLogin"
+            android:exported="false" />
+        <activity
             android:name=".presentation.team.QRForPlayerAddingActivity"
             android:exported="false" />
         <activity

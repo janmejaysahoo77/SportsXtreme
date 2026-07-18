@@ -59,6 +59,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import android.app.Activity
+import android.content.Intent
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -236,7 +238,7 @@ class SignupScreenView @JvmOverloads constructor(
             when (val result = authRepository.signup(name, email, password)) {
                 is Resource.Success -> {
                     showError(null)
-                    (context as? MainActivity)?.showSportSelectionScreen()
+                    (context as? MainActivity)?.showOtpVerificationScreen(email)
                 }
                 is Resource.Error -> {
                     showError(result.message ?: "Signup failed")
@@ -277,7 +279,8 @@ class SignupScreenView @JvmOverloads constructor(
                     when (val authResult = authRepository.signupWithGoogle(googleCredential.idToken)) {
                         is Resource.Success -> {
                             showError(null)
-                            (context as? MainActivity)?.showSportSelectionScreen()
+                            context.startActivity(Intent(context, PhooneNumberAfterGoogleLogin::class.java))
+                            (context as? Activity)?.overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
                         }
                         is Resource.Error -> showError(authResult.message ?: "Google signup failed")
                         is Resource.Loading -> Unit
