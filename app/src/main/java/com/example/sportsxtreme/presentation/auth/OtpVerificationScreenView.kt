@@ -28,7 +28,14 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Space
 import android.widget.TextView
+import com.example.sportsxtreme.common.Resource
+import com.example.sportsxtreme.data.di.AuthDependencies
 import com.example.sportsxtreme.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -47,9 +54,13 @@ class OtpVerificationScreenView @JvmOverloads constructor(
     private lateinit var verifyButton: TextView
     private lateinit var errorView: TextView
     private lateinit var resendView: TextView
+    private val authViewModel = AuthDependencies.authViewModel()
+    private val otpScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var resendCount = 0
+    private var isVerifying = false
 
     init {
+        (context as? Activity)?.let { AuthDependencies.bindPhoneAuthActivity(it) }
         isFocusable = true
         isFocusableInTouchMode = true
         setBackgroundColor(Color.BLACK)
@@ -59,6 +70,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
             otpInputs.firstOrNull()?.requestFocus()
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
             imm?.showSoftInput(otpInputs.firstOrNull(), InputMethodManager.SHOW_IMPLICIT)
+            verifyAutomaticallyIfReady(context)
         }
     }
 
@@ -247,10 +259,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
                 includeFontPadding = false
                 setOnClickListener {
-                    resendCount += 1
-                    text = "CODE RESENT ${resendCount}X"
-                    clearOtp()
-                    showMessage("New code request queued.")
+                    resendOtp()
                 }
             }
             addView(resendView)
@@ -278,12 +287,66 @@ class OtpVerificationScreenView @JvmOverloads constructor(
     }
 
     private fun verifyOtp(context: Context) {
+        if (isVerifying) return
         val code = otpInputs.joinToString(separator = "") { it.text.toString() }
         if (code.length != 6) {
             showError("Enter the complete 6 digit code")
             return
         }
-        showMessage("Verification complete.")
+        setVerifying(true)
+        otpScope.launch {
+            when (val result = authViewModel.verifyPhoneOtp(code)) {
+                is Resource.Success -> {
+                    showMessage("Verification complete.")
+                    navigateAfterVerification(context)
+                }
+                is Resource.Error -> {
+                    showError(result.message ?: "OTP verification failed")
+                }
+                is Resource.Loading -> Unit
+            }
+            setVerifying(false)
+        }
+    }
+
+    private fun verifyAutomaticallyIfReady(context: Context) {
+        val autoVerified = authViewModel.state.value.pendingPhoneSession?.isAutoVerified == true
+        if (!autoVerified) return
+        setVerifying(true)
+        showMessage("Phone verified automatically.")
+        otpScope.launch {
+            when (val result = authViewModel.verifyPhoneOtp("")) {
+                is Resource.Success -> navigateAfterVerification(context)
+                is Resource.Error -> showError(result.message ?: "Automatic verification failed")
+                is Resource.Loading -> Unit
+            }
+            setVerifying(false)
+        }
+    }
+
+    private fun resendOtp() {
+        if (isVerifying) return
+        setVerifying(true, label = "RESENDING...")
+        otpScope.launch {
+            when (val result = authViewModel.resendPhoneOtp()) {
+                is Resource.Success -> {
+                    resendCount += 1
+                    resendView.text = "CODE RESENT ${resendCount}X"
+                    clearOtp()
+                    if (result.data?.isAutoVerified == true) {
+                        showMessage("Phone verified automatically.")
+                    } else {
+                        showMessage("New code request queued.")
+                    }
+                }
+                is Resource.Error -> showError(result.message ?: "Could not resend OTP")
+                is Resource.Loading -> Unit
+            }
+            setVerifying(false)
+        }
+    }
+
+    private fun navigateAfterVerification(context: Context) {
         postDelayed({
             val mainActivity = context as? MainActivity
             if (mainActivity != null) {
@@ -302,6 +365,15 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         val ready = otpInputs.all { it.text.length == 1 }
         verifyButton.isEnabled = ready
         verifyButton.alpha = if (ready) 1f else 0.62f
+    }
+
+    private fun setVerifying(verifying: Boolean, label: String = "VERIFYING...") {
+        isVerifying = verifying
+        verifyButton.text = if (verifying) label else "VERIFY ACCOUNT  ->"
+        verifyButton.isEnabled = !verifying && otpInputs.all { it.text.length == 1 }
+        verifyButton.alpha = if (verifyButton.isEnabled) 1f else 0.62f
+        resendView.isEnabled = !verifying
+        resendView.alpha = if (verifying) 0.62f else 1f
     }
 
     private fun clearOtp() {
@@ -325,6 +397,11 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         errorView.setTextColor(neonGreen)
         errorView.text = message
         errorView.visibility = View.VISIBLE
+    }
+
+    override fun onDetachedFromWindow() {
+        otpScope.cancel()
+        super.onDetachedFromWindow()
     }
 
     private fun title(text: String, size: Float, color: Int): TextView {

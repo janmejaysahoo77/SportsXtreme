@@ -33,6 +33,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.common.Resource
+import com.example.sportsxtreme.data.di.AuthDependencies
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -41,6 +48,7 @@ class PhooneNumberAfterGoogleLogin : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AuthDependencies.bindPhoneAuthActivity(this)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, android.R.color.black)
         window.navigationBarColor = ContextCompat.getColor(this, android.R.color.black)
@@ -82,6 +90,9 @@ private class PhooneNumberAfterGoogleLoginView(
     private lateinit var phoneInput: EditText
     private lateinit var errorView: TextView
     private lateinit var nextButton: TextView
+    private val authViewModel = AuthDependencies.authViewModel()
+    private val phoneScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var isSendingOtp = false
 
     init {
         isFocusable = true
@@ -256,18 +267,48 @@ private class PhooneNumberAfterGoogleLoginView(
     }
 
     private fun submitPhoneNumber() {
+        if (isSendingOtp) return
         val phoneNumber = phoneInput.text.toString().trim()
         if (!isValidPhoneNumber(phoneNumber)) {
-            showError("Enter a valid phone number")
+            showError("Enter +91XXXXXXXXXX or a 10 digit phone number")
             return
         }
-        onNext(phoneNumber)
+        val activity = context as? Activity
+        if (activity == null) {
+            showError("Phone verification needs an active screen.")
+            return
+        }
+        AuthDependencies.bindPhoneAuthActivity(activity)
+        setSending(true)
+        phoneScope.launch {
+            when (val result = authViewModel.sendPhoneOtp(phoneNumber)) {
+                is Resource.Success -> {
+                    clearError()
+                    val session = result.data
+                    if (session?.isAutoVerified == true) {
+                        onNext(session.phoneNumber)
+                    } else {
+                        onNext(session?.phoneNumber ?: phoneNumber)
+                    }
+                }
+                is Resource.Error -> showError(result.message ?: "Could not send OTP")
+                is Resource.Loading -> Unit
+            }
+            setSending(false)
+        }
     }
 
     private fun refreshNextState() {
         val ready = isValidPhoneNumber(phoneInput.text.toString())
         nextButton.isEnabled = ready
         nextButton.alpha = if (ready) 1f else 0.62f
+    }
+
+    private fun setSending(sending: Boolean) {
+        isSendingOtp = sending
+        nextButton.isEnabled = !sending && isValidPhoneNumber(phoneInput.text.toString())
+        nextButton.alpha = if (nextButton.isEnabled) 1f else 0.62f
+        nextButton.text = if (sending) "SENDING OTP..." else "NEXT  ->"
     }
 
     private fun isValidPhoneNumber(value: String): Boolean {
@@ -283,6 +324,11 @@ private class PhooneNumberAfterGoogleLoginView(
     private fun showError(message: String) {
         errorView.text = message
         errorView.visibility = View.VISIBLE
+    }
+
+    override fun onDetachedFromWindow() {
+        phoneScope.cancel()
+        super.onDetachedFromWindow()
     }
 
     private fun title(text: String, size: Float, color: Int): TextView {

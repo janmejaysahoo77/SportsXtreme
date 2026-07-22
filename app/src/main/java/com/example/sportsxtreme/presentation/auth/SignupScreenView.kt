@@ -2,7 +2,8 @@ package com.example.sportsxtreme.presentation.auth
 
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
-import com.example.sportsxtreme.data.repository.AuthRepositoryImpl
+import com.example.sportsxtreme.data.di.AuthDependencies
+import com.example.sportsxtreme.domain.model.AuthFeatureFlags
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -83,7 +84,7 @@ class SignupScreenView @JvmOverloads constructor(
     private lateinit var errorMessageView: TextView
     private lateinit var createAccountButton: TextView
     private lateinit var googleSignupButton: LinearLayout
-    private val authRepository = AuthRepositoryImpl()
+    private val authViewModel = AuthDependencies.authViewModel()
     private val signupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val credentialManager = CredentialManager.create(context)
     private var isSignupLoading = false
@@ -224,10 +225,11 @@ class SignupScreenView @JvmOverloads constructor(
 
         val name = fullNameInput.text.toString().trim()
         val email = emailInput.text.toString().trim()
+        val phoneNumber = phoneInput.text.toString().trim()
         val password = passwordInput.text.toString()
         val confirmPassword = confirmPasswordInput.text.toString()
 
-        val validationError = validateSignup(name, email, password, confirmPassword)
+        val validationError = validateSignup(name, email, phoneNumber, password, confirmPassword)
         if (validationError != null) {
             showError(validationError)
             return
@@ -235,10 +237,20 @@ class SignupScreenView @JvmOverloads constructor(
 
         setLoading(true)
         signupScope.launch {
-            when (val result = authRepository.signup(name, email, password)) {
+            when (val result = authViewModel.createEmailAccount(name, email, password, phoneNumber)) {
                 is Resource.Success -> {
                     showError(null)
-                    (context as? MainActivity)?.showOtpVerificationScreen(email)
+                    if (AuthFeatureFlags.EMAIL_VERIFICATION_ENABLED) {
+                        (context as? MainActivity)?.showEmailVerificationScreen()
+                    } else if (AuthFeatureFlags.PHONE_OTP_ENABLED) {
+                        sendOtpAndContinue(context, phoneNumber)
+                    } else {
+                        when (val profileResult = authViewModel.completePendingAuthentication()) {
+                            is Resource.Success -> (context as? MainActivity)?.showHomeScreen()
+                            is Resource.Error -> showError(profileResult.message ?: "Signup failed")
+                            is Resource.Loading -> Unit
+                        }
+                    }
                 }
                 is Resource.Error -> {
                     showError(result.message ?: "Signup failed")
@@ -246,6 +258,27 @@ class SignupScreenView @JvmOverloads constructor(
                 is Resource.Loading -> Unit
             }
             setLoading(false)
+        }
+    }
+
+    private suspend fun sendOtpAndContinue(context: Context, phoneNumber: String) {
+        val activity = context as? Activity
+        if (activity == null) {
+            showError("Phone verification needs an active screen.")
+            return
+        }
+        AuthDependencies.bindPhoneAuthActivity(activity)
+        when (val otpResult = authViewModel.sendPhoneOtp(phoneNumber)) {
+            is Resource.Success -> {
+                showError(null)
+                if (otpResult.data?.isAutoVerified == true) {
+                    (context as? MainActivity)?.showSportSelectionScreen()
+                } else {
+                    (context as? MainActivity)?.showOtpVerificationScreen(otpResult.data?.phoneNumber ?: phoneNumber)
+                }
+            }
+            is Resource.Error -> showError(otpResult.message ?: "Could not send OTP")
+            is Resource.Loading -> Unit
         }
     }
 
@@ -276,11 +309,19 @@ class SignupScreenView @JvmOverloads constructor(
                     credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
                 ) {
                     val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                    when (val authResult = authRepository.signupWithGoogle(googleCredential.idToken)) {
+                    when (val authResult = authViewModel.signInWithGoogle(googleCredential.idToken)) {
                         is Resource.Success -> {
                             showError(null)
-                            context.startActivity(Intent(context, PhooneNumberAfterGoogleLogin::class.java))
-                            (context as? Activity)?.overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
+                            if (AuthFeatureFlags.PHONE_OTP_ENABLED && !AuthFeatureFlags.GOOGLE_BYPASSES_EMAIL_VERIFICATION) {
+                                context.startActivity(Intent(context, PhooneNumberAfterGoogleLogin::class.java))
+                                (context as? Activity)?.overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
+                            } else {
+                                when (val profileResult = authViewModel.completePendingAuthentication()) {
+                                    is Resource.Success -> (context as? MainActivity)?.showHomeScreen()
+                                    is Resource.Error -> showError(profileResult.message ?: "Google signup failed")
+                                    is Resource.Loading -> Unit
+                                }
+                            }
                         }
                         is Resource.Error -> showError(authResult.message ?: "Google signup failed")
                         is Resource.Loading -> Unit
@@ -300,10 +341,12 @@ class SignupScreenView @JvmOverloads constructor(
         }
     }
 
-    private fun validateSignup(name: String, email: String, password: String, confirmPassword: String): String? {
+    private fun validateSignup(name: String, email: String, phoneNumber: String, password: String, confirmPassword: String): String? {
+        val phoneDigits = phoneNumber.count { it.isDigit() }
         return when {
             name.isBlank() -> "Name is required"
             !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> "Enter a valid email"
+            phoneDigits !in 10..15 -> "Enter +91XXXXXXXXXX or a 10 digit phone number"
             password.length < 6 -> "Password must be at least 6 characters"
             password != confirmPassword -> "Passwords do not match"
             else -> null

@@ -1,6 +1,8 @@
 package com.example.sportsxtreme.presentation.auth
 
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.common.Resource
+import com.example.sportsxtreme.data.di.AuthDependencies
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -30,6 +32,7 @@ import android.text.method.PasswordTransformationMethod
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.util.AttributeSet
+import android.util.Patterns
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -40,7 +43,19 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Space
 import android.widget.TextView
-import android.widget.Toast
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
 
@@ -56,6 +71,13 @@ class LoginScreenView @JvmOverloads constructor(
 
     private lateinit var emailInput: EditText
     private lateinit var passwordInput: EditText
+    private lateinit var errorMessageView: TextView
+    private lateinit var loginButton: TextView
+    private lateinit var googleLoginButton: LinearLayout
+    private val authViewModel = AuthDependencies.authViewModel()
+    private val loginScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val credentialManager = CredentialManager.create(context)
+    private var isLoginLoading = false
 
     init {
         isFocusable = true
@@ -101,12 +123,15 @@ class LoginScreenView @JvmOverloads constructor(
             includeFontPadding = false
         }, fullWidthParams(top = dp(8), bottom = dp(22)))
 
-        emailInput = addField(content, "EMAIL", "ATHLETE@DOMAIN.COM", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+        emailInput = addField(content, "EMAIL", "ATHLETE@DOMAIN.COM", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS).apply {
+            setText("")
+        }
         passwordInput = addField(content, "PASSWORD", "********", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD).apply {
             transformationMethod = PasswordTransformationMethod.getInstance()
         }
 
-        content.addView(forgotPassword(context), fullWidthParams(bottom = dp(18), height = dp(24)))
+        errorMessageView = errorMessage(context)
+        content.addView(errorMessageView, fullWidthParams(bottom = dp(8)))
         content.addView(primaryButton(context), fullWidthParams(bottom = dp(18), height = dp(52)))
         content.addView(divider(context), fullWidthParams(bottom = dp(16), height = dp(18)))
         content.addView(socialRow(context), fullWidthParams(bottom = dp(26), height = dp(44)))
@@ -147,22 +172,19 @@ class LoginScreenView @JvmOverloads constructor(
         return editText
     }
 
-    private fun forgotPassword(context: Context): TextView {
+    private fun errorMessage(context: Context): TextView {
         return TextView(context).apply {
-            text = context.getString(R.string.str_forgot_password)
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            setTextColor(primaryFixed)
-            textSize = 9f
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+            visibility = View.GONE
+            setTextColor(Color.rgb(255, 112, 112))
+            textSize = 11f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
             includeFontPadding = false
-            setOnClickListener {
-                Toast.makeText(context, "Forgot password tapped", Toast.LENGTH_SHORT).show()
-            }
         }
     }
 
     private fun primaryButton(context: Context): TextView {
         return TextView(context).apply {
+            loginButton = this
             text = context.getString(R.string.str_login)
             gravity = Gravity.CENTER
             setTextColor(onPrimary)
@@ -174,9 +196,65 @@ class LoginScreenView @JvmOverloads constructor(
                 setColor(primaryFixed)
             }
             setOnClickListener {
-                (context as? MainActivity)?.showSportSelectionScreen()
+                handleLogin(context)
             }
         }
+    }
+
+    private fun handleLogin(context: Context) {
+        if (isLoginLoading) return
+
+        val email = emailInput.text.toString().trim()
+        val password = passwordInput.text.toString()
+        val validationError = validateLogin(email, password)
+        if (validationError != null) {
+            showError(validationError)
+            return
+        }
+
+        setLoading(true)
+        loginScope.launch {
+            when (val result = authViewModel.signInWithEmailAndPassword(email, password)) {
+                is Resource.Success -> {
+                    showError(null)
+                    (context as? MainActivity)?.showHomeScreen()
+                }
+                is Resource.Error -> showError(result.message ?: "Login failed")
+                is Resource.Loading -> Unit
+            }
+            setLoading(false)
+        }
+    }
+
+    private fun validateLogin(email: String, password: String): String? {
+        return when {
+            email.isBlank() -> "Email is required"
+            !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> "Enter a valid email"
+            password.isBlank() -> "Password is required"
+            password.length < 6 -> "Password must be at least 6 characters"
+            else -> null
+        }
+    }
+
+    private fun setLoading(loading: Boolean) {
+        isLoginLoading = loading
+        loginButton.isEnabled = !loading
+        loginButton.alpha = if (loading) 0.72f else 1f
+        loginButton.text = if (loading) "LOGGING IN..." else context.getString(R.string.str_login)
+        googleLoginButton.isEnabled = !loading
+        googleLoginButton.alpha = if (loading) 0.72f else 1f
+    }
+
+    private fun showError(message: String?) {
+        errorMessageView.setTextColor(Color.rgb(255, 112, 112))
+        errorMessageView.text = message.orEmpty()
+        errorMessageView.visibility = if (message.isNullOrBlank()) View.GONE else View.VISIBLE
+    }
+
+    private fun showMessage(message: String) {
+        errorMessageView.setTextColor(Color.rgb(255, 210, 96))
+        errorMessageView.text = message
+        errorMessageView.visibility = View.VISIBLE
     }
 
     private fun divider(context: Context): View {
@@ -207,13 +285,77 @@ class LoginScreenView @JvmOverloads constructor(
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            addView(socialButton(context, "GOOGLE", R.drawable.googleicon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+            googleLoginButton = socialButton(context, "GOOGLE", R.drawable.googleicon).apply {
+                setOnClickListener {
+                    handleGoogleLogin(context)
+                }
+            }
+            addView(googleLoginButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
                 rightMargin = dp(6)
             })
             addView(socialButton(context, "FACEBOOK", R.drawable.facebook_icon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
                 leftMargin = dp(6)
             })
         }
+    }
+
+    private fun handleGoogleLogin(context: Context) {
+        if (isLoginLoading) return
+
+        val serverClientId = googleServerClientId(context)
+        if (serverClientId.isNullOrBlank()) {
+            showError("Google login needs a Firebase web client ID. Add SHA keys in Firebase, download google-services.json again, then rebuild.")
+            return
+        }
+
+        setLoading(true)
+        loginScope.launch {
+            try {
+                val googleIdOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(serverClientId)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
+                val result = credentialManager.getCredential(context, request)
+                val credential = result.credential
+
+                if (credential is CustomCredential &&
+                    credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                ) {
+                    val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                    when (val authResult = authViewModel.signInWithGoogle(googleCredential.idToken)) {
+                        is Resource.Success -> {
+                            showError(null)
+                            when (val profileResult = authViewModel.completePendingAuthentication()) {
+                                is Resource.Success -> (context as? MainActivity)?.showHomeScreen()
+                                is Resource.Error -> showError(profileResult.message ?: "Google login failed")
+                                is Resource.Loading -> Unit
+                            }
+                        }
+                        is Resource.Error -> showError(authResult.message ?: "Google login failed")
+                        is Resource.Loading -> Unit
+                    }
+                } else {
+                    showError("Google login did not return a valid account.")
+                }
+            } catch (error: GetCredentialCancellationException) {
+                showError(null)
+            } catch (error: GetCredentialException) {
+                showError(error.message ?: "Google login failed")
+            } catch (error: GoogleIdTokenParsingException) {
+                showError("Google login response could not be read.")
+            } finally {
+                setLoading(false)
+            }
+        }
+    }
+
+    private fun googleServerClientId(context: Context): String? {
+        val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+        return if (resId != 0) context.getString(resId) else null
     }
 
     private fun socialButton(context: Context, label: String, iconRes: Int?): LinearLayout {
@@ -303,6 +445,11 @@ class LoginScreenView @JvmOverloads constructor(
 
     private fun dp(value: Int): Int {
         return (value * resources.displayMetrics.density + 0.5f).toInt()
+    }
+
+    override fun onDetachedFromWindow() {
+        loginScope.cancel()
+        super.onDetachedFromWindow()
     }
 
     private class BackgroundLayer(context: Context) : View(context) {
