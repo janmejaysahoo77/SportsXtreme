@@ -177,6 +177,28 @@ class AuthDataSource(
         }
     }
 
+    suspend fun sendEmailChangeVerification(newEmail: String): Result<Unit> {
+        return suspendCancellableCoroutine { continuation ->
+            val firebaseUser = firebaseAuth.currentUser
+            if (firebaseUser == null) {
+                continuation.resume(Result.failure(IllegalStateException("No authenticated account is available for email verification.")))
+                return@suspendCancellableCoroutine
+            }
+            if (newEmail.isBlank()) {
+                continuation.resume(Result.failure(IllegalArgumentException("Enter a valid email address.")))
+                return@suspendCancellableCoroutine
+            }
+
+            firebaseUser.verifyBeforeUpdateEmail(newEmail)
+                .addOnSuccessListener {
+                    continuation.resume(Result.success(Unit))
+                }
+                .addOnFailureListener { exception ->
+                    continuation.resume(Result.failure(exception))
+                }
+        }
+    }
+
     suspend fun reloadAndCheckEmailVerified(): Result<Boolean> {
         return suspendCancellableCoroutine { continuation ->
             val firebaseUser = firebaseAuth.currentUser

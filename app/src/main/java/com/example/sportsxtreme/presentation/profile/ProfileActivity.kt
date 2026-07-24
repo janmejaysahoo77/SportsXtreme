@@ -22,9 +22,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,6 +49,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,12 +60,12 @@ import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
 import com.example.sportsxtreme.domain.model.User
-import com.example.sportsxtreme.domain.model.UserAchievement
 import com.example.sportsxtreme.domain.model.PendingUserProfile
 import com.example.sportsxtreme.domain.model.UserProfile
 import com.example.sportsxtreme.domain.model.UserProfileSettings
 import com.example.sportsxtreme.domain.model.UserProfileStats
 import com.example.sportsxtreme.domain.usecase.AuthUseCases
+import kotlinx.coroutines.launch
 
 private val XtremeBg = Color(0xFF010407)
 private val Card = Color(0xFF0C1419)
@@ -74,10 +80,23 @@ private data class ProfileUiState(
     val profile: UserProfile = fallbackProfile(),
     val stats: UserProfileStats = UserProfileStats(userId = ""),
     val settings: UserProfileSettings = UserProfileSettings(userId = ""),
-    val achievements: List<UserAchievement> = emptyList(),
     val isLoading: Boolean = true,
+    val isSaving: Boolean = false,
+    val infoMessage: String? = null,
     val errorMessage: String? = null
 )
+
+private data class ProfileChoiceInput(
+    val label: String,
+    val options: List<String>,
+    val currentValue: String,
+    val updateProfile: (UserProfile, String) -> UserProfile
+)
+
+private enum class ProfileEditSection(val title: String) {
+    PersonalDetails("Personal Details"),
+    PlayingProfile("Playing Profile")
+}
 
 class ProfileActivity : ComponentActivity() {
 
@@ -97,9 +116,14 @@ class ProfileActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProfileScreen(useCases: AuthUseCases, onBack: () -> Unit) {
     var uiState by remember { mutableStateOf(ProfileUiState()) }
+    var activeEditSection by remember { mutableStateOf<ProfileEditSection?>(null) }
+    var draftProfile by remember { mutableStateOf(uiState.profile) }
+    val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         uiState = loadProfileUiState(useCases)
@@ -116,13 +140,13 @@ private fun ProfileScreen(useCases: AuthUseCases, onBack: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 ProfileTopBar(onBack)
-                if (uiState.isLoading || uiState.errorMessage != null) {
+                if (uiState.isLoading || uiState.isSaving || uiState.infoMessage != null || uiState.errorMessage != null) {
                     ProfileStatusLine(uiState)
                 }
                 Spacer(Modifier.height(14.dp))
                 HeroProfileCard(uiState.profile, uiState.stats)
                 Spacer(Modifier.height(12.dp))
-                SeasonHighlight(uiState.stats, uiState.achievements)
+                HostedSummary(uiState.profile)
                 Spacer(Modifier.height(14.dp))
                 Text(
                     "Your Xtreme Presence",
@@ -134,20 +158,34 @@ private fun ProfileScreen(useCases: AuthUseCases, onBack: () -> Unit) {
                         .padding(bottom = 10.dp)
                 )
                 ProfileStats(uiState.profile)
-                SectionTitle("Personal Details")
+                SectionTitle(
+                    title = "Personal Details",
+                    onEdit = {
+                        draftProfile = uiState.profile
+                        activeEditSection = ProfileEditSection.PersonalDetails
+                    },
+                    editEnabled = !uiState.isLoading && !uiState.isSaving
+                )
                 DetailGrid(
                     listOf(
                         "Mobile Number" to uiState.profile.phoneNumber.ifBlank { "Not added" },
-                        "Gender" to uiState.profile.gender,
+                        "Gender" to uiState.profile.gender.ifBlank { "Not added" },
                         "Email Address" to uiState.profile.email.ifBlank { "Not added" }
                     )
                 )
-                SectionTitle("Playing Profile")
+                SectionTitle(
+                    title = "Playing Profile",
+                    onEdit = {
+                        draftProfile = uiState.profile
+                        activeEditSection = ProfileEditSection.PlayingProfile
+                    },
+                    editEnabled = !uiState.isLoading && !uiState.isSaving
+                )
                 DetailGrid(
                     listOf(
-                        "Role" to uiState.profile.role,
-                        "Batting" to uiState.profile.battingStyle,
-                        "Bowling" to uiState.profile.bowlingStyle
+                        "Role" to uiState.profile.role.ifBlank { "Not added" },
+                        "Batting" to uiState.profile.battingStyle.ifBlank { "Not added" },
+                        "Bowling" to uiState.profile.bowlingStyle.ifBlank { "Not added" }
                     )
                 )
                 Spacer(Modifier.height(18.dp))
@@ -159,16 +197,83 @@ private fun ProfileScreen(useCases: AuthUseCases, onBack: () -> Unit) {
                     modifier = Modifier.padding(top = 12.dp, bottom = 10.dp)
                 )
             }
+
+            activeEditSection?.let { section ->
+                ModalBottomSheet(
+                    onDismissRequest = { if (!uiState.isSaving) activeEditSection = null },
+                    sheetState = bottomSheetState,
+                    containerColor = Color(0xFF081014),
+                    contentColor = Platinum
+                ) {
+                    ProfileSectionEditSheet(
+                        section = section,
+                        draftProfile = draftProfile,
+                        isSaving = uiState.isSaving,
+                        onProfileChange = { draftProfile = it },
+                        onCancel = { activeEditSection = null },
+                        onSave = {
+                            val emailChanged = !draftProfile.email.equals(uiState.profile.email, ignoreCase = true)
+                            val phoneChanged = draftProfile.phoneNumber != uiState.profile.phoneNumber
+                            val updatedProfile = draftProfile.copy(
+                                email = draftProfile.email.trim(),
+                                phoneNumber = draftProfile.phoneNumber.trim(),
+                                isEmailVerified = if (emailChanged) false else draftProfile.isEmailVerified,
+                                isPhoneVerified = if (phoneChanged) false else draftProfile.isPhoneVerified
+                            )
+                            if (updatedProfile.email.isBlank() || !updatedProfile.email.contains("@")) {
+                                uiState = uiState.copy(errorMessage = "Enter a valid email address.", infoMessage = null)
+                                return@ProfileSectionEditSheet
+                            }
+                            uiState = uiState.copy(isSaving = true, errorMessage = null, infoMessage = null)
+                            activeEditSection = null
+                            scope.launch {
+                                val emailVerificationResult = if (emailChanged) {
+                                    useCases.sendEmailChangeVerification(updatedProfile.email)
+                                } else {
+                                    Resource.Success(Unit)
+                                }
+                                if (emailVerificationResult is Resource.Error) {
+                                    uiState = uiState.copy(
+                                        isSaving = false,
+                                        errorMessage = emailVerificationResult.message ?: "Could not send verification email.",
+                                        infoMessage = null
+                                    )
+                                    return@launch
+                                }
+
+                                uiState = when (useCases.updateUserProfile(updatedProfile)) {
+                                    is Resource.Success -> uiState.copy(
+                                        profile = updatedProfile,
+                                        isSaving = false,
+                                        infoMessage = if (emailChanged) "Verification email sent. Please verify your new email." else null,
+                                        errorMessage = null
+                                    )
+                                    is Resource.Error -> uiState.copy(
+                                        isSaving = false,
+                                        infoMessage = null,
+                                        errorMessage = "Could not update profile."
+                                    )
+                                    is Resource.Loading -> uiState.copy(isSaving = true)
+                                }
+                            }
+                        }
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun ProfileStatusLine(uiState: ProfileUiState) {
-    val text = uiState.errorMessage ?: "Loading latest profile..."
+    val text = uiState.errorMessage ?: uiState.infoMessage ?: if (uiState.isSaving) "Saving profile..." else "Loading latest profile..."
     Text(
         text,
-        color = if (uiState.errorMessage == null) SoftText else Gold,
+        color = when {
+            uiState.errorMessage != null -> Gold
+            uiState.infoMessage != null -> Lime
+            else -> SoftText
+        },
         fontSize = 10.sp,
         fontWeight = FontWeight.Bold,
         modifier = Modifier
@@ -204,24 +309,20 @@ private suspend fun loadProfileUiState(useCases: AuthUseCases): ProfileUiState {
     val profileResult = useCases.getUserProfile(userId)
     val statsResult = useCases.getUserProfileStats(userId)
     val settingsResult = useCases.getUserProfileSettings(userId)
-    val achievementsResult = useCases.getUserAchievements(userId)
 
     val profile = profileResult.successData() ?: fallbackProfile
     val stats = statsResult.successData() ?: profile.toFallbackStats()
     val settings = settingsResult.successData() ?: UserProfileSettings(userId = userId)
-    val achievements = achievementsResult.successData().orEmpty()
     val errorMessage = listOf(
         profileResult.errorText(),
         statsResult.errorText(),
-        settingsResult.errorText(),
-        achievementsResult.errorText()
+        settingsResult.errorText()
     ).firstOrNull()
 
     return ProfileUiState(
         profile = profile,
         stats = stats,
         settings = settings,
-        achievements = achievements,
         isLoading = false,
         errorMessage = if (errorMessage == null) null else "Some profile data could not refresh."
     )
@@ -378,7 +479,15 @@ private fun HeroProfileCard(profile: UserProfile, stats: UserProfileStats) {
             Avatar()
             Spacer(Modifier.height(14.dp))
             Text(profile.name, color = Platinum, fontSize = 23.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
-            Text("${profile.location}  |  ${profile.joinedLabel}", color = SoftText, fontSize = 12.sp, textAlign = TextAlign.Center)
+            Text(
+                listOf(profile.location, profile.joinedLabel)
+                    .filter { it.isNotBlank() }
+                    .joinToString("  |  ")
+                    .ifBlank { "Location not added" },
+                color = SoftText,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center
+            )
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("Verified Player", Lime, Color.Black)
@@ -501,35 +610,37 @@ private fun HeroMetric(value: String, label: String, accent: Color, modifier: Mo
 }
 
 @Composable
-private fun SeasonHighlight(stats: UserProfileStats, achievements: List<UserAchievement>) {
-    val achievement = achievements.firstOrNull()
-    val title = achievement?.title ?: "2026 Season Form"
-    val subtitle = "${stats.wins} wins  |  ${stats.trophies} trophies  |  ${if (stats.topPerformerStreak) "top performer streak" else "building momentum"}"
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .shadow(10.dp, RoundedCornerShape(14.dp), clip = false)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFF171E14), Color(0xFF0A1216))))
-            .border(1.dp, Color(0x6645E9FF), RoundedCornerShape(14.dp))
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically
+private fun HostedSummary(profile: UserProfile) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            "Hosted",
+            color = Platinum,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.padding(bottom = 10.dp)
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HostedTile(profile.hostedTournaments.toString(), "Tournament", Gold, Modifier.weight(1f))
+            HostedTile(profile.hostedSeries.toString(), "Series", Aqua, Modifier.weight(1f))
+            HostedTile(profile.hostedMatches.toString(), "Matches", Lime, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun HostedTile(value: String, label: String, accent: Color, modifier: Modifier) {
+    Column(
+        modifier
+            .shadow(8.dp, RoundedCornerShape(12.dp), clip = false)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Brush.verticalGradient(listOf(Color(0xFF10191E), Card)))
+            .border(1.dp, accent.copy(alpha = 0.36f), RoundedCornerShape(12.dp))
+            .padding(vertical = 13.dp, horizontal = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Brush.linearGradient(listOf(Gold, Platinum))),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("XP", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Black)
-        }
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Platinum, fontSize = 14.sp, fontWeight = FontWeight.Black)
-            Text(subtitle, color = SoftText, fontSize = 11.sp)
-        }
-        Text(">", color = Gold, fontSize = 20.sp, fontWeight = FontWeight.Black)
+        Text(value, color = accent, fontSize = 20.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = SoftText, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
@@ -569,7 +680,7 @@ private fun StatTile(value: String, label: String, accent: Color, modifier: Modi
 }
 
 @Composable
-private fun SectionTitle(title: String) {
+private fun SectionTitle(title: String, onEdit: (() -> Unit)? = null, editEnabled: Boolean = true) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -578,7 +689,20 @@ private fun SectionTitle(title: String) {
     ) {
         Box(Modifier.width(4.dp).height(20.dp).clip(RoundedCornerShape(8.dp)).background(Brush.verticalGradient(listOf(Gold, Aqua))))
         Spacer(Modifier.width(10.dp))
-        Text(title, color = Platinum, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        Text(title, color = Platinum, fontSize = 15.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+        if (onEdit != null) {
+            Text(
+                "Edit",
+                color = if (editEnabled) Color.Black else Color(0xFF59656A),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(if (editEnabled) Lime else Color(0xFF1B252A))
+                    .clickable(enabled = editEnabled) { onEdit() }
+                    .padding(horizontal = 14.dp, vertical = 7.dp)
+            )
+        }
     }
 }
 
@@ -642,4 +766,191 @@ private fun SettingsRow(title: String, value: String, titleColor: Color) {
 @Composable
 private fun SettingsDivider() {
     Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF202C34)))
+}
+
+@Composable
+private fun ProfileSectionEditSheet(
+    section: ProfileEditSection,
+    draftProfile: UserProfile,
+    isSaving: Boolean,
+    onProfileChange: (UserProfile) -> Unit,
+    onCancel: () -> Unit,
+    onSave: () -> Unit
+) {
+    val inputs = when (section) {
+        ProfileEditSection.PersonalDetails -> personalDetailChoiceInputs(draftProfile)
+        ProfileEditSection.PlayingProfile -> playingProfileInputs(draftProfile)
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text(section.title, color = Platinum, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        if (section == ProfileEditSection.PersonalDetails) {
+            ProfileTextInput(
+                label = "Mobile Number",
+                value = draftProfile.phoneNumber,
+                keyboardType = KeyboardType.Phone,
+                enabled = !isSaving,
+                onValueChange = { onProfileChange(draftProfile.copy(phoneNumber = it)) }
+            )
+            ProfileTextInput(
+                label = "Email Address",
+                value = draftProfile.email,
+                keyboardType = KeyboardType.Email,
+                enabled = !isSaving,
+                onValueChange = { onProfileChange(draftProfile.copy(email = it)) }
+            )
+        }
+        inputs.forEach { input ->
+            ChoiceInputGroup(
+                input = input,
+                enabled = !isSaving,
+                onSelect = { value -> onProfileChange(input.updateProfile(draftProfile, value)) }
+            )
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            SheetActionButton(
+                text = "Cancel",
+                enabled = !isSaving,
+                modifier = Modifier.weight(1f),
+                background = Color(0xFF172228),
+                foreground = Platinum,
+                onClick = onCancel
+            )
+            SheetActionButton(
+                text = if (isSaving) "Saving..." else "Save",
+                enabled = !isSaving,
+                modifier = Modifier.weight(1f),
+                background = Lime,
+                foreground = Color.Black,
+                onClick = onSave
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileTextInput(
+    label: String,
+    value: String,
+    keyboardType: KeyboardType,
+    enabled: Boolean,
+    onValueChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        enabled = enabled,
+        singleLine = true,
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun ChoiceInputGroup(input: ProfileChoiceInput, enabled: Boolean, onSelect: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(input.label, color = SoftText, fontSize = 12.sp, fontWeight = FontWeight.Black)
+        input.options.forEachIndexed { index, option ->
+            ChoiceRow(
+                number = index + 1,
+                option = option,
+                selected = option == input.currentValue,
+                enabled = enabled,
+                onClick = { onSelect(option) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChoiceRow(
+    number: Int,
+    option: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Color(0x332BFF88) else Color(0xFF10191E))
+            .border(1.dp, if (selected) Lime else Line, RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("$number.", color = if (selected) Lime else Gold, fontSize = 13.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.width(10.dp))
+        Text(option, color = Platinum, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        if (selected) {
+            Text("Selected", color = Lime, fontSize = 10.sp, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun SheetActionButton(
+    text: String,
+    enabled: Boolean,
+    modifier: Modifier,
+    background: Color,
+    foreground: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier
+            .height(46.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (enabled) background else Color(0xFF263138))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = if (enabled) foreground else SoftText, fontSize = 13.sp, fontWeight = FontWeight.Black)
+    }
+}
+
+private fun personalDetailChoiceInputs(profile: UserProfile): List<ProfileChoiceInput> {
+    return listOf(
+        ProfileChoiceInput(
+            label = "Gender",
+            options = listOf("Male", "Female", "Hinjida"),
+            currentValue = profile.gender,
+            updateProfile = { currentProfile, value -> currentProfile.copy(gender = value) }
+        )
+    )
+}
+
+private fun playingProfileInputs(profile: UserProfile): List<ProfileChoiceInput> {
+    return listOf(
+        ProfileChoiceInput(
+            label = "Role",
+            options = listOf("BatsMan", "Bowler", "All Rounder"),
+            currentValue = profile.role,
+            updateProfile = { currentProfile, value -> currentProfile.copy(role = value) }
+        ),
+        ProfileChoiceInput(
+            label = "Batting",
+            options = listOf("Right hand batter", "LeftHand Batter", "MiddleHand Batter"),
+            currentValue = profile.battingStyle,
+            updateProfile = { currentProfile, value -> currentProfile.copy(battingStyle = value) }
+        ),
+        ProfileChoiceInput(
+            label = "Bowling",
+            options = listOf("Right hand bowler", "Left Hand Bowler"),
+            currentValue = profile.bowlingStyle,
+            updateProfile = { currentProfile, value -> currentProfile.copy(bowlingStyle = value) }
+        )
+    )
 }

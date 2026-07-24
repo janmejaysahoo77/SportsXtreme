@@ -1,5 +1,7 @@
 package com.example.sportsxtreme.presentation.auth
 
+import android.Manifest
+import android.annotation.SuppressLint
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
@@ -12,8 +14,15 @@ import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.Geocoder
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Bundle
+import android.os.Looper
 import android.view.ViewTreeObserver
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -25,7 +34,17 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
+import java.util.Locale
+import kotlin.coroutines.resume
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -46,7 +65,17 @@ class MainActivity : ComponentActivity() {
     private var emailVerificationScreenView: EmailVerificationScreenView? = null
     private var pendingOtpContact = ""
     private val authViewModel by lazy { AuthDependencies.authViewModel() }
+    private val locationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var currentScreen by mutableStateOf(Screen.Splash)
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) {
+            updateCurrentUserLocation()
+        }
+    }
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,6 +86,7 @@ class MainActivity : ComponentActivity() {
         splashScreen.setKeepOnScreenCondition { !isCustomSplashReady }
 
         super.onCreate(savedInstanceState)
+        requestLocationPermissionAndUpdate()
         val hasIncomingAuthLink = handleIncomingAuthLink(intent)
         if (intent.getStringExtra(EXTRA_START_DESTINATION) == DESTINATION_SPORT_SELECTION) {
             isCustomSplashReady = true
@@ -227,6 +257,7 @@ class MainActivity : ComponentActivity() {
         homeScreenView = null
         emailVerificationScreenView = null
         currentScreen = Screen.Home
+        requestLocationPermissionAndUpdate()
     }
 
     fun showXtremeMediaScreen() {
@@ -259,8 +290,138 @@ class MainActivity : ComponentActivity() {
         return authViewModel.handleIncomingEmailLink(intent?.dataString)
     }
 
+    private fun requestLocationPermissionAndUpdate() {
+        val hasFineLocation = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarseLocation = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasFineLocation || hasCoarseLocation) {
+            updateCurrentUserLocation()
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
+    private fun updateCurrentUserLocation() {
+        val user = authViewModel.state.value.authenticatedUser ?: AuthDependencies.authUseCases().getCurrentUser() ?: return
+        locationScope.launch {
+            val location = findCurrentLocation() ?: return@launch
+            val locationLabel = formatLocation(location)
+            if (locationLabel.isBlank()) return@launch
+
+            val useCases = AuthDependencies.authUseCases()
+            val profile = when (val profileResult = useCases.getUserProfile(user.id)) {
+                is Resource.Success -> profileResult.data
+                else -> null
+            } ?: user.toLocationFallbackProfile()
+
+            useCases.updateUserProfile(profile.copy(location = locationLabel))
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun findCurrentLocation(): Location? {
+        return withContext(Dispatchers.Main) {
+            val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+            val knownProviders = listOf(
+                LocationManager.GPS_PROVIDER,
+                LocationManager.NETWORK_PROVIDER,
+                LocationManager.PASSIVE_PROVIDER
+            )
+            val lastLocation = knownProviders
+                .mapNotNull { providerName ->
+                    runCatching { locationManager.getLastKnownLocation(providerName) }.getOrNull()
+                }
+                .sortedWith(compareByDescending<Location> { it.time }.thenBy { it.accuracy })
+                .firstOrNull()
+
+            if (lastLocation != null) {
+                return@withContext lastLocation
+            }
+
+            val enabledProviders = runCatching { locationManager.getProviders(true) }
+                .getOrDefault(emptyList())
+                .filter { it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER }
+
+            if (enabledProviders.isEmpty()) {
+                return@withContext null
+            }
+
+            withTimeoutOrNull(LOCATION_FETCH_TIMEOUT_MS) {
+                suspendCancellableCoroutine { continuation ->
+                    val listener = object : LocationListener {
+                        override fun onLocationChanged(location: Location) {
+                            if (continuation.isActive) {
+                                continuation.resume(location)
+                            }
+                            locationManager.removeUpdates(this)
+                        }
+                    }
+
+                    continuation.invokeOnCancellation { locationManager.removeUpdates(listener) }
+                    var requestStarted = false
+                    enabledProviders.forEach { provider ->
+                        runCatching {
+                            locationManager.requestLocationUpdates(
+                                provider,
+                                0L,
+                                0f,
+                                listener,
+                                Looper.getMainLooper()
+                            )
+                            requestStarted = true
+                        }
+                    }
+                    if (!requestStarted && continuation.isActive) {
+                        continuation.resume(null)
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun formatLocation(location: Location): String {
+        return withContext(Dispatchers.IO) {
+            val geocoder = Geocoder(this@MainActivity, Locale.getDefault())
+            val address = runCatching {
+                @Suppress("DEPRECATION")
+                geocoder.getFromLocation(location.latitude, location.longitude, 1)?.firstOrNull()
+            }.getOrNull()
+            listOfNotNull(address?.locality, address?.adminArea, address?.countryName)
+                .distinct()
+                .joinToString(", ")
+                .ifBlank {
+                    "%.4f, %.4f".format(Locale.US, location.latitude, location.longitude)
+                }
+        }
+    }
+
+    private fun com.example.sportsxtreme.domain.model.User.toLocationFallbackProfile(): com.example.sportsxtreme.domain.model.UserProfile {
+        return com.example.sportsxtreme.domain.model.UserProfile(
+            id = id,
+            name = name.ifBlank { "SportsXtreme Player" },
+            email = email,
+            phoneNumber = mobileNumber,
+            profilePhotoUrl = profilePhotoUrl,
+            authProvider = authProvider,
+            isEmailVerified = isEmailVerified,
+            isPhoneVerified = isPhoneVerified
+        )
+    }
+
     companion object {
         const val EXTRA_START_DESTINATION = "extra_start_destination"
         const val DESTINATION_SPORT_SELECTION = "sport_selection"
+        private const val LOCATION_FETCH_TIMEOUT_MS = 12000L
     }
 }

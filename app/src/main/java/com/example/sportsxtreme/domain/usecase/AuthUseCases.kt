@@ -3,6 +3,7 @@ package com.example.sportsxtreme.domain.usecase
 data class AuthUseCases(
     val createEmailAccount: CreateEmailAccountUseCase,
     val resendEmailVerification: ResendEmailVerificationUseCase,
+    val sendEmailChangeVerification: SendEmailChangeVerificationUseCase,
     val checkEmailVerification: CheckEmailVerificationUseCase,
     val signInWithEmailAndPassword: SignInWithEmailAndPasswordUseCase,
     val signInWithGoogle: SignInWithGoogleUseCase,

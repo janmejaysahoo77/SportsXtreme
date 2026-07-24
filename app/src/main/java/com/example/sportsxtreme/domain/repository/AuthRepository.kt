@@ -16,6 +16,7 @@ interface AuthRepository {
 
     suspend fun createEmailAccount(request: EmailSignupRequest): Resource<AuthSession>
     suspend fun resendEmailVerification(): Resource<Unit>
+    suspend fun sendEmailChangeVerification(newEmail: String): Resource<Unit>
     suspend fun checkEmailVerification(): Resource<Boolean>
     suspend fun signInWithEmailAndPassword(email: String, password: String): Resource<AuthSession>
     suspend fun signInWithGoogle(idToken: String): Resource<AuthSession>

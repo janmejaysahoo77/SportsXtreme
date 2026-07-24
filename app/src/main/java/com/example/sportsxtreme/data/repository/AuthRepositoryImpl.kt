@@ -54,6 +54,10 @@ class AuthRepositoryImpl(
         return authDataSource.resendEmailVerification().toResource("Could not resend verification email")
     }
 
+    override suspend fun sendEmailChangeVerification(newEmail: String): Resource<Unit> {
+        return authDataSource.sendEmailChangeVerification(newEmail).toResource("Could not send verification email")
+    }
+
     override suspend fun checkEmailVerification(): Resource<Boolean> {
         return authDataSource.reloadAndCheckEmailVerified().toResource("Could not check email verification")
     }

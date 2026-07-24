@@ -17,6 +17,7 @@ import com.example.sportsxtreme.domain.usecase.GetUserProfileSettingsUseCase
 import com.example.sportsxtreme.domain.usecase.GetUserProfileStatsUseCase
 import com.example.sportsxtreme.domain.usecase.ResendPhoneOtpUseCase
 import com.example.sportsxtreme.domain.usecase.ResendEmailVerificationUseCase
+import com.example.sportsxtreme.domain.usecase.SendEmailChangeVerificationUseCase
 import com.example.sportsxtreme.domain.usecase.SendPhoneOtpUseCase
 import com.example.sportsxtreme.domain.usecase.SignInWithGoogleUseCase
 import com.example.sportsxtreme.domain.usecase.VerifyPhoneOtpUseCase
@@ -56,6 +57,7 @@ object AuthDependencies {
         AuthUseCases(
             createEmailAccount = CreateEmailAccountUseCase(repository),
             resendEmailVerification = ResendEmailVerificationUseCase(repository),
+            sendEmailChangeVerification = SendEmailChangeVerificationUseCase(repository),
             checkEmailVerification = CheckEmailVerificationUseCase(repository),
             signInWithEmailAndPassword = SignInWithEmailAndPasswordUseCase(repository),
             signInWithGoogle = SignInWithGoogleUseCase(repository),
