@@ -8,6 +8,7 @@ import com.example.sportsxtreme.domain.model.User
 import com.google.firebase.auth.ActionCodeSettings
 import com.google.firebase.auth.AuthCredential
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.UserProfileChangeRequest
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 
@@ -44,14 +45,27 @@ class AuthDataSource(
                     isEmailVerified = firebaseUser?.isEmailVerified == true,
                     isPhoneVerified = false
                 )
-                firebaseUser?.sendEmailVerification()
-                    ?.addOnSuccessListener {
-                        continuation.resume(Result.success(AuthSession(user, authResult.additionalUserInfo?.isNewUser == true)))
+                if (firebaseUser == null) {
+                    continuation.resume(Result.failure(IllegalStateException("Firebase account was created, but no active user was returned.")))
+                    return@addOnSuccessListener
+                }
+
+                val profileUpdates = UserProfileChangeRequest.Builder()
+                    .setDisplayName(request.name)
+                    .build()
+                firebaseUser.updateProfile(profileUpdates)
+                    .addOnSuccessListener {
+                        firebaseUser.sendEmailVerification()
+                            .addOnSuccessListener {
+                                continuation.resume(Result.success(AuthSession(user, authResult.additionalUserInfo?.isNewUser == true)))
+                            }
+                            .addOnFailureListener { exception ->
+                                continuation.resume(Result.failure(exception))
+                            }
                     }
-                    ?.addOnFailureListener { exception ->
+                    .addOnFailureListener { exception ->
                         continuation.resume(Result.failure(exception))
                     }
-                    ?: continuation.resume(Result.failure(IllegalStateException("Firebase account was created, but no active user was returned.")))
             }.addOnFailureListener { exception ->
                 continuation.resume(Result.failure(exception))
             }

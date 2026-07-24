@@ -11,6 +11,10 @@ import com.example.sportsxtreme.domain.usecase.AuthUseCases
 import com.example.sportsxtreme.domain.usecase.CreateEmailAccountUseCase
 import com.example.sportsxtreme.domain.usecase.CreateOrUpdateUserProfileUseCase
 import com.example.sportsxtreme.domain.usecase.GetCurrentUserUseCase
+import com.example.sportsxtreme.domain.usecase.GetUserAchievementsUseCase
+import com.example.sportsxtreme.domain.usecase.GetUserProfileUseCase
+import com.example.sportsxtreme.domain.usecase.GetUserProfileSettingsUseCase
+import com.example.sportsxtreme.domain.usecase.GetUserProfileStatsUseCase
 import com.example.sportsxtreme.domain.usecase.ResendPhoneOtpUseCase
 import com.example.sportsxtreme.domain.usecase.ResendEmailVerificationUseCase
 import com.example.sportsxtreme.domain.usecase.SendPhoneOtpUseCase
@@ -22,6 +26,7 @@ import com.example.sportsxtreme.domain.usecase.GetPendingEmailLinkUseCase
 import com.example.sportsxtreme.domain.usecase.HandleIncomingEmailLinkUseCase
 import com.example.sportsxtreme.domain.usecase.SendLoginEmailLinkUseCase
 import com.example.sportsxtreme.domain.usecase.SignInWithEmailAndPasswordUseCase
+import com.example.sportsxtreme.domain.usecase.UpdateUserProfileUseCase
 import com.example.sportsxtreme.presentation.auth.AuthViewModel
 
 object AuthDependencies {
@@ -59,6 +64,11 @@ object AuthDependencies {
             handleIncomingEmailLink = HandleIncomingEmailLinkUseCase(repository),
             getPendingEmailLink = GetPendingEmailLinkUseCase(repository),
             createOrUpdateUserProfile = CreateOrUpdateUserProfileUseCase(repository),
+            getUserProfile = GetUserProfileUseCase(repository),
+            updateUserProfile = UpdateUserProfileUseCase(repository),
+            getUserProfileStats = GetUserProfileStatsUseCase(repository),
+            getUserProfileSettings = GetUserProfileSettingsUseCase(repository),
+            getUserAchievements = GetUserAchievementsUseCase(repository),
             sendPhoneOtp = SendPhoneOtpUseCase(repository),
             resendPhoneOtp = ResendPhoneOtpUseCase(repository),
             verifyPhoneOtp = VerifyPhoneOtpUseCase(repository),
@@ -72,6 +82,10 @@ object AuthDependencies {
 
     fun authViewModel(): AuthViewModel {
         return authViewModel
+    }
+
+    fun authUseCases(): AuthUseCases {
+        return useCases
     }
 
     fun bindPhoneAuthActivity(activity: Activity) {

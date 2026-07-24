@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.data.repository
 
 import android.content.Context
+import android.util.Log
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.local.auth.PendingEmailLinkStore
 import com.example.sportsxtreme.data.remote.auth.AuthDataSource
@@ -14,6 +15,10 @@ import com.example.sportsxtreme.domain.model.EmailSignupRequest
 import com.example.sportsxtreme.domain.model.PendingUserProfile
 import com.example.sportsxtreme.domain.model.PhoneAuthSession
 import com.example.sportsxtreme.domain.model.User
+import com.example.sportsxtreme.domain.model.UserAchievement
+import com.example.sportsxtreme.domain.model.UserProfile
+import com.example.sportsxtreme.domain.model.UserProfileSettings
+import com.example.sportsxtreme.domain.model.UserProfileStats
 import com.example.sportsxtreme.domain.repository.AuthRepository
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuthActionCodeException
@@ -33,7 +38,16 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun createEmailAccount(request: EmailSignupRequest): Resource<AuthSession> {
-        return authDataSource.createEmailAccount(request).toResource("Signup failed")
+        return authDataSource.createEmailAccount(request).fold(
+            onSuccess = { session ->
+                when (val seedResult = seedFirestoreProfile(session.user, "email signup")) {
+                    is Resource.Success -> Resource.Success(session)
+                    is Resource.Error -> Resource.Error(seedResult.message ?: "Firestore profile setup failed")
+                    is Resource.Loading -> Resource.Loading()
+                }
+            },
+            onFailure = { error -> Resource.Error(error.toAuthMessage("Signup failed")) }
+        )
     }
 
     override suspend fun resendEmailVerification(): Resource<Unit> {
@@ -60,7 +74,16 @@ class AuthRepositoryImpl(
 
     override suspend fun signInWithGoogle(idToken: String): Resource<AuthSession> {
         val credential = GoogleAuthProvider.getCredential(idToken, null)
-        return authDataSource.signInWithCredential(credential, AuthProvider.GOOGLE).toResource("Google signup failed")
+        return authDataSource.signInWithCredential(credential, AuthProvider.GOOGLE).fold(
+            onSuccess = { session ->
+                when (val seedResult = seedFirestoreProfile(session.user, "Google sign-in")) {
+                    is Resource.Success -> Resource.Success(session)
+                    is Resource.Error -> Resource.Error(seedResult.message ?: "Firestore profile setup failed")
+                    is Resource.Loading -> Resource.Loading()
+                }
+            },
+            onFailure = { error -> Resource.Error(error.toAuthMessage("Google signup failed")) }
+        )
     }
 
     override suspend fun sendLoginEmailLink(email: String): Resource<Unit> {
@@ -118,6 +141,57 @@ class AuthRepositoryImpl(
 
     override suspend fun createOrUpdateUserProfile(profile: PendingUserProfile): Resource<User> {
         return firestoreUserDataSource.createOrUpdateUser(profile).toResource("User profile initialization failed")
+    }
+
+    private suspend fun seedFirestoreProfile(user: User, source: String): Resource<User> {
+        return firestoreUserDataSource.createOrUpdateUser(user.toPendingProfile()).fold(
+            onSuccess = { Resource.Success(it) },
+            onFailure = { error ->
+                Log.e(TAG, "Firestore profile seed failed during $source for uid=${user.id}", error)
+                Resource.Error("Account created, but Firestore profile setup failed: ${error.toAuthMessage("Firestore write failed")}")
+            }
+        )
+    }
+
+    private fun User.toPendingProfile(): PendingUserProfile {
+        return PendingUserProfile(
+            id = id,
+            name = name,
+            email = email,
+            phoneNumber = mobileNumber,
+            profilePhotoUrl = profilePhotoUrl,
+            authProvider = authProvider,
+            isEmailVerified = isEmailVerified,
+            isPhoneVerified = isPhoneVerified
+        )
+    }
+
+    override suspend fun getUserProfile(userId: String): Resource<UserProfile> {
+        return firestoreUserDataSource.getUserProfile(userId).toResource("Could not load user profile")
+    }
+
+    override suspend fun updateUserProfile(profile: UserProfile): Resource<UserProfile> {
+        return firestoreUserDataSource.updateUserProfile(profile).toResource("Could not update user profile")
+    }
+
+    override suspend fun getUserProfileStats(userId: String): Resource<UserProfileStats> {
+        return firestoreUserDataSource.getUserProfileStats(userId).toResource("Could not load profile stats")
+    }
+
+    override suspend fun updateUserProfileStats(stats: UserProfileStats): Resource<UserProfileStats> {
+        return firestoreUserDataSource.updateUserProfileStats(stats).toResource("Could not update profile stats")
+    }
+
+    override suspend fun getUserProfileSettings(userId: String): Resource<UserProfileSettings> {
+        return firestoreUserDataSource.getUserProfileSettings(userId).toResource("Could not load profile settings")
+    }
+
+    override suspend fun updateUserProfileSettings(settings: UserProfileSettings): Resource<UserProfileSettings> {
+        return firestoreUserDataSource.updateUserProfileSettings(settings).toResource("Could not update profile settings")
+    }
+
+    override suspend fun getUserAchievements(userId: String): Resource<List<UserAchievement>> {
+        return firestoreUserDataSource.getUserAchievements(userId).toResource("Could not load achievements")
     }
 
     override suspend fun sendPhoneOtp(phoneNumber: String): Resource<PhoneAuthSession> {
@@ -191,5 +265,9 @@ class AuthRepositoryImpl(
             is Resource.Error -> Resource.Error(message ?: "Authentication failed")
             is Resource.Loading -> Resource.Loading()
         }
+    }
+
+    private companion object {
+        const val TAG = "AuthRepository"
     }
 }

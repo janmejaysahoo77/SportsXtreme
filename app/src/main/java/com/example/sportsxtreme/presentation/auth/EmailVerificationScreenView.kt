@@ -95,7 +95,7 @@ class EmailVerificationScreenView @JvmOverloads constructor(
             when (val result = authViewModel.confirmEmailVerification()) {
                 is Resource.Success -> {
                     showMessage(null)
-                    (context as? MainActivity)?.showVerificationCompleteScreen()
+                    (context as? MainActivity)?.showHomeScreen()
                 }
                 is Resource.Error -> {
                     if (showUnverifiedMessage) {

@@ -201,8 +201,7 @@ class AuthViewModel(
         val phoneSession = state.value.pendingPhoneSession
             ?: return Resource.Error("No phone verification session is active.")
         if (phoneSession.isAutoVerified) {
-            markPhoneVerified(phoneSession.phoneNumber, PhoneVerificationStatus.AutoVerified)
-            return Resource.Success(Unit)
+            return markPhoneVerified(phoneSession.phoneNumber, PhoneVerificationStatus.AutoVerified)
         }
         _state.value = state.value.copy(
             isLoading = true,
@@ -213,7 +212,6 @@ class AuthViewModel(
         return when (result) {
             is Resource.Success -> {
                 markPhoneVerified(phoneSession.phoneNumber, PhoneVerificationStatus.VerificationSuccess)
-                Resource.Success(Unit)
             }
             is Resource.Error -> {
                 val message = result.message ?: "OTP verification failed"
@@ -277,16 +275,7 @@ class AuthViewModel(
                 Resource.Success(authenticatedUser)
             }
             is Resource.Error -> {
-                val message = result.message ?: "User profile initialization failed"
-                if (message.isFirestoreDatabaseMissing()) {
-                    return completeAuthWithoutBlockingOnProfile(user)
-                }
-                _state.value = state.value.copy(
-                    isLoading = false,
-                    emailVerificationStatus = EmailVerificationStatus.Failure,
-                    errorMessage = message
-                )
-                Resource.Error(message)
+                completeAuthWithoutBlockingOnProfile(user)
             }
             is Resource.Loading -> result
         }
@@ -308,11 +297,37 @@ class AuthViewModel(
         scope.cancel()
     }
 
-    private fun markPhoneVerified(phoneNumber: String, status: PhoneVerificationStatus) {
+    private suspend fun markPhoneVerified(phoneNumber: String, status: PhoneVerificationStatus): Resource<Unit> {
         val verifiedUser = state.value.pendingAuthSession?.user?.copy(
             mobileNumber = phoneNumber,
             isPhoneVerified = true
         )
+        if (verifiedUser != null) {
+            val profileResult = withTimeoutOrNull(PROFILE_WRITE_TIMEOUT_MS) {
+                useCases.createOrUpdateUserProfile(
+                    PendingUserProfile(
+                        id = verifiedUser.id,
+                        name = verifiedUser.name,
+                        email = verifiedUser.email,
+                        phoneNumber = verifiedUser.mobileNumber,
+                        profilePhotoUrl = verifiedUser.profilePhotoUrl,
+                        authProvider = verifiedUser.authProvider,
+                        isEmailVerified = verifiedUser.isEmailVerified,
+                        isPhoneVerified = verifiedUser.isPhoneVerified
+                    )
+                )
+            } ?: Resource.Error("Phone verified, but profile update timed out. Try again.")
+
+            if (profileResult is Resource.Error) {
+                val message = profileResult.message ?: "Phone verified, but profile update failed."
+                _state.value = state.value.copy(
+                    isLoading = false,
+                    phoneVerificationStatus = PhoneVerificationStatus.VerificationFailure,
+                    errorMessage = message
+                )
+                return Resource.Error(message)
+            }
+        }
         _state.value = state.value.copy(
             isLoading = false,
             pendingAuthSession = null,
@@ -321,6 +336,7 @@ class AuthViewModel(
             phoneVerificationStatus = status,
             errorMessage = null
         )
+        return Resource.Success(Unit)
     }
 
     private fun updateAuthSession(result: Resource<AuthSession>) {

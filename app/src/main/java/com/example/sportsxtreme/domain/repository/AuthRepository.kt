@@ -6,6 +6,10 @@ import com.example.sportsxtreme.domain.model.EmailSignupRequest
 import com.example.sportsxtreme.domain.model.PendingUserProfile
 import com.example.sportsxtreme.domain.model.PhoneAuthSession
 import com.example.sportsxtreme.domain.model.User
+import com.example.sportsxtreme.domain.model.UserAchievement
+import com.example.sportsxtreme.domain.model.UserProfile
+import com.example.sportsxtreme.domain.model.UserProfileSettings
+import com.example.sportsxtreme.domain.model.UserProfileStats
 
 interface AuthRepository {
     fun currentUser(): User?
@@ -22,6 +26,13 @@ interface AuthRepository {
     fun pendingEmailForLink(): String?
     suspend fun completeEmailLinkLogin(email: String, link: String? = null): Resource<AuthSession>
     suspend fun createOrUpdateUserProfile(profile: PendingUserProfile): Resource<User>
+    suspend fun getUserProfile(userId: String): Resource<UserProfile>
+    suspend fun updateUserProfile(profile: UserProfile): Resource<UserProfile>
+    suspend fun getUserProfileStats(userId: String): Resource<UserProfileStats>
+    suspend fun updateUserProfileStats(stats: UserProfileStats): Resource<UserProfileStats>
+    suspend fun getUserProfileSettings(userId: String): Resource<UserProfileSettings>
+    suspend fun updateUserProfileSettings(settings: UserProfileSettings): Resource<UserProfileSettings>
+    suspend fun getUserAchievements(userId: String): Resource<List<UserAchievement>>
     suspend fun sendPhoneOtp(phoneNumber: String): Resource<PhoneAuthSession>
     suspend fun resendPhoneOtp(session: PhoneAuthSession): Resource<PhoneAuthSession>
     suspend fun verifyPhoneOtp(verificationId: String, otpCode: String): Resource<Unit>
