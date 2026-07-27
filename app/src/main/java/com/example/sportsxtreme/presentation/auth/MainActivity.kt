@@ -94,9 +94,6 @@ class MainActivity : ComponentActivity() {
         } else if (hasIncomingAuthLink) {
             isCustomSplashReady = true
             currentScreen = Screen.Login
-        } else if (authViewModel.state.value.authenticatedUser != null) {
-            isCustomSplashReady = true
-            currentScreen = Screen.Home
         }
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
