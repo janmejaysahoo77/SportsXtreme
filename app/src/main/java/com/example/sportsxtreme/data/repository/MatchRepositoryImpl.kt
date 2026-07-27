@@ -238,6 +238,7 @@ class MatchRepositoryImpl @Inject constructor(
             overs = Overs(legalBalls / 6, legalBalls % 6),
             currentOverEvents = emptyList(),
             target = latestInnings?.target,
+            currentInnings = latestInnings?.toDomain(),
             updatedAtEpochMs = match.updatedAtEpochMs
         )
     }

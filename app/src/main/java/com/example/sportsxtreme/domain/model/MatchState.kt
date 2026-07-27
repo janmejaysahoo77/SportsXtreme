@@ -16,6 +16,10 @@ data class MatchState(
     val currentOverEvents: List<BallEvent>,
     val target: Int? = null,
     val lastEventId: String? = null,
+    val currentInnings: Innings? = null,
+    val currentOver: Overs = overs,
+    val currentRunRate: Double? = null,
+    val requiredRunRate: Double? = null,
     val updatedAtEpochMs: Long
 )
 

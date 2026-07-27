@@ -21,7 +21,9 @@ object LocalDatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SportsXtremeDatabase =
-        Room.databaseBuilder(context, SportsXtremeDatabase::class.java, "sports_xtreme.db").build()
+        Room.databaseBuilder(context, SportsXtremeDatabase::class.java, "sports_xtreme.db")
+            .addMigrations(SportsXtremeDatabase.MIGRATION_1_2)
+            .build()
 
     @Provides fun provideMatchDao(database: SportsXtremeDatabase): MatchDao = database.matchDao()
     @Provides fun provideTeamDao(database: SportsXtremeDatabase): TeamDao = database.teamDao()

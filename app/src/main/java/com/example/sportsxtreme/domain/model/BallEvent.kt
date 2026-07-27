@@ -1,12 +1,13 @@
 package com.example.sportsxtreme.domain.model
 
 data class BallEvent(
-    val id: String,
+    val ballId: String,
     val matchId: String,
     val inningsId: String,
+    val inningsNumber: Int,
     val sequenceNumber: Long,
     val overNumber: Int,
-    val ballNumberInOver: Int,
+    val ballNumber: Int,
     val legalBallNumber: Int,
     val battingTeamId: String,
     val bowlingTeamId: String,
@@ -14,42 +15,66 @@ data class BallEvent(
     val nonStrikerId: String,
     val bowlerId: String,
     val runsOffBat: Int,
-    val extras: Extras = Extras(),
-    val wicket: Wicket? = null,
+    val extras: List<ExtraRun> = emptyList(),
+    val dismissal: Dismissal? = null,
     val isLegalDelivery: Boolean,
+    val eventType: BallEventType = BallEventType.DELIVERY,
+    val reversedEventId: String? = null,
+    val comment: String? = null,
     val recordedByUserId: String,
-    val recordedAtEpochMs: Long,
+    val timestampEpochMs: Long,
+    val syncState: SyncState = SyncState.PENDING,
     val previousEventId: String? = null,
     val metadata: Map<String, String> = emptyMap()
 ) {
+    val extraRuns: Int
+        get() = extras.sumOf { it.runs }
+
     val totalRuns: Int
-        get() = runsOffBat + extras.total
+        get() = runsOffBat + extraRuns
 }
 
-data class Extras(
-    val wides: Int = 0,
-    val noBalls: Int = 0,
-    val byes: Int = 0,
-    val legByes: Int = 0,
-    val penalty: Int = 0
-) {
-    val total: Int
-        get() = wides + noBalls + byes + legByes + penalty
-}
+data class ExtraRun(
+    val type: ExtraType,
+    val runs: Int
+)
 
-data class Wicket(
+data class Dismissal(
+    val type: DismissalType,
     val dismissedPlayerId: String,
-    val type: WicketType,
     val assistedByPlayerIds: List<String> = emptyList()
 )
 
-enum class WicketType {
+enum class ExtraType {
+    NONE,
+    WIDE,
+    NO_BALL,
+    BYE,
+    LEG_BYE,
+    PENALTY
+}
+
+enum class DismissalType {
+    NONE,
     BOWLED,
     CAUGHT,
-    RUN_OUT,
     LBW,
+    RUN_OUT,
     STUMPED,
     HIT_WICKET,
-    RETIRED,
+    TIMED_OUT,
+    OBSTRUCTING_THE_FIELD,
+    RETIRED_OUT,
     OTHER
+}
+
+enum class BallEventType {
+    DELIVERY,
+    REVERSAL
+}
+
+enum class SyncState {
+    PENDING,
+    SYNCED,
+    FAILED
 }

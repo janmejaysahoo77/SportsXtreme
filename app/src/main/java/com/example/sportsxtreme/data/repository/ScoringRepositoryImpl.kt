@@ -31,7 +31,8 @@ class ScoringRepositoryImpl @Inject constructor(
     override suspend fun recordBall(event: BallEvent): Resource<MatchState> = runCatching {
         val innings = requireNotNull(inningsDao.getInnings(event.inningsId)) { "Innings not found" }
         require(innings.matchId == event.matchId) { "Ball event does not belong to this innings" }
-        ballEventDao.insertBall(event.toEntity(innings.number))
+        require(event.inningsNumber == innings.number) { "Ball event innings number does not match" }
+        ballEventDao.insertBall(event.toEntity())
         Resource.Success(matchStateFor(event.matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to save ball event") }
 
@@ -73,6 +74,7 @@ class ScoringRepositoryImpl @Inject constructor(
             overs = Overs(legalBalls / 6, legalBalls % 6),
             currentOverEvents = emptyList(),
             target = innings?.target,
+            currentInnings = innings?.toDomain(),
             updatedAtEpochMs = match.updatedAtEpochMs
         )
     }
