@@ -52,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,13 +82,31 @@ class SelectTeamAorBActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
         val teamSlot = intent.getStringExtra(EXTRA_TEAM_SLOT)?.takeIf { it == "B" } ?: "A"
+        val selectedTeamId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID)
+            ?: FRIENDLY_TEAM_OPTIONS.first().id
         setContent {
             SelectTeamAScreen(
                 teamSlot = teamSlot,
+                initialTeamId = selectedTeamId,
                 onBack = { finish() },
-                onDone = { finish() },
-                onViewDetails = { startActivity(Intent(this, ViewDetailsScreenWhileStartMatch::class.java)) }
+                onNext = { selectedTeam ->
+                    startActivity(
+                        Intent(this, FinalSquadActivity::class.java)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID, selectedTeam.id)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME, selectedTeam.name)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, teamSlot)
+                            .putExtras(intent.copyTeamSelectionExtras())
+                    )
+                },
+                onViewDetails = {
+                    startActivity(
+                        Intent(this, ViewDetailsScreenWhileStartMatch::class.java)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                    )
+                }
             )
         }
     }
@@ -103,11 +122,30 @@ private val TeamAPanel = Color(0xFF090F1C)
 private val TeamACard = Color(0xFF151B28)
 private val TeamAMuted = Color(0xFFAAB3B8)
 
+private data class FriendlyTeamOption(
+    val id: String,
+    val name: String
+)
+
+private val FRIENDLY_TEAM_OPTIONS = listOf(
+    FriendlyTeamOption("bhu", "Bhu"),
+    FriendlyTeamOption("dipesh-warrior-69", "Dipesh Warrior 69")
+)
+
 @Composable
-private fun SelectTeamAScreen(teamSlot: String, onBack: () -> Unit, onDone: () -> Unit, onViewDetails: () -> Unit) {
+private fun SelectTeamAScreen(
+    teamSlot: String,
+    initialTeamId: String,
+    onBack: () -> Unit,
+    onNext: (FriendlyTeamOption) -> Unit,
+    onViewDetails: () -> Unit
+) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var swipeAmount by remember { mutableStateOf(0f) }
     var previousTab by remember { mutableIntStateOf(0) }
+    var selectedTeamId by rememberSaveable { mutableStateOf(initialTeamId) }
+    val selectedTeam = FRIENDLY_TEAM_OPTIONS.firstOrNull { it.id == selectedTeamId }
+        ?: FRIENDLY_TEAM_OPTIONS.first()
 
     fun switchTab(tab: Int) {
         if (tab != selectedTab) {
@@ -159,6 +197,8 @@ private fun SelectTeamAScreen(teamSlot: String, onBack: () -> Unit, onDone: () -
                     Column(verticalArrangement = Arrangement.spacedBy(if (tab == 0) 14.dp else 13.dp)) {
                         if (tab == 0) {
                             TournamentTeamsContent(
+                                selectedTeamId = selectedTeamId,
+                                onTeamSelected = { selectedTeamId = it },
                                 onAddTeams = { switchTab(1) },
                                 onViewDetails = onViewDetails
                             )
@@ -184,13 +224,32 @@ private fun SelectTeamAScreen(teamSlot: String, onBack: () -> Unit, onDone: () -
                     .shadow(20.dp, RoundedCornerShape(12.dp), clip = false)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Brush.horizontalGradient(listOf(TeamAAccent, Color(0xFF9BFF00))))
-                    .clickable(onClick = onDone),
+                    .clickable(onClick = { onNext(selectedTeam) }),
                 contentAlignment = Alignment.Center
             ) {
-                Text(if (selectedTab == 0) "DONE" else "ADD TEAM", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text(if (selectedTab == 0) "NEXT->" else "ADD TEAM", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black)
             }
         }
     }
+}
+
+private fun Intent.copyTeamSelectionExtras(): Bundle = Bundle().apply {
+    putString(
+        SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID,
+        getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID)
+    )
+    putString(
+        SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME,
+        getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME)
+    )
+    putString(
+        SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID,
+        getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID)
+    )
+    putString(
+        SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME,
+        getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME)
+    )
 }
 
 @Composable
@@ -288,23 +347,30 @@ private fun TeamATabs(selectedTab: Int, onSelectTab: (Int) -> Unit) {
 }
 
 @Composable
-private fun TournamentTeamsContent(onAddTeams: () -> Unit, onViewDetails: () -> Unit) {
+private fun TournamentTeamsContent(
+    selectedTeamId: String,
+    onTeamSelected: (String) -> Unit,
+    onAddTeams: () -> Unit,
+    onViewDetails: () -> Unit
+) {
     SearchBox()
     LeagueHeader(onAddTeams)
     TeamRow(
         initials = "BH",
         title = "Bhu",
         subtitle = "Ready for Draft",
-        selected = true,
+        selected = selectedTeamId == "bhu",
         color = Color(0xFF1E73FF),
+        onSelect = { onTeamSelected("bhu") },
         onViewDetails = onViewDetails
     )
     TeamRow(
         initials = "DW",
         title = "Dipesh Warrior 69",
         subtitle = "Pending Entry",
-        selected = false,
+        selected = selectedTeamId == "dipesh-warrior-69",
         color = Color(0xFF007A70),
+        onSelect = { onTeamSelected("dipesh-warrior-69") },
         onViewDetails = onViewDetails
     )
 }
@@ -507,7 +573,15 @@ private fun AddTeamInfoCard() {
 }
 
 @Composable
-private fun TeamRow(initials: String, title: String, subtitle: String, selected: Boolean, color: Color, onViewDetails: () -> Unit) {
+private fun TeamRow(
+    initials: String,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    color: Color,
+    onSelect: () -> Unit,
+    onViewDetails: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -518,6 +592,7 @@ private fun TeamRow(initials: String, title: String, subtitle: String, selected:
                 if (selected) Brush.horizontalGradient(listOf(Color(0xFF16270E), Color(0xFF101B2A)))
                 else Brush.horizontalGradient(listOf(Color(0xFF111B2A), Color(0xFF0D1624)))
             )
+            .clickable(onClick = onSelect)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

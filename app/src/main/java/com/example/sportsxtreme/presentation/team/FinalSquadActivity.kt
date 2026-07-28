@@ -76,13 +76,52 @@ class FinalSquadActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
+        val teamSlot = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT).orEmpty()
+        val selectedTeamId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID).orEmpty()
+        val selectedTeamName = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME).orEmpty()
         setContent {
             FinalSquadScreen(
                 onBack = { finish() },
-                onNext = { startActivity(Intent(this, StartMatchPreviewActivity::class.java)) }
+                onNext = {
+                    startActivity(
+                        Intent(this, SelectPlayingTeamsActivity::class.java)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                            .putExtras(intent.copyTeamSelectionExtras())
+                            .apply {
+                                if (teamSlot == "A") {
+                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID, selectedTeamId)
+                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME, selectedTeamName)
+                                } else {
+                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID, selectedTeamId)
+                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME, selectedTeamName)
+                                }
+                            }
+                    )
+                    finish()
+                }
             )
         }
     }
+}
+
+private fun Intent.copyTeamSelectionExtras(): Bundle = Bundle().apply {
+    putString(
+        SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID,
+        getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID)
+    )
+    putString(
+        SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME,
+        getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME)
+    )
+    putString(
+        SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID,
+        getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID)
+    )
+    putString(
+        SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME,
+        getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME)
+    )
 }
 
 private val SquadAccent = Color(0xFFC1FF00)

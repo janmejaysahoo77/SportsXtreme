@@ -68,8 +68,18 @@ class StartMatchPreviewActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val teamA = PreviewSelectedTeam(
+            id = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID).orEmpty(),
+            name = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME).orEmpty()
+        ).takeIf { it.name.isNotBlank() }
+        val teamB = PreviewSelectedTeam(
+            id = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID).orEmpty(),
+            name = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME).orEmpty()
+        ).takeIf { it.name.isNotBlank() }
         setContent {
             StartMatchPreviewScreen(
+                teamA = teamA,
+                teamB = teamB,
                 onBack = { finish() },
                 onContinue = { startActivity(Intent(this, TossActivity::class.java)) }
             )
@@ -86,8 +96,18 @@ private val PreviewStroke = Color(0xFF25314A)
 private val PreviewMuted = Color(0xFFA9B5C4)
 private val PreviewBlue = Color(0xFF70B9FF)
 
+private data class PreviewSelectedTeam(
+    val id: String,
+    val name: String
+)
+
 @Composable
-private fun StartMatchPreviewScreen(onBack: () -> Unit, onContinue: () -> Unit) {
+private fun StartMatchPreviewScreen(
+    teamA: PreviewSelectedTeam?,
+    teamB: PreviewSelectedTeam?,
+    onBack: () -> Unit,
+    onContinue: () -> Unit
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -105,7 +125,7 @@ private fun StartMatchPreviewScreen(onBack: () -> Unit, onContinue: () -> Unit) 
                     .padding(horizontal = 14.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                MatchHeroCard()
+                MatchHeroCard(teamA = teamA, teamB = teamB)
                 MatchInformation()
                 MatchVenue()
                 BallTypeSection()
@@ -164,7 +184,7 @@ private fun PreviewTopBar(onBack: () -> Unit) {
 }
 
 @Composable
-private fun MatchHeroCard() {
+private fun MatchHeroCard(teamA: PreviewSelectedTeam?, teamB: PreviewSelectedTeam?) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -210,7 +230,10 @@ private fun MatchHeroCard() {
                 .padding(top = 18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            HeroTeam("DW", "Dipesh\nWarrior 69", "12 PLAYERS", Modifier.weight(1f))
+            HeroTeam(
+                team = teamA ?: PreviewSelectedTeam("team-a", "Team A"),
+                modifier = Modifier.weight(1f)
+            )
             Box(
                 modifier = Modifier
                     .size(52.dp)
@@ -221,13 +244,16 @@ private fun MatchHeroCard() {
             ) {
                 Text("VS", color = Color(0xFF111604), fontSize = 16.sp, fontWeight = FontWeight.Black)
             }
-            HeroTeam("BH", "Bhu", "12 PLAYERS", Modifier.weight(1f))
+            HeroTeam(
+                team = teamB ?: PreviewSelectedTeam("team-b", "Team B"),
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
 
 @Composable
-private fun HeroTeam(initials: String, name: String, players: String, modifier: Modifier = Modifier) {
+private fun HeroTeam(team: PreviewSelectedTeam, modifier: Modifier = Modifier) {
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
@@ -236,10 +262,10 @@ private fun HeroTeam(initials: String, name: String, players: String, modifier: 
                 .background(Brush.radialGradient(listOf(Color(0xFF111D35), Color(0xFF070D18)), radius = 100f)),
             contentAlignment = Alignment.Center
         ) {
-            Text(initials, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
+            PreviewTemporaryTeamLogo(team = team, modifier = Modifier.size(74.dp))
         }
         Text(
-            name,
+            team.name,
             color = Color.White,
             fontSize = 15.sp,
             lineHeight = 18.sp,
@@ -251,8 +277,29 @@ private fun HeroTeam(initials: String, name: String, players: String, modifier: 
         )
         Row(modifier = Modifier.padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             PreviewPeopleIcon(Modifier.size(14.dp), PreviewMuted)
-            Text(players, color = PreviewMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 4.dp))
+            Text("12 PLAYERS", color = PreviewMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 4.dp))
         }
+    }
+}
+
+@Composable
+private fun PreviewTemporaryTeamLogo(team: PreviewSelectedTeam, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .drawBehind {
+                drawCircle(Color(0x334E9AFF), radius = size.minDimension * 0.5f)
+                drawCircle(Color(0xFF111A21), radius = size.minDimension * 0.39f)
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        TeamBenchIcon(Modifier.size(34.dp), PreviewAccent)
+        Text(
+            team.name.take(2).uppercase(),
+            color = Color.White,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp)
+        )
     }
 }
 

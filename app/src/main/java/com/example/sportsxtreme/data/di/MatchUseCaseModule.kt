@@ -8,6 +8,7 @@ import com.example.sportsxtreme.domain.usecase.FinishMatchUseCase
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import com.example.sportsxtreme.domain.usecase.ObserveMatchStateUseCase
 import com.example.sportsxtreme.domain.usecase.ObserveActiveMatchUseCase
+import com.example.sportsxtreme.domain.usecase.ObserveMatchUseCase
 import com.example.sportsxtreme.domain.usecase.RecordBallUseCase
 import com.example.sportsxtreme.domain.usecase.SaveTossUseCase
 import com.example.sportsxtreme.domain.usecase.SelectOpeningPlayersUseCase
@@ -37,6 +38,7 @@ object MatchUseCaseModule {
             undoBall = UndoBallUseCase(scoringRepository),
             finishInnings = FinishInningsUseCase(matchRepository),
             finishMatch = FinishMatchUseCase(matchRepository),
+            observeMatch = ObserveMatchUseCase(matchRepository),
             observeActiveMatch = ObserveActiveMatchUseCase(matchRepository),
             observeMatchState = ObserveMatchStateUseCase(matchRepository)
         )

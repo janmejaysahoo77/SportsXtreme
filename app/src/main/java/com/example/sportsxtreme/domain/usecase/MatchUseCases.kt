@@ -10,6 +10,7 @@ data class MatchUseCases(
     val undoBall: UndoBallUseCase,
     val finishInnings: FinishInningsUseCase,
     val finishMatch: FinishMatchUseCase,
+    val observeMatch: ObserveMatchUseCase,
     val observeActiveMatch: ObserveActiveMatchUseCase,
     val observeMatchState: ObserveMatchStateUseCase
 )

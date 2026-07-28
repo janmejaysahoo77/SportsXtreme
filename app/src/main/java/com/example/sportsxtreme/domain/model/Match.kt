@@ -40,6 +40,7 @@ enum class TeamSide {
 
 enum class MatchStatus {
     CREATED,
+    TEAM_SELECTION,
     TOSS_PENDING,
     TEAM_A_PLAYING_XI_SELECTED,
     TEAM_B_PLAYING_XI_SELECTED,

@@ -21,7 +21,11 @@ fun CreateMatchRequest.toEntity(matchId: String): MatchEntity = MatchEntity(
     sport = sport.name,
     tournamentId = tournamentId,
     title = title,
-    status = MatchStatus.CREATED.name,
+    status = if (matchType == MatchType.FRIENDLY) {
+        MatchStatus.TEAM_SELECTION.name
+    } else {
+        MatchStatus.CREATED.name
+    },
     teamAId = teamA.teamId,
     teamBId = teamB.teamId,
     createdAtEpochMs = createdAtEpochMs,

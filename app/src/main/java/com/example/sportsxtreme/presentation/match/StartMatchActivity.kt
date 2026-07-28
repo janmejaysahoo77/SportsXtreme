@@ -15,6 +15,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -37,6 +38,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -60,19 +63,44 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.domain.model.MatchType
+import com.example.sportsxtreme.domain.usecase.MatchUseCases
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import android.widget.Toast
 
+@AndroidEntryPoint
 class StartMatchActivity : ComponentActivity() {
+    @Inject lateinit var matchUseCases: MatchUseCases
+    private val viewModel: StartMatchViewModel by viewModels {
+        StartMatchViewModel.factory(matchUseCases)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         setContent {
+            val uiState by viewModel.uiState.collectAsState()
+            LaunchedEffect(Unit) {
+                viewModel.events.collect { event ->
+                    when (event) {
+                        StartMatchEvent.NavigateToFriendlySetup -> {
+                            startActivity(
+                                Intent(this@StartMatchActivity, FriendlyMatchSetupActivity::class.java)
+                            )
+                        }
+                        is StartMatchEvent.ShowMessage -> {
+                            Toast.makeText(this@StartMatchActivity, event.message, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
             StartMatchScreen(
                 onBack = { finish() },
-                onContinue = {
-                    startActivity(Intent(this, LeagueTournamentFlowActivity::class.java))
-                }
+                onContinue = { selectedType -> viewModel.continueWith(selectedType) },
+                isLoading = uiState.isLoading
             )
         }
     }
@@ -87,7 +115,11 @@ private val MatchMuted = Color(0xFF8E9C9A)
 private val MatchBlue = Color(0xFF00D2FF)
 
 @Composable
-private fun StartMatchScreen(onBack: () -> Unit, onContinue: () -> Unit) {
+private fun StartMatchScreen(
+    onBack: () -> Unit,
+    onContinue: (MatchType) -> Unit,
+    isLoading: Boolean
+) {
     var selectedType by remember { mutableIntStateOf(0) }
     var selectedTournament by remember { mutableIntStateOf(0) }
     var selectedStage by remember { mutableIntStateOf(0) }
@@ -163,7 +195,10 @@ private fun StartMatchScreen(onBack: () -> Unit, onContinue: () -> Unit) {
                 .background(Brush.verticalGradient(listOf(Color(0x00010509), MatchBg, MatchBg)))
                 .padding(start = 14.dp, end = 14.dp, top = 22.dp, bottom = 14.dp)
         ) {
-            ContinueButton(onContinue)
+            ContinueButton(
+                onClick = { onContinue(if (selectedType == 2) MatchType.FRIENDLY else MatchType.TOURNAMENT) },
+                enabled = !isLoading
+            )
         }
     }
 }
@@ -478,14 +513,14 @@ private fun InfoNotice(text: String) {
 }
 
 @Composable
-private fun ContinueButton(onClick: () -> Unit) {
+private fun ContinueButton(onClick: () -> Unit, enabled: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(64.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(Brush.horizontalGradient(listOf(Color(0xFFD8FF42), MatchAccent, Color(0xFF70EA29))))
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
