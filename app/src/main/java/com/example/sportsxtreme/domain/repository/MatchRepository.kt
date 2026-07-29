@@ -2,6 +2,8 @@ package com.example.sportsxtreme.domain.repository
 
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.Match
+import com.example.sportsxtreme.domain.model.BallType
+import com.example.sportsxtreme.domain.model.MatchFormat
 import com.example.sportsxtreme.domain.model.MatchState
 import com.example.sportsxtreme.domain.model.MatchTeam
 import com.example.sportsxtreme.domain.model.MatchType
@@ -13,6 +15,12 @@ import kotlinx.coroutines.flow.Flow
 
 interface MatchRepository {
     suspend fun createMatch(request: CreateMatchRequest): Resource<Match>
+    suspend fun updateMatchSettings(
+        matchId: String,
+        format: MatchFormat,
+        ballType: BallType,
+        overs: Int
+    ): Resource<Match>
     suspend fun selectPlayingXI(matchId: String, side: TeamSide, playingXI: PlayingXI): Resource<Match>
     suspend fun saveToss(matchId: String, toss: Toss): Resource<Match>
     suspend fun selectOpeningPlayers(

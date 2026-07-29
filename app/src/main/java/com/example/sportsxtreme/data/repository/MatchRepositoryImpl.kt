@@ -15,7 +15,9 @@ import com.example.sportsxtreme.data.local.mapper.toEntities
 import com.example.sportsxtreme.data.local.mapper.toEntity
 import com.example.sportsxtreme.data.local.mapper.toMatchTeam
 import com.example.sportsxtreme.domain.model.InningsStatus
+import com.example.sportsxtreme.domain.model.BallType
 import com.example.sportsxtreme.domain.model.Match
+import com.example.sportsxtreme.domain.model.MatchFormat
 import com.example.sportsxtreme.domain.model.MatchState
 import com.example.sportsxtreme.domain.model.MatchStatus
 import com.example.sportsxtreme.domain.model.MatchTeam
@@ -50,6 +52,26 @@ class MatchRepositoryImpl @Inject constructor(
         }
         Resource.Success(loadMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to create match") }
+
+    override suspend fun updateMatchSettings(
+        matchId: String,
+        format: MatchFormat,
+        ballType: BallType,
+        overs: Int
+    ): Resource<Match> = runCatching {
+        database.withTransaction {
+            val match = requireMatch(matchId)
+            matchDao.updateMatch(
+                match.copy(
+                    format = format.name,
+                    ballType = ballType.name,
+                    overs = overs,
+                    updatedAtEpochMs = System.currentTimeMillis()
+                )
+            )
+        }
+        Resource.Success(loadMatch(matchId))
+    }.getOrElse { Resource.Error(it.message ?: "Unable to update match settings") }
 
     override suspend fun selectPlayingXI(
         matchId: String,

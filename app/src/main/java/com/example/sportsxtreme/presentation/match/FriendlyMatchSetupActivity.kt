@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,12 +26,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,6 +52,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -55,6 +61,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
+import com.example.sportsxtreme.domain.model.BallType
+import com.example.sportsxtreme.domain.model.MatchFormat
 import com.example.sportsxtreme.domain.model.MatchType
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import dagger.hilt.android.AndroidEntryPoint
@@ -104,8 +112,13 @@ class FriendlyMatchSetupActivity : ComponentActivity() {
             }
             FriendlyMatchSetupScreen(
                 onBack = { finish() },
-                onContinue = {
-                    startActivity(Intent(this@FriendlyMatchSetupActivity, FriendlyMatchDetailsActivity::class.java))
+                onContinue = { format, ballType, overs ->
+                    startActivity(
+                        Intent(this@FriendlyMatchSetupActivity, FriendlyMatchDetailsActivity::class.java)
+                            .putExtra(FriendlyMatchDetailsActivity.EXTRA_MATCH_FORMAT, format.name)
+                            .putExtra(FriendlyMatchDetailsActivity.EXTRA_BALL_TYPE, ballType.name)
+                            .putExtra(FriendlyMatchDetailsActivity.EXTRA_OVERS, overs)
+                    )
                 },
                 isLoading = false
             )
@@ -122,14 +135,19 @@ private val FriendlyMuted = Color(0xFF9AA69E)
 @Composable
 private fun FriendlyMatchSetupScreen(
     onBack: () -> Unit,
-    onContinue: () -> Unit,
+    onContinue: (MatchFormat, BallType, Int) -> Unit,
     isLoading: Boolean
 ) {
     var format by remember { mutableIntStateOf(1) }
     var ballType by remember { mutableIntStateOf(1) }
     var selectedOvers by remember { mutableIntStateOf(1) }
+    var customOvers by remember { mutableStateOf("15") }
+    var showCustomOversDialog by remember { mutableStateOf(false) }
+    var customOversError by remember { mutableStateOf(false) }
     val formats = listOf("Limited Overs", "T20 Match", "Test Match")
     val overs = listOf("5", "10", "20", "Custom")
+    val matchFormats = listOf(MatchFormat.ODI, MatchFormat.T20, MatchFormat.TEST)
+    val ballTypes = listOf(BallType.LEATHER, BallType.TENNIS, BallType.OTHER)
 
     Box(
         modifier = Modifier
@@ -196,7 +214,13 @@ private fun FriendlyMatchSetupScreen(
                                 .fillMaxSize()
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(if (selectedOvers == index) FriendlyAccent else Color.Transparent)
-                                .clickable { selectedOvers = index },
+                                .clickable {
+                                    if (index == 3) {
+                                        showCustomOversDialog = true
+                                    } else {
+                                        selectedOvers = index
+                                    }
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -211,7 +235,7 @@ private fun FriendlyMatchSetupScreen(
                 FriendlyMatchPreview(
                     format = formats[format],
                     ball = listOf("Leather Ball", "Tennis Ball", "Tape Ball")[ballType],
-                    overs = if (selectedOvers == 3) "Custom Overs" else "${overs[selectedOvers]} Overs"
+                    overs = if (selectedOvers == 3) "$customOvers Overs" else "${overs[selectedOvers]} Overs"
                 )
                 Spacer(Modifier.height(74.dp))
             }
@@ -229,13 +253,71 @@ private fun FriendlyMatchSetupScreen(
                     .height(52.dp)
                     .clip(RoundedCornerShape(28.dp))
                     .background(Brush.horizontalGradient(listOf(Color(0xFFD8FF38), FriendlyAccent, Color(0xFF9BFA00))))
-                    .clickable(enabled = !isLoading, onClick = onContinue),
+                    .clickable(
+                        enabled = !isLoading,
+                        onClick = {
+                            onContinue(
+                                matchFormats[format],
+                                ballTypes[ballType],
+                                when (selectedOvers) {
+                                    0 -> 5
+                                    1 -> 10
+                                    2 -> 20
+                                    else -> customOvers.toInt()
+                                }
+                            )
+                        }
+                    ),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(if (isLoading) "CREATING MATCH..." else "Continue", color = Color(0xFF101904), fontSize = 14.sp, fontWeight = FontWeight.Black)
                 FriendlyArrow(Modifier.padding(start = 10.dp).size(18.dp), true, Color(0xFF101904))
             }
+        }
+        if (showCustomOversDialog) {
+            AlertDialog(
+                onDismissRequest = { showCustomOversDialog = false },
+                title = { Text("Custom Overs") },
+                text = {
+                    Column {
+                        Text("Enter the number of overs for this match.")
+                        OutlinedTextField(
+                            value = customOvers,
+                            onValueChange = { value ->
+                                customOvers = value.filter(Char::isDigit)
+                                customOversError = false
+                            },
+                            label = { Text("Overs") },
+                            singleLine = true,
+                            isError = customOversError,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        if (customOversError) {
+                            Text("Enter at least 1 over.", color = Color(0xFFFF7676), fontSize = 12.sp)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            if (customOvers.toIntOrNull()?.let { it > 0 } == true) {
+                                selectedOvers = 3
+                                showCustomOversDialog = false
+                            } else {
+                                customOversError = true
+                            }
+                        }
+                    ) {
+                        Text("SAVE", color = FriendlyAccent)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCustomOversDialog = false }) {
+                        Text("CANCEL", color = FriendlyMuted)
+                    }
+                }
+            )
         }
     }
 }
@@ -382,14 +464,20 @@ class FriendlyMatchSetupViewModel(private val matchUseCases: MatchUseCases) : Vi
     val uiState: StateFlow<FriendlyMatchSetupUiState> = _uiState.asStateFlow()
     val events: SharedFlow<FriendlyMatchSetupEvent> = _events.asSharedFlow()
 
-    fun createFriendlyMatch() {
+    fun createFriendlyMatch(format: MatchFormat, ballType: BallType, overs: Int) {
         if (_uiState.value.isLoading) return
         scope.launch {
             _uiState.value = FriendlyMatchSetupUiState(isLoading = true)
             when (val result = matchUseCases.createMatch(MatchType.FRIENDLY)) {
                 is Resource.Success -> result.data?.let { match ->
-                    _uiState.value = FriendlyMatchSetupUiState()
-                    _events.emit(FriendlyMatchSetupEvent.NavigateToTeamSelection(match.id))
+                    when (val settingsResult = matchUseCases.updateMatchSettings(match.id, format, ballType, overs)) {
+                        is Resource.Success -> {
+                            _uiState.value = FriendlyMatchSetupUiState()
+                            _events.emit(FriendlyMatchSetupEvent.NavigateToTeamSelection(match.id))
+                        }
+                        is Resource.Error -> showError(settingsResult.message ?: "Unable to save match settings")
+                        is Resource.Loading -> Unit
+                    }
                 } ?: showError("Friendly match was not created")
                 is Resource.Error -> showError(result.message ?: "Unable to create friendly match")
                 is Resource.Loading -> Unit

@@ -51,6 +51,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.domain.model.BallType
+import com.example.sportsxtreme.domain.model.MatchFormat
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -67,6 +69,9 @@ class FriendlyMatchDetailsActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val format = intent.requiredMatchFormat()
+        val ballType = intent.requiredBallType()
+        val overs = intent.getIntExtra(EXTRA_OVERS, DEFAULT_OVERS)
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             LaunchedEffect(Unit) {
@@ -87,12 +92,27 @@ class FriendlyMatchDetailsActivity : ComponentActivity() {
             }
             FriendlyMatchDetailsScreen(
                 onBack = { finish() },
-                onContinue = viewModel::createFriendlyMatch,
+                onContinue = { viewModel.createFriendlyMatch(format, ballType, overs) },
                 isLoading = uiState.isLoading
             )
         }
     }
+
+    companion object {
+        const val EXTRA_MATCH_FORMAT = "friendly_match_format"
+        const val EXTRA_BALL_TYPE = "friendly_ball_type"
+        const val EXTRA_OVERS = "friendly_overs"
+        private const val DEFAULT_OVERS = 10
+    }
 }
+
+private fun Intent.requiredMatchFormat(): MatchFormat = runCatching {
+    MatchFormat.valueOf(getStringExtra(FriendlyMatchDetailsActivity.EXTRA_MATCH_FORMAT).orEmpty())
+}.getOrDefault(MatchFormat.T20)
+
+private fun Intent.requiredBallType(): BallType = runCatching {
+    BallType.valueOf(getStringExtra(FriendlyMatchDetailsActivity.EXTRA_BALL_TYPE).orEmpty())
+}.getOrDefault(BallType.TENNIS)
 
 private val DetailsAccent = Color(0xFFC1FF00)
 private val DetailsBg = Color(0xFF030A14)

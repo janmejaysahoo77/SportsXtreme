@@ -11,6 +11,8 @@ data class MatchEntity(
     val sport: String,
     val tournamentId: String?,
     val title: String,
+    val format: String? = null,
+    val ballType: String? = null,
     val status: String,
     val teamAId: String,
     val teamBId: String,

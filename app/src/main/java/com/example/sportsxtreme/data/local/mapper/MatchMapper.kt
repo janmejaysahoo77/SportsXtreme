@@ -4,6 +4,8 @@ import com.example.sportsxtreme.data.local.entity.MatchEntity
 import com.example.sportsxtreme.data.local.entity.PlayingXIEntity
 import com.example.sportsxtreme.data.local.entity.TeamEntity
 import com.example.sportsxtreme.domain.model.Match
+import com.example.sportsxtreme.domain.model.BallType
+import com.example.sportsxtreme.domain.model.MatchFormat
 import com.example.sportsxtreme.domain.model.MatchStatus
 import com.example.sportsxtreme.domain.model.MatchTeam
 import com.example.sportsxtreme.domain.model.MatchType
@@ -21,6 +23,8 @@ fun CreateMatchRequest.toEntity(matchId: String): MatchEntity = MatchEntity(
     sport = sport.name,
     tournamentId = tournamentId,
     title = title,
+    format = null,
+    ballType = null,
     status = if (matchType == MatchType.FRIENDLY) {
         MatchStatus.TEAM_SELECTION.name
     } else {
@@ -28,6 +32,7 @@ fun CreateMatchRequest.toEntity(matchId: String): MatchEntity = MatchEntity(
     },
     teamAId = teamA.teamId,
     teamBId = teamB.teamId,
+    overs = null,
     createdAtEpochMs = createdAtEpochMs,
     updatedAtEpochMs = createdAtEpochMs
 )
@@ -55,7 +60,10 @@ fun MatchEntity.toDomain(
     innings = innings,
     status = MatchStatus.valueOf(status),
     createdAtEpochMs = createdAtEpochMs,
-    updatedAtEpochMs = updatedAtEpochMs
+    updatedAtEpochMs = updatedAtEpochMs,
+    format = format?.let(MatchFormat::valueOf),
+    ballType = ballType?.let(BallType::valueOf),
+    overs = overs
 )
 
 fun TeamEntity.toMatchTeam(side: TeamSide): MatchTeam = MatchTeam(

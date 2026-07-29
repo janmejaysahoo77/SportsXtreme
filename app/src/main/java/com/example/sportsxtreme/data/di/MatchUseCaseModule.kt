@@ -15,6 +15,7 @@ import com.example.sportsxtreme.domain.usecase.SelectOpeningPlayersUseCase
 import com.example.sportsxtreme.domain.usecase.SelectPlayingXIUseCase
 import com.example.sportsxtreme.domain.usecase.StartMatchUseCase
 import com.example.sportsxtreme.domain.usecase.UndoBallUseCase
+import com.example.sportsxtreme.domain.usecase.UpdateMatchSettingsUseCase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -30,6 +31,7 @@ object MatchUseCaseModule {
     ): MatchUseCases {
         return MatchUseCases(
             createMatch = CreateMatchUseCase(matchRepository),
+            updateMatchSettings = UpdateMatchSettingsUseCase(matchRepository),
             selectPlayingXI = SelectPlayingXIUseCase(matchRepository),
             saveToss = SaveTossUseCase(matchRepository),
             selectOpeningPlayers = SelectOpeningPlayersUseCase(matchRepository),

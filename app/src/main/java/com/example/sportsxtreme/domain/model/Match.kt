@@ -14,7 +14,10 @@ data class Match(
     val innings: List<Innings> = emptyList(),
     val status: MatchStatus = MatchStatus.CREATED,
     val createdAtEpochMs: Long,
-    val updatedAtEpochMs: Long
+    val updatedAtEpochMs: Long,
+    val format: MatchFormat? = null,
+    val ballType: BallType? = null,
+    val overs: Int? = null
 )
 
 data class MatchTeam(
@@ -27,6 +30,19 @@ data class MatchTeam(
 enum class MatchType {
     FRIENDLY,
     TOURNAMENT
+}
+
+enum class MatchFormat {
+    T10,
+    T20,
+    ODI,
+    TEST
+}
+
+enum class BallType {
+    LEATHER,
+    TENNIS,
+    OTHER
 }
 
 enum class SportType {

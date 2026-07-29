@@ -22,7 +22,10 @@ object LocalDatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SportsXtremeDatabase =
         Room.databaseBuilder(context, SportsXtremeDatabase::class.java, "sports_xtreme.db")
-            .addMigrations(SportsXtremeDatabase.MIGRATION_1_2)
+            .addMigrations(
+                SportsXtremeDatabase.MIGRATION_1_2,
+                SportsXtremeDatabase.MIGRATION_2_3
+            )
             .build()
 
     @Provides fun provideMatchDao(database: SportsXtremeDatabase): MatchDao = database.matchDao()
