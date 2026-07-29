@@ -21,6 +21,12 @@ interface MatchRepository {
         ballType: BallType,
         overs: Int
     ): Resource<Match>
+    suspend fun updateMatchDetails(
+        matchId: String,
+        venue: String,
+        matchDateEpochMs: Long,
+        matchTime: String
+    ): Resource<Match>
     suspend fun selectPlayingXI(matchId: String, side: TeamSide, playingXI: PlayingXI): Resource<Match>
     suspend fun saveToss(matchId: String, toss: Toss): Resource<Match>
     suspend fun selectOpeningPlayers(

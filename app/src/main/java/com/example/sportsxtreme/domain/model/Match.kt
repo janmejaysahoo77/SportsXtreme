@@ -17,7 +17,10 @@ data class Match(
     val updatedAtEpochMs: Long,
     val format: MatchFormat? = null,
     val ballType: BallType? = null,
-    val overs: Int? = null
+    val overs: Int? = null,
+    val venue: String? = null,
+    val matchDateEpochMs: Long? = null,
+    val matchTime: String? = null
 )
 
 data class MatchTeam(

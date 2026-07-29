@@ -25,7 +25,7 @@ import com.example.sportsxtreme.data.local.entity.TeamEntity
         InningsEntity::class,
         BallEventEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class SportsXtremeDatabase : RoomDatabase() {
@@ -36,6 +36,13 @@ abstract class SportsXtremeDatabase : RoomDatabase() {
     abstract fun ballEventDao(): BallEventDao
 
     companion object {
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE matches ADD COLUMN matchDateEpochMs INTEGER")
+                db.execSQL("ALTER TABLE matches ADD COLUMN matchTime TEXT")
+            }
+        }
+
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE matches ADD COLUMN format TEXT")

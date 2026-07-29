@@ -97,10 +97,10 @@ class FriendlyMatchSetupActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 viewModel.events.collect { event ->
                     when (event) {
-                        is FriendlyMatchSetupEvent.NavigateToTeamSelection -> {
+                        is FriendlyMatchSetupEvent.NavigateToMatchDetails -> {
                             startActivity(
-                                Intent(this@FriendlyMatchSetupActivity, SelectPlayingTeamsActivity::class.java)
-                                    .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, event.matchId)
+                                Intent(this@FriendlyMatchSetupActivity, FriendlyMatchDetailsActivity::class.java)
+                                    .putExtra(FriendlyMatchDetailsActivity.EXTRA_MATCH_ID, event.matchId)
                             )
                             finish()
                         }
@@ -112,15 +112,8 @@ class FriendlyMatchSetupActivity : ComponentActivity() {
             }
             FriendlyMatchSetupScreen(
                 onBack = { finish() },
-                onContinue = { format, ballType, overs ->
-                    startActivity(
-                        Intent(this@FriendlyMatchSetupActivity, FriendlyMatchDetailsActivity::class.java)
-                            .putExtra(FriendlyMatchDetailsActivity.EXTRA_MATCH_FORMAT, format.name)
-                            .putExtra(FriendlyMatchDetailsActivity.EXTRA_BALL_TYPE, ballType.name)
-                            .putExtra(FriendlyMatchDetailsActivity.EXTRA_OVERS, overs)
-                    )
-                },
-                isLoading = false
+                onContinue = viewModel::createFriendlyMatch,
+                isLoading = uiState.isLoading
             )
         }
     }
@@ -452,7 +445,7 @@ private fun FriendlyHelpIcon(modifier: Modifier) {
 data class FriendlyMatchSetupUiState(val isLoading: Boolean = false)
 
 sealed interface FriendlyMatchSetupEvent {
-    data class NavigateToTeamSelection(val matchId: String) : FriendlyMatchSetupEvent
+    data class NavigateToMatchDetails(val matchId: String) : FriendlyMatchSetupEvent
     data class ShowMessage(val message: String) : FriendlyMatchSetupEvent
 }
 
@@ -473,7 +466,7 @@ class FriendlyMatchSetupViewModel(private val matchUseCases: MatchUseCases) : Vi
                     when (val settingsResult = matchUseCases.updateMatchSettings(match.id, format, ballType, overs)) {
                         is Resource.Success -> {
                             _uiState.value = FriendlyMatchSetupUiState()
-                            _events.emit(FriendlyMatchSetupEvent.NavigateToTeamSelection(match.id))
+                            _events.emit(FriendlyMatchSetupEvent.NavigateToMatchDetails(match.id))
                         }
                         is Resource.Error -> showError(settingsResult.message ?: "Unable to save match settings")
                         is Resource.Loading -> Unit

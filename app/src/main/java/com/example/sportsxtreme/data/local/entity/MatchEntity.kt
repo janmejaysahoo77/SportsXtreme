@@ -27,6 +27,8 @@ data class MatchEntity(
     val currentBowlerId: String? = null,
     val overs: Int? = null,
     val venue: String? = null,
+    val matchDateEpochMs: Long? = null,
+    val matchTime: String? = null,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long
 )

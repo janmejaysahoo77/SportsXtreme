@@ -3,9 +3,13 @@ package com.example.sportsxtreme.presentation.match
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,11 +29,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,22 +55,36 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
-import com.example.sportsxtreme.domain.model.BallType
-import com.example.sportsxtreme.domain.model.MatchFormat
+import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 @AndroidEntryPoint
 class FriendlyMatchDetailsActivity : ComponentActivity() {
     @Inject lateinit var matchUseCases: MatchUseCases
-    private val viewModel: FriendlyMatchSetupViewModel by viewModels {
-        FriendlyMatchSetupViewModel.factory(matchUseCases)
+    private val viewModel: FriendlyMatchDetailsViewModel by viewModels {
+        FriendlyMatchDetailsViewModel.factory(matchUseCases)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,22 +92,20 @@ class FriendlyMatchDetailsActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        val format = intent.requiredMatchFormat()
-        val ballType = intent.requiredBallType()
-        val overs = intent.getIntExtra(EXTRA_OVERS, DEFAULT_OVERS)
+        val matchId = intent.getStringExtra(EXTRA_MATCH_ID).orEmpty()
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             LaunchedEffect(Unit) {
                 viewModel.events.collect { event ->
                     when (event) {
-                        is FriendlyMatchSetupEvent.NavigateToTeamSelection -> {
+                        is FriendlyMatchDetailsEvent.NavigateToTeamSelection -> {
                             startActivity(
                                 Intent(this@FriendlyMatchDetailsActivity, SelectPlayingTeamsActivity::class.java)
                                     .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, event.matchId)
                             )
                             finish()
                         }
-                        is FriendlyMatchSetupEvent.ShowMessage -> Toast.makeText(
+                        is FriendlyMatchDetailsEvent.ShowMessage -> Toast.makeText(
                             this@FriendlyMatchDetailsActivity, event.message, Toast.LENGTH_SHORT
                         ).show()
                     }
@@ -92,27 +113,18 @@ class FriendlyMatchDetailsActivity : ComponentActivity() {
             }
             FriendlyMatchDetailsScreen(
                 onBack = { finish() },
-                onContinue = { viewModel.createFriendlyMatch(format, ballType, overs) },
+                onContinue = { venue, matchDateEpochMs, matchTime ->
+                    viewModel.updateMatchDetails(matchId, venue, matchDateEpochMs, matchTime)
+                },
                 isLoading = uiState.isLoading
             )
         }
     }
 
     companion object {
-        const val EXTRA_MATCH_FORMAT = "friendly_match_format"
-        const val EXTRA_BALL_TYPE = "friendly_ball_type"
-        const val EXTRA_OVERS = "friendly_overs"
-        private const val DEFAULT_OVERS = 10
+        const val EXTRA_MATCH_ID = "match_id"
     }
 }
-
-private fun Intent.requiredMatchFormat(): MatchFormat = runCatching {
-    MatchFormat.valueOf(getStringExtra(FriendlyMatchDetailsActivity.EXTRA_MATCH_FORMAT).orEmpty())
-}.getOrDefault(MatchFormat.T20)
-
-private fun Intent.requiredBallType(): BallType = runCatching {
-    BallType.valueOf(getStringExtra(FriendlyMatchDetailsActivity.EXTRA_BALL_TYPE).orEmpty())
-}.getOrDefault(BallType.TENNIS)
 
 private val DetailsAccent = Color(0xFFC1FF00)
 private val DetailsBg = Color(0xFF030A14)
@@ -121,10 +133,27 @@ private val DetailsBorder = Color(0xFF17283A)
 private val DetailsMuted = Color(0xFF8D9B9C)
 
 @Composable
-private fun FriendlyMatchDetailsScreen(onBack: () -> Unit, onContinue: () -> Unit, isLoading: Boolean) {
+private fun FriendlyMatchDetailsScreen(
+    onBack: () -> Unit,
+    onContinue: (String, Long, String) -> Unit,
+    isLoading: Boolean
+) {
+    val context = LocalContext.current
     var ground by remember { mutableIntStateOf(0) }
     var date by remember { mutableIntStateOf(0) }
     var timeMode by remember { mutableIntStateOf(1) }
+    var venue by remember { mutableStateOf("KRT Stadium, Bhubaneswar") }
+    var customVenue by remember { mutableStateOf("") }
+    var showVenueDialog by remember { mutableStateOf(false) }
+    var matchDateEpochMs by remember { mutableLongStateOf(startOfToday()) }
+    var matchTime by remember { mutableStateOf("06:30 PM") }
+    val openTimePicker = {
+        val calendar = Calendar.getInstance()
+        TimePickerDialog(context, { _, hour, minute ->
+            timeMode = 2
+            matchTime = formatMatchTime(hour, minute)
+        }, calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE), false).show()
+    }
     Box(
         modifier = Modifier.fillMaxSize().background(DetailsBg).drawBehind {
             drawCircle(Color(0x15214970), size.width * 0.69f, Offset(size.width * 1.08f, size.height * 0.24f))
@@ -142,23 +171,49 @@ private fun FriendlyMatchDetailsScreen(onBack: () -> Unit, onContinue: () -> Uni
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 DetailsHeading("Ground Selection", DetailsIcon.LOCATION)
-                DetailsOptionCard("Select Existing Ground", "KRT Stadium, Bhubaneswar", ground == 0) { ground = 0 }
-                DetailsOptionCard("Use Current Location", null, ground == 1) { ground = 1 }
-                DetailsOptionCard("Add New Ground", null, ground == 2) { ground = 2 }
+                DetailsOptionCard("Select Existing Ground", "KRT Stadium, Bhubaneswar", ground == 0) {
+                    ground = 0
+                    venue = "KRT Stadium, Bhubaneswar"
+                }
+                DetailsOptionCard("Use Current Location", null, ground == 1) {
+                    ground = 1
+                    venue = "Current Location"
+                }
+                DetailsOptionCard("Add New Ground", null, ground == 2) {
+                    showVenueDialog = true
+                }
                 DetailsHeading("Match Date", DetailsIcon.CALENDAR)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                    DetailsDateCard("Today", "OCT 31", date == 0, Modifier.weight(1f)) { date = 0 }
-                    DetailsDateCard("Tomorrow", "OCT 32", date == 1, Modifier.weight(1f)) { date = 1 }
-                    DetailsDateCard("Custom", "SELECT", date == 2, Modifier.weight(1f)) { date = 2 }
+                    DetailsDateCard("Today", formatShortDate(startOfToday()), date == 0, Modifier.weight(1f)) {
+                        date = 0
+                        matchDateEpochMs = startOfToday()
+                    }
+                    DetailsDateCard("Tomorrow", formatShortDate(startOfTomorrow()), date == 1, Modifier.weight(1f)) {
+                        date = 1
+                        matchDateEpochMs = startOfTomorrow()
+                    }
+                    DetailsDateCard("Custom", formatShortDate(matchDateEpochMs), date == 2, Modifier.weight(1f)) {
+                        val calendar = Calendar.getInstance().apply { timeInMillis = matchDateEpochMs }
+                        DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                            date = 2
+                            matchDateEpochMs = startOfDay(year, month, dayOfMonth)
+                        }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+                    }
                 }
                 DetailsHeading("Match Time", DetailsIcon.CLOCK)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DetailsTimeChip("Now", timeMode == 0) { timeMode = 0 }
-                    DetailsTimeChip("Choose Time", timeMode == 1) { timeMode = 1 }
-                    DetailsTimeChip("Custom Time", timeMode == 2) { timeMode = 2 }
+                    DetailsTimeChip("Now", timeMode == 0) {
+                        timeMode = 0
+                        matchTime = formatMatchTime(Calendar.getInstance())
+                    }
+                    DetailsTimeChip("Choose Time", timeMode == 1) {
+                        timeMode = 1
+                        matchTime = "06:30 PM"
+                    }
+                    DetailsTimeChip("Custom Time", timeMode == 2, openTimePicker)
                 }
-                DetailsTimeCard(timeMode)
-                DetailsSnapshot()
+                DetailsTimeCard(matchTime, openTimePicker)
+                DetailsSnapshot(venue, matchDateEpochMs, matchTime)
                 Spacer(Modifier.height(70.dp))
             }
         }
@@ -170,12 +225,44 @@ private fun FriendlyMatchDetailsScreen(onBack: () -> Unit, onContinue: () -> Uni
             Row(
                 modifier = Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(26.dp))
                     .background(Brush.horizontalGradient(listOf(Color(0xFFD8FF37), DetailsAccent, Color(0xFF9AFF00))))
-                    .clickable(enabled = !isLoading, onClick = onContinue),
+                    .clickable(
+                        enabled = !isLoading && venue.isNotBlank() && matchDateEpochMs > 0L && matchTime.isNotBlank(),
+                        onClick = { onContinue(venue, matchDateEpochMs, matchTime) }
+                    ),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(if (isLoading) "CREATING MATCH..." else "CONTINUE", color = Color(0xFF122004), fontSize = 13.sp, fontWeight = FontWeight.Black)
+                Text(if (isLoading) "SAVING DETAILS..." else "CONTINUE", color = Color(0xFF122004), fontSize = 13.sp, fontWeight = FontWeight.Black)
                 DetailsArrow(Modifier.padding(start = 9.dp).size(17.dp), true, Color(0xFF122004))
             }
+        }
+        if (showVenueDialog) {
+            AlertDialog(
+                onDismissRequest = { showVenueDialog = false },
+                title = { Text("Add New Ground") },
+                text = {
+                    OutlinedTextField(
+                        value = customVenue,
+                        onValueChange = { customVenue = it },
+                        label = { Text("Ground name") },
+                        singleLine = true
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val newVenue = customVenue.trim()
+                            if (newVenue.isNotBlank()) {
+                                ground = 2
+                                venue = newVenue
+                                showVenueDialog = false
+                            }
+                        }
+                    ) { Text("SAVE", color = DetailsAccent) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showVenueDialog = false }) { Text("CANCEL", color = DetailsMuted) }
+                }
+            )
         }
     }
 }
@@ -246,22 +333,22 @@ private fun DetailsTimeChip(label: String, selected: Boolean, onClick: () -> Uni
 }
 
 @Composable
-private fun DetailsTimeCard(timeMode: Int) {
+private fun DetailsTimeCard(matchTime: String, onEditTime: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().height(55.dp).clip(RoundedCornerShape(10.dp)).background(DetailsCard)
             .border(1.dp, DetailsBorder, RoundedCornerShape(10.dp)).padding(horizontal = 13.dp), verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(if (timeMode == 0) "NOW" else "06:30", color = Color.White, fontSize = 24.sp)
-        Text("PM", color = DetailsAccent, fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 5.dp, top = 6.dp))
+        Text(matchTime.substringBefore(" "), color = Color.White, fontSize = 24.sp)
+        Text(matchTime.substringAfter(" ", ""), color = DetailsAccent, fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 5.dp, top = 6.dp))
         Spacer(Modifier.weight(1f))
-        Box(Modifier.size(25.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF1A2838)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(25.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF1A2838)).clickable(onClick = onEditTime), contentAlignment = Alignment.Center) {
             DetailsIconCanvas(DetailsIcon.EDIT, Modifier.size(13.dp), DetailsMuted)
         }
     }
 }
 
 @Composable
-private fun DetailsSnapshot() {
+private fun DetailsSnapshot(venue: String, matchDateEpochMs: Long, matchTime: String) {
     Row(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(Color(0xDD091522)).border(1.dp, DetailsBorder, RoundedCornerShape(9.dp))
             .drawBehind { drawLine(DetailsAccent, Offset(0f, 8.dp.toPx()), Offset(0f, size.height - 8.dp.toPx()), 3.dp.toPx()) }.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -271,8 +358,44 @@ private fun DetailsSnapshot() {
             Text("MATCH SNAPSHOT", color = DetailsMuted, fontSize = 6.sp, fontWeight = FontWeight.Black, letterSpacing = 0.8.sp)
             Text("Friendly • Today • KRT Stadium", color = Color(0xFFCFD8D4), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
         }
-        Text("18:30", color = DetailsAccent, fontSize = 13.sp, fontWeight = FontWeight.Black)
+        Text(matchTime, color = DetailsAccent, fontSize = 13.sp, fontWeight = FontWeight.Black)
     }
+}
+
+private fun startOfToday(): Long = Calendar.getInstance().apply {
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+}.timeInMillis
+
+private fun startOfTomorrow(): Long = Calendar.getInstance().apply {
+    add(Calendar.DAY_OF_YEAR, 1)
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+}.timeInMillis
+
+private fun startOfDay(year: Int, month: Int, dayOfMonth: Int): Long = Calendar.getInstance().apply {
+    set(year, month, dayOfMonth, 0, 0, 0)
+    set(Calendar.MILLISECOND, 0)
+}.timeInMillis
+
+private fun formatShortDate(epochMs: Long): String =
+    SimpleDateFormat("MMM dd", Locale.getDefault()).format(epochMs).uppercase(Locale.getDefault())
+
+private fun formatMatchTime(calendar: Calendar): String = formatMatchTime(
+    calendar.get(Calendar.HOUR_OF_DAY),
+    calendar.get(Calendar.MINUTE)
+)
+
+private fun formatMatchTime(hour: Int, minute: Int): String {
+    val calendar = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
+    }
+    return SimpleDateFormat("hh:mm a", Locale.getDefault()).format(calendar.time)
 }
 
 private enum class DetailsIcon { LOCATION, CALENDAR, CLOCK, EDIT, CHECK, INFO }
@@ -300,6 +423,64 @@ private fun DetailsIconCanvas(icon: DetailsIcon, modifier: Modifier, color: Colo
             DetailsIcon.EDIT -> { drawLine(color, Offset(size.width * .28f, size.height * .73f), Offset(size.width * .72f, size.height * .29f), strokeWidth = stroke.width * 1.5f, cap = StrokeCap.Round); drawLine(color, Offset(size.width * .26f, size.height * .76f), Offset(size.width * .43f, size.height * .72f), strokeWidth = stroke.width, cap = StrokeCap.Round) }
             DetailsIcon.CHECK -> { drawCircle(color, size.minDimension * .37f); drawLine(Color(0xFF1C2908), Offset(size.width * .32f, size.height * .5f), Offset(size.width * .46f, size.height * .64f), strokeWidth = stroke.width, cap = StrokeCap.Round); drawLine(Color(0xFF1C2908), Offset(size.width * .46f, size.height * .64f), Offset(size.width * .7f, size.height * .36f), strokeWidth = stroke.width, cap = StrokeCap.Round) }
             DetailsIcon.INFO -> { drawCircle(color, size.minDimension * .38f, style = stroke); drawLine(color, Offset(size.width * .5f, size.height * .45f), Offset(size.width * .5f, size.height * .7f), strokeWidth = stroke.width, cap = StrokeCap.Round); drawCircle(color, size.minDimension * .045f, Offset(size.width * .5f, size.height * .29f)) }
+        }
+    }
+}
+
+private data class FriendlyMatchDetailsUiState(val isLoading: Boolean = false)
+
+private sealed interface FriendlyMatchDetailsEvent {
+    data class NavigateToTeamSelection(val matchId: String) : FriendlyMatchDetailsEvent
+    data class ShowMessage(val message: String) : FriendlyMatchDetailsEvent
+}
+
+private class FriendlyMatchDetailsViewModel(private val matchUseCases: MatchUseCases) : ViewModel() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _uiState = MutableStateFlow(FriendlyMatchDetailsUiState())
+    private val _events = MutableSharedFlow<FriendlyMatchDetailsEvent>()
+
+    val uiState: StateFlow<FriendlyMatchDetailsUiState> = _uiState.asStateFlow()
+    val events: SharedFlow<FriendlyMatchDetailsEvent> = _events.asSharedFlow()
+
+    fun updateMatchDetails(matchId: String, venue: String, matchDateEpochMs: Long, matchTime: String) {
+        if (_uiState.value.isLoading) return
+        if (matchId.isBlank()) {
+            scope.launch { showError("Match id is missing") }
+            return
+        }
+        if (venue.isBlank() || matchDateEpochMs <= 0L || matchTime.isBlank()) {
+            scope.launch { showError("Complete all match details") }
+            return
+        }
+        scope.launch {
+            _uiState.value = FriendlyMatchDetailsUiState(isLoading = true)
+            when (val result = matchUseCases.updateMatchDetails(matchId, venue, matchDateEpochMs, matchTime)) {
+                is Resource.Success -> {
+                    _uiState.value = FriendlyMatchDetailsUiState()
+                    _events.emit(FriendlyMatchDetailsEvent.NavigateToTeamSelection(matchId))
+                }
+                is Resource.Error -> showError(result.message ?: "Unable to save match details")
+                is Resource.Loading -> Unit
+            }
+        }
+    }
+
+    override fun onCleared() {
+        scope.cancel()
+    }
+
+    private suspend fun showError(message: String) {
+        _uiState.value = FriendlyMatchDetailsUiState()
+        _events.emit(FriendlyMatchDetailsEvent.ShowMessage(message))
+    }
+
+    companion object {
+        fun factory(matchUseCases: MatchUseCases): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                require(modelClass.isAssignableFrom(FriendlyMatchDetailsViewModel::class.java))
+                return FriendlyMatchDetailsViewModel(matchUseCases) as T
+            }
         }
     }
 }

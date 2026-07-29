@@ -3,6 +3,7 @@ package com.example.sportsxtreme.domain.usecase
 data class MatchUseCases(
     val createMatch: CreateMatchUseCase,
     val updateMatchSettings: UpdateMatchSettingsUseCase,
+    val updateMatchDetails: UpdateMatchDetailsUseCase,
     val selectPlayingXI: SelectPlayingXIUseCase,
     val saveToss: SaveTossUseCase,
     val selectOpeningPlayers: SelectOpeningPlayersUseCase,

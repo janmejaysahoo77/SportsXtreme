@@ -24,7 +24,8 @@ object LocalDatabaseModule {
         Room.databaseBuilder(context, SportsXtremeDatabase::class.java, "sports_xtreme.db")
             .addMigrations(
                 SportsXtremeDatabase.MIGRATION_1_2,
-                SportsXtremeDatabase.MIGRATION_2_3
+                SportsXtremeDatabase.MIGRATION_2_3,
+                SportsXtremeDatabase.MIGRATION_3_4
             )
             .build()
 

@@ -33,6 +33,9 @@ fun CreateMatchRequest.toEntity(matchId: String): MatchEntity = MatchEntity(
     teamAId = teamA.teamId,
     teamBId = teamB.teamId,
     overs = null,
+    venue = null,
+    matchDateEpochMs = null,
+    matchTime = null,
     createdAtEpochMs = createdAtEpochMs,
     updatedAtEpochMs = createdAtEpochMs
 )
@@ -63,7 +66,10 @@ fun MatchEntity.toDomain(
     updatedAtEpochMs = updatedAtEpochMs,
     format = format?.let(MatchFormat::valueOf),
     ballType = ballType?.let(BallType::valueOf),
-    overs = overs
+    overs = overs,
+    venue = venue,
+    matchDateEpochMs = matchDateEpochMs,
+    matchTime = matchTime
 )
 
 fun TeamEntity.toMatchTeam(side: TeamSide): MatchTeam = MatchTeam(

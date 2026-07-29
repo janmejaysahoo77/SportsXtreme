@@ -73,6 +73,26 @@ class MatchRepositoryImpl @Inject constructor(
         Resource.Success(loadMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to update match settings") }
 
+    override suspend fun updateMatchDetails(
+        matchId: String,
+        venue: String,
+        matchDateEpochMs: Long,
+        matchTime: String
+    ): Resource<Match> = runCatching {
+        database.withTransaction {
+            val match = requireMatch(matchId)
+            matchDao.updateMatch(
+                match.copy(
+                    venue = venue,
+                    matchDateEpochMs = matchDateEpochMs,
+                    matchTime = matchTime,
+                    updatedAtEpochMs = System.currentTimeMillis()
+                )
+            )
+        }
+        Resource.Success(loadMatch(matchId))
+    }.getOrElse { Resource.Error(it.message ?: "Unable to update match details") }
+
     override suspend fun selectPlayingXI(
         matchId: String,
         side: TeamSide,
