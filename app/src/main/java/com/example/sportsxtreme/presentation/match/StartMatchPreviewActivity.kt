@@ -62,26 +62,40 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 
+import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.example.sportsxtreme.domain.model.Match
+import com.example.sportsxtreme.domain.usecase.MatchUseCases
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import java.text.SimpleDateFormat
+import java.util.Locale
+
+@AndroidEntryPoint
 class StartMatchPreviewActivity : ComponentActivity() {
+    @Inject lateinit var matchUseCases: MatchUseCases
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        val teamA = PreviewSelectedTeam(
-            id = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID).orEmpty(),
-            name = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME).orEmpty()
-        ).takeIf { it.name.isNotBlank() }
-        val teamB = PreviewSelectedTeam(
-            id = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID).orEmpty(),
-            name = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME).orEmpty()
-        ).takeIf { it.name.isNotBlank() }
+        val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
+        val viewModel: StartMatchPreviewViewModel by viewModels {
+            StartMatchPreviewViewModel.factory(matchId, matchUseCases)
+        }
         setContent {
+            val uiState by viewModel.uiState.collectAsState()
             StartMatchPreviewScreen(
-                teamA = teamA,
-                teamB = teamB,
+                match = uiState.match,
                 onBack = { finish() },
-                onContinue = { startActivity(Intent(this, TossActivity::class.java)) }
+                onContinue = {
+                    startActivity(
+                        Intent(this, TossActivity::class.java)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                    )
+                }
             )
         }
     }
@@ -103,11 +117,13 @@ private data class PreviewSelectedTeam(
 
 @Composable
 private fun StartMatchPreviewScreen(
-    teamA: PreviewSelectedTeam?,
-    teamB: PreviewSelectedTeam?,
+    match: Match?,
     onBack: () -> Unit,
     onContinue: () -> Unit
 ) {
+    val teamA = match?.teamA?.let { PreviewSelectedTeam(it.teamId, it.name) }
+    val teamB = match?.teamB?.let { PreviewSelectedTeam(it.teamId, it.name) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -126,11 +142,11 @@ private fun StartMatchPreviewScreen(
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 MatchHeroCard(teamA = teamA, teamB = teamB)
-                MatchInformation()
-                MatchVenue()
-                BallTypeSection()
+                MatchInformation(match = match)
+                MatchVenue(match = match)
+                BallTypeSection(match = match)
                 AdvancedSettingsCard()
-                ScheduleMatchSection()
+                ScheduleMatchSection(match = match)
                 Spacer(Modifier.height(100.dp))
             }
         }
@@ -304,10 +320,35 @@ private fun PreviewTemporaryTeamLogo(team: PreviewSelectedTeam, modifier: Modifi
 }
 
 @Composable
-private fun MatchInformation() {
+private fun MatchInformation(match: Match?) {
+    val formatStr = match?.format?.name?.replace('_', ' ') ?: "Limited Overs"
+    val isTest = match?.format?.name?.contains("TEST", ignoreCase = true) == true
+    val oversStr = match?.overs?.toString() ?: "20"
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionHeader("Match Information", "Configure match format and playing conditions.")
-        InfoGrid()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .pureNeonGlow(NeonYellow.copy(alpha = 0.65f), 18.dp, 14.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(PreviewCard)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MatchInfoTile(formatStr, "FORMAT", selected = !isTest, modifier = Modifier.weight(1f)) {
+                    PreviewBallIcon(Modifier.size(20.dp), PreviewAccent)
+                }
+                MatchInfoTile("Test Match", null, selected = isTest, modifier = Modifier.weight(1f)) {
+                    PreviewStumpsIcon(Modifier.size(19.dp), if (isTest) PreviewAccent else PreviewMuted)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MatchInfoTile(oversStr, "TOTAL OVERS", selected = false, modifier = Modifier.weight(1f))
+                MatchInfoTile("4", "OVERS/BOWLER", selected = false, modifier = Modifier.weight(1f))
+            }
+        }
     }
 }
 
@@ -317,32 +358,6 @@ private fun SectionHeader(title: String, subtitle: String? = null) {
         Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black)
         if (subtitle != null) {
             Text(subtitle, color = PreviewMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 5.dp))
-        }
-    }
-}
-
-@Composable
-private fun InfoGrid() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .pureNeonGlow(NeonYellow.copy(alpha = 0.65f), 18.dp, 14.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(PreviewCard)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MatchInfoTile("Limited Overs", "FORMAT", selected = true, modifier = Modifier.weight(1f)) {
-                PreviewBallIcon(Modifier.size(20.dp), PreviewAccent)
-            }
-            MatchInfoTile("Test Match", null, selected = false, modifier = Modifier.weight(1f)) {
-                PreviewStumpsIcon(Modifier.size(19.dp), PreviewMuted)
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MatchInfoTile("20", "TOTAL OVERS", selected = false, modifier = Modifier.weight(1f))
-            MatchInfoTile("4", "OVERS/BOWLER", selected = false, modifier = Modifier.weight(1f))
         }
     }
 }
@@ -369,7 +384,8 @@ private fun MatchInfoTile(title: String, label: String?, selected: Boolean, modi
 }
 
 @Composable
-private fun MatchVenue() {
+private fun MatchVenue(match: Match?) {
+    val venueName = match?.venue.orEmpty().ifBlank { "KRT Stadium, Bhubaneswar" }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PreviewPinIcon(Modifier.size(16.dp), Color(0xFFFF5F9E))
@@ -385,7 +401,7 @@ private fun MatchVenue() {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             VenueField("CITY / TOWN", "Bhubaneswar") { PreviewPinIcon(Modifier.size(18.dp), PreviewAccent) }
-            VenueField("GROUND NAME", "IIT Bhubaneswar") { PreviewGroundIcon(Modifier.size(18.dp), PreviewAccent) }
+            VenueField("GROUND NAME", venueName) { PreviewGroundIcon(Modifier.size(18.dp), PreviewAccent) }
         }
     }
 }
@@ -410,7 +426,12 @@ private fun VenueField(label: String, value: String, icon: @Composable () -> Uni
 }
 
 @Composable
-private fun BallTypeSection() {
+private fun BallTypeSection(match: Match?) {
+    val ballTypeName = match?.ballType?.name.orEmpty()
+    val isTennis = ballTypeName.contains("TENNIS", ignoreCase = true) || ballTypeName.isBlank()
+    val isLeather = ballTypeName.contains("LEATHER", ignoreCase = true)
+    val isOther = !isTennis && !isLeather
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Ball Type", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
         Row(
@@ -422,9 +443,9 @@ private fun BallTypeSection() {
                 .padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            BallTypeCard("TENNIS", R.drawable.tennisball, selected = true, modifier = Modifier.weight(1f))
-            BallTypeCard("LEATHER", R.drawable.leatherball, selected = false, modifier = Modifier.weight(1f))
-            BallTypeCard("OTHER", R.drawable.otherball, selected = false, modifier = Modifier.weight(1f))
+            BallTypeCard("TENNIS", R.drawable.tennisball, selected = isTennis, modifier = Modifier.weight(1f))
+            BallTypeCard("LEATHER", R.drawable.leatherball, selected = isLeather, modifier = Modifier.weight(1f))
+            BallTypeCard("OTHER", R.drawable.otherball, selected = isOther, modifier = Modifier.weight(1f))
         }
     }
 }
@@ -471,7 +492,12 @@ private fun AdvancedSettingsCard() {
 }
 
 @Composable
-private fun ScheduleMatchSection() {
+private fun ScheduleMatchSection(match: Match?) {
+    val dateStr = match?.matchDateEpochMs?.takeIf { it > 0L }?.let {
+        SimpleDateFormat("dd MMMM yyyy", Locale.getDefault()).format(it)
+    } ?: "Today"
+    val timeStr = match?.matchTime.orEmpty().ifBlank { "08:00 PM" }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PreviewCalendarIcon(Modifier.size(16.dp), PreviewAccent)
@@ -487,8 +513,8 @@ private fun ScheduleMatchSection() {
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            ScheduleField("MATCH DATE", "03 June 2026") { PreviewCalendarIcon(Modifier.size(20.dp), PreviewAccent) }
-            ScheduleField("MATCH TIME", "08:00 PM") { PreviewClockIcon(Modifier.size(20.dp), PreviewAccent) }
+            ScheduleField("MATCH DATE", dateStr) { PreviewCalendarIcon(Modifier.size(20.dp), PreviewAccent) }
+            ScheduleField("MATCH TIME", timeStr) { PreviewClockIcon(Modifier.size(20.dp), PreviewAccent) }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

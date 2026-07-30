@@ -112,6 +112,38 @@ class TeamSelectionViewModel(
         scope.cancel()
     }
 
+    fun updateMatchTeams(
+        matchId: String,
+        teamAId: String,
+        teamBId: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        if (teamAId.isBlank() || teamBId.isBlank()) {
+            onError("Both Team A and Team B must be selected")
+            return
+        }
+        if (teamAId == teamBId) {
+            onError("Team A and Team B cannot be the same")
+            return
+        }
+        scope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            when (val result = matchUseCases.updateMatchTeams(matchId, teamAId, teamBId)) {
+                is Resource.Success -> {
+                    _uiState.value = _uiState.value.copy(isLoading = false, match = result.data)
+                    onSuccess()
+                }
+                is Resource.Error -> {
+                    val msg = result.message ?: "Failed to update match teams"
+                    _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = msg)
+                    onError(msg)
+                }
+                is Resource.Loading -> Unit
+            }
+        }
+    }
+
     companion object {
         fun factory(matchId: String, matchUseCases: MatchUseCases): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
@@ -119,6 +151,56 @@ class TeamSelectionViewModel(
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     require(modelClass.isAssignableFrom(TeamSelectionViewModel::class.java))
                     return TeamSelectionViewModel(matchId, matchUseCases) as T
+                }
+            }
+    }
+}
+
+data class StartMatchPreviewUiState(
+    val isLoading: Boolean = true,
+    val match: Match? = null,
+    val errorMessage: String? = null
+)
+
+class StartMatchPreviewViewModel(
+    matchId: String,
+    private val matchUseCases: MatchUseCases
+) : ViewModel() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _uiState = MutableStateFlow(StartMatchPreviewUiState())
+
+    val uiState: StateFlow<StartMatchPreviewUiState> = _uiState.asStateFlow()
+
+    init {
+        if (matchId.isBlank()) {
+            _uiState.value = StartMatchPreviewUiState(isLoading = false, errorMessage = "Match id is missing")
+        } else {
+            scope.launch {
+                matchUseCases.observeMatch(matchId).collect { result ->
+                    _uiState.value = when (result) {
+                        is Resource.Success -> StartMatchPreviewUiState(isLoading = false, match = result.data)
+                        is Resource.Error -> StartMatchPreviewUiState(
+                            isLoading = false,
+                            errorMessage = result.message ?: "Unable to load match preview"
+                        )
+                        is Resource.Loading -> StartMatchPreviewUiState(isLoading = true)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        scope.cancel()
+    }
+
+    companion object {
+        fun factory(matchId: String, matchUseCases: MatchUseCases): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    require(modelClass.isAssignableFrom(StartMatchPreviewViewModel::class.java))
+                    return StartMatchPreviewViewModel(matchId, matchUseCases) as T
                 }
             }
     }

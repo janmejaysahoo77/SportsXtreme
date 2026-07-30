@@ -11,6 +11,7 @@ import com.example.sportsxtreme.presentation.home.*
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
+import android.widget.Toast
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -103,15 +104,21 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                 teamB = teamB,
                 onBack = { finish() },
                 onOpenStartMatchPreview = { selectedTeamA, selectedTeamB ->
-                    startActivity(
-                        Intent(this, StartMatchPreviewActivity::class.java)
-                            .putExtra(EXTRA_MATCH_ID, matchId)
-                            .putExtra(EXTRA_TEAM_A_ID, selectedTeamA.id)
-                            .putExtra(EXTRA_TEAM_A_NAME, selectedTeamA.name)
-                            .putExtra(EXTRA_TEAM_B_ID, selectedTeamB.id)
-                            .putExtra(EXTRA_TEAM_B_NAME, selectedTeamB.name)
+                    viewModel.updateMatchTeams(
+                        matchId = matchId,
+                        teamAId = selectedTeamA.id,
+                        teamBId = selectedTeamB.id,
+                        onSuccess = {
+                            startActivity(
+                                Intent(this, StartMatchPreviewActivity::class.java)
+                                    .putExtra(EXTRA_MATCH_ID, matchId)
+                            )
+                            finish()
+                        },
+                        onError = { errorMsg ->
+                            Toast.makeText(this, errorMsg, Toast.LENGTH_SHORT).show()
+                        }
                     )
-                    finish()
                 },
                 onSelectTeamA = {
                     startActivity(

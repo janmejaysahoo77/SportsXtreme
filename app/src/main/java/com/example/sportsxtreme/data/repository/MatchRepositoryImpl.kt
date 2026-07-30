@@ -93,6 +93,28 @@ class MatchRepositoryImpl @Inject constructor(
         Resource.Success(loadMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to update match details") }
 
+    override suspend fun updateMatchTeams(
+        matchId: String,
+        teamAId: String,
+        teamBId: String
+    ): Resource<Match> = runCatching {
+        require(teamAId != teamBId) { "Team A and Team B cannot be the same team" }
+        database.withTransaction {
+            val match = requireMatch(matchId)
+            val teamA = requireNotNull(teamDao.getTeam(teamAId)) { "Team A not found" }
+            val teamB = requireNotNull(teamDao.getTeam(teamBId)) { "Team B not found" }
+            matchDao.updateMatch(
+                match.copy(
+                    teamAId = teamAId,
+                    teamBId = teamBId,
+                    status = MatchStatus.TEAM_SELECTION.name,
+                    updatedAtEpochMs = System.currentTimeMillis()
+                )
+            )
+        }
+        Resource.Success(loadMatch(matchId))
+    }.getOrElse { Resource.Error(it.message ?: "Unable to update match teams") }
+
     override suspend fun selectPlayingXI(
         matchId: String,
         side: TeamSide,

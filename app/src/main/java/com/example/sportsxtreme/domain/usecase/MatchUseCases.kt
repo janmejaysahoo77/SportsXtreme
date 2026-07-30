@@ -4,6 +4,7 @@ data class MatchUseCases(
     val createMatch: CreateMatchUseCase,
     val updateMatchSettings: UpdateMatchSettingsUseCase,
     val updateMatchDetails: UpdateMatchDetailsUseCase,
+    val updateMatchTeams: UpdateMatchTeamsUseCase,
     val selectPlayingXI: SelectPlayingXIUseCase,
     val saveToss: SaveTossUseCase,
     val selectOpeningPlayers: SelectOpeningPlayersUseCase,

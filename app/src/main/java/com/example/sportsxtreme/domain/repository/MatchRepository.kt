@@ -27,6 +27,11 @@ interface MatchRepository {
         matchDateEpochMs: Long,
         matchTime: String
     ): Resource<Match>
+    suspend fun updateMatchTeams(
+        matchId: String,
+        teamAId: String,
+        teamBId: String
+    ): Resource<Match>
     suspend fun selectPlayingXI(matchId: String, side: TeamSide, playingXI: PlayingXI): Resource<Match>
     suspend fun saveToss(matchId: String, toss: Toss): Resource<Match>
     suspend fun selectOpeningPlayers(
