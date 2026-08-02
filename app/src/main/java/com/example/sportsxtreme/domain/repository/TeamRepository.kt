@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
 interface TeamRepository {
     suspend fun saveTeam(team: Team): Resource<Team>
     suspend fun getTeam(teamId: String): Resource<Team>
-    suspend fun getFriendlyTestTeams(): Resource<Pair<Team, Team>>
+    fun observeFriendlyTestTeams(): Flow<Resource<Pair<Team, Team>>>
+    suspend fun ensureDummyTeamsExist()
     fun observeTeam(teamId: String): Flow<Resource<Team>>
 }

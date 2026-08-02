@@ -84,20 +84,17 @@ class FinalSquadActivity : ComponentActivity() {
             FinalSquadScreen(
                 onBack = { finish() },
                 onNext = {
-                    startActivity(
-                        Intent(this, SelectPlayingTeamsActivity::class.java)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
-                            .putExtras(intent.copyTeamSelectionExtras())
-                            .apply {
-                                if (teamSlot == "A") {
-                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID, selectedTeamId)
-                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME, selectedTeamName)
-                                } else {
-                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID, selectedTeamId)
-                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME, selectedTeamName)
-                                }
-                            }
-                    )
+                    val resultIntent = Intent().apply {
+                        putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, teamSlot)
+                        if (teamSlot == "A") {
+                            putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID, selectedTeamId)
+                            putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME, selectedTeamName)
+                        } else {
+                            putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID, selectedTeamId)
+                            putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME, selectedTeamName)
+                        }
+                    }
+                    setResult(android.app.Activity.RESULT_OK, resultIntent)
                     finish()
                 }
             )

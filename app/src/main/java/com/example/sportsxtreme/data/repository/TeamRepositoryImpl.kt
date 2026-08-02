@@ -14,6 +14,10 @@ import com.example.sportsxtreme.domain.model.TeamType
 import com.example.sportsxtreme.domain.repository.TeamRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.catch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,16 +40,22 @@ class TeamRepositoryImpl @Inject constructor(
         Resource.Success(team.toDomain(playerDao.getPlayers(teamId)))
     }.getOrElse { Resource.Error(it.message ?: "Unable to load team") }
 
-    override suspend fun getFriendlyTestTeams(): Resource<Pair<Team, Team>> = runCatching {
-        database.withTransaction { ensureFriendlyTestTeams() }
-        val teams = teamDao.getFriendlyTestTeams()
-        val teamA = requireNotNull(teams.firstOrNull { it.isTeamA }) { "Team A not found" }
-        val teamB = requireNotNull(teams.firstOrNull { !it.isTeamA }) { "Team B not found" }
-        Resource.Success(
-            teamA.toDomain(playerDao.getPlayers(teamA.teamId)) to
-                teamB.toDomain(playerDao.getPlayers(teamB.teamId))
+    override fun observeFriendlyTestTeams(): Flow<Resource<Pair<Team, Team>>> = flow {
+        runCatching { database.withTransaction { ensureDummyTeamsExist() } }
+            .onFailure { emit(Resource.Error(it.message ?: "Failed to init dummy teams")) }
+        emitAll(
+            teamDao.observeFriendlyTestTeams().map { teams ->
+                runCatching {
+                    val teamA = requireNotNull(teams.firstOrNull { it.isTeamA }) { "Team A not found" }
+                    val teamB = requireNotNull(teams.firstOrNull { !it.isTeamA }) { "Team B not found" }
+                    Resource.Success(
+                        teamA.toDomain(playerDao.getPlayers(teamA.teamId)) to
+                            teamB.toDomain(playerDao.getPlayers(teamB.teamId))
+                    )
+                }.getOrElse { Resource.Error(it.message ?: "Unable to load friendly teams") }
+            }.catch { e -> emit(Resource.Error(e.message ?: "Unknown error")) }
         )
-    }.getOrElse { Resource.Error(it.message ?: "Unable to load friendly teams") }
+    }
 
     override fun observeTeam(teamId: String): Flow<Resource<Team>> = teamDao.observeTeam(teamId).map { team ->
         if (team == null) {
@@ -56,8 +66,8 @@ class TeamRepositoryImpl @Inject constructor(
         }
     }
 
-    private suspend fun ensureFriendlyTestTeams() {
-        if (teamDao.getFriendlyTestTeams().size >= 2) return
+    override suspend fun ensureDummyTeamsExist() {
+        if (teamDao.observeFriendlyTestTeams().first().size >= 2) return
 
         val now = System.currentTimeMillis()
         val teamA = TeamEntity(

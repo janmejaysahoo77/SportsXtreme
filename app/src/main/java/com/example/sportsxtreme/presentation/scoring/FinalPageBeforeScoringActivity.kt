@@ -13,11 +13,13 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,8 +43,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,22 +67,60 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.domain.model.Player
+import com.example.sportsxtreme.domain.usecase.MatchUseCases
+import com.example.sportsxtreme.domain.repository.TeamRepository
+import com.example.sportsxtreme.presentation.match.OpeningPlayersViewModel
+import com.example.sportsxtreme.presentation.match.OpeningPlayersUiState
+import com.example.sportsxtreme.presentation.match.SelectPlayingTeamsActivity
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class FinalPageBeforeScoringActivity : ComponentActivity() {
+    @Inject lateinit var matchUseCases: MatchUseCases
+    @Inject lateinit var teamRepository: TeamRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+
+        val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
+        val viewModel: OpeningPlayersViewModel by viewModels {
+            OpeningPlayersViewModel.factory(matchId, matchUseCases, teamRepository)
+        }
+
         setContent {
+            val uiState by viewModel.uiState.collectAsState()
+
             FinalPageBeforeScoringScreen(
+                uiState = uiState,
                 onBack = { finish() },
-                onOpenSelection = { startActivity(Intent(this, StartMatchPreviewActivity::class.java)) },
-                onStartScoring = { startActivity(Intent(this, MainScoringActivity::class.java)) }
+                onSelectStriker = { viewModel.selectStriker(it) },
+                onSelectNonStriker = { viewModel.selectNonStriker(it) },
+                onSelectBowler = { viewModel.selectBowler(it) },
+                onStartScoring = {
+                    viewModel.saveOpeningPlayers(
+                        matchId = matchId,
+                        onSuccess = {
+                            startActivity(
+                                Intent(this, MainScoringActivity::class.java)
+                                    .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                            )
+                            finish()
+                        },
+                        onError = { msg ->
+                            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
             )
         }
     }
@@ -92,7 +135,24 @@ private val InningsMuted = Color(0xFFAAB6C4)
 private val InningsGold = Color(0xFFFFD36A)
 
 @Composable
-private fun FinalPageBeforeScoringScreen(onBack: () -> Unit, onOpenSelection: () -> Unit, onStartScoring: () -> Unit) {
+private fun FinalPageBeforeScoringScreen(
+    uiState: OpeningPlayersUiState,
+    onBack: () -> Unit,
+    onSelectStriker: (String) -> Unit,
+    onSelectNonStriker: (String) -> Unit,
+    onSelectBowler: (String) -> Unit,
+    onStartScoring: () -> Unit
+) {
+    var showStrikerPicker by remember { mutableStateOf(false) }
+    var showNonStrikerPicker by remember { mutableStateOf(false) }
+    var showBowlerPicker by remember { mutableStateOf(false) }
+
+    val battingPlayers = uiState.battingTeamPlayers
+    val bowlingPlayers = uiState.bowlingTeamPlayers
+    val selectedStriker = battingPlayers.firstOrNull { it.id == uiState.selectedStrikerId }
+    val selectedNonStriker = battingPlayers.firstOrNull { it.id == uiState.selectedNonStrikerId }
+    val selectedBowler = bowlingPlayers.firstOrNull { it.id == uiState.selectedBowlerId }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -116,36 +176,69 @@ private fun FinalPageBeforeScoringScreen(onBack: () -> Unit, onOpenSelection: ()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 4.dp, vertical = 22.dp)
             ) {
-                InningsSectionTitle("BATTING - DIPESH WARRIOR 69")
+                InningsSectionTitle("BATTING - ${uiState.battingTeamName.uppercase()}")
                 Row(
                     modifier = Modifier.padding(top = 15.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     PlayerPickCard(
-                        label = "SELECT STRIKER",
+                        label = selectedStriker?.displayName ?: "SELECT STRIKER",
                         imageRes = R.drawable.nonstriker,
-                        selected = false,
+                        selected = selectedStriker != null,
                         modifier = Modifier.weight(1f),
-                        onClick = onOpenSelection
+                        onClick = { showStrikerPicker = true }
                     )
                     PlayerPickCard(
-                        label = "SELECT NON-STRIKER",
+                        label = selectedNonStriker?.displayName ?: "SELECT NON-STRIKER",
                         imageRes = R.drawable.striker,
-                        selected = false,
+                        selected = selectedNonStriker != null,
                         modifier = Modifier.weight(1f),
-                        onClick = onOpenSelection
+                        onClick = { showNonStrikerPicker = true }
                     )
                 }
-                InningsSectionTitle("BOWLING - BHU", Modifier.padding(top = 33.dp))
+                InningsSectionTitle("BOWLING - ${uiState.bowlingTeamName.uppercase()}", Modifier.padding(top = 33.dp))
                 Row(modifier = Modifier.padding(top = 15.dp)) {
                     PlayerPickCard(
-                        label = "SELECT BOWLER",
+                        label = selectedBowler?.displayName ?: "SELECT BOWLER",
                         imageRes = R.drawable.choosebowler,
-                        selected = true,
+                        selected = selectedBowler != null,
                         modifier = Modifier.width(166.dp),
-                        onClick = onOpenSelection
+                        onClick = { showBowlerPicker = true }
                     )
                     Spacer(Modifier.weight(1f))
+                }
+                // Striker picker
+                if (showStrikerPicker && battingPlayers.isNotEmpty()) {
+                    PlayerPickerList(
+                        title = "SELECT STRIKER",
+                        players = battingPlayers,
+                        selectedPlayerId = uiState.selectedStrikerId,
+                        disabledPlayerId = uiState.selectedNonStrikerId,
+                        onSelect = { onSelectStriker(it); showStrikerPicker = false },
+                        onDismiss = { showStrikerPicker = false }
+                    )
+                }
+                // Non-Striker picker
+                if (showNonStrikerPicker && battingPlayers.isNotEmpty()) {
+                    PlayerPickerList(
+                        title = "SELECT NON-STRIKER",
+                        players = battingPlayers,
+                        selectedPlayerId = uiState.selectedNonStrikerId,
+                        disabledPlayerId = uiState.selectedStrikerId,
+                        onSelect = { onSelectNonStriker(it); showNonStrikerPicker = false },
+                        onDismiss = { showNonStrikerPicker = false }
+                    )
+                }
+                // Bowler picker
+                if (showBowlerPicker && bowlingPlayers.isNotEmpty()) {
+                    PlayerPickerList(
+                        title = "SELECT BOWLER",
+                        players = bowlingPlayers,
+                        selectedPlayerId = uiState.selectedBowlerId,
+                        disabledPlayerId = null,
+                        onSelect = { onSelectBowler(it); showBowlerPicker = false },
+                        onDismiss = { showBowlerPicker = false }
+                    )
                 }
                 Spacer(Modifier.height(150.dp))
             }
@@ -159,6 +252,104 @@ private fun FinalPageBeforeScoringScreen(onBack: () -> Unit, onOpenSelection: ()
             modifier = Modifier.align(Alignment.BottomCenter),
             onStartScoring = onStartScoring
         )
+    }
+}
+
+@Composable
+private fun PlayerPickerList(
+    title: String,
+    players: List<Player>,
+    selectedPlayerId: String?,
+    disabledPlayerId: String?,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF0D1926))
+            .border(1.dp, InningsStroke, RoundedCornerShape(12.dp))
+            .padding(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                title,
+                color = InningsAccent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                "✕",
+                color = InningsMuted,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable(onClick = onDismiss).padding(horizontal = 8.dp)
+            )
+        }
+        players.forEach { player ->
+            val isSelected = player.id == selectedPlayerId
+            val isDisabled = player.id == disabledPlayerId
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (isSelected) Color(0xFF172513)
+                        else if (isDisabled) Color(0xFF0A0E14)
+                        else Color(0xFF111B2B)
+                    )
+                    .then(
+                        if (!isDisabled) Modifier.clickable { onSelect(player.id) }
+                        else Modifier
+                    )
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isSelected) Brush.radialGradient(listOf(InningsAccent.copy(alpha = 0.7f), Color(0xFF172513)))
+                            else Brush.radialGradient(listOf(Color(0xFF2A3B50), Color(0xFF111B2B)))
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        player.displayName.take(2).uppercase(),
+                        color = if (isSelected) Color(0xFF111604) else Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+                Text(
+                    player.displayName,
+                    color = if (isDisabled) InningsMuted.copy(alpha = 0.4f)
+                            else if (isSelected) InningsAccent
+                            else Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 12.dp).weight(1f)
+                )
+                if (isSelected) {
+                    Text("✓", color = InningsAccent, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                }
+                if (isDisabled) {
+                    Text("(in use)", color = InningsMuted.copy(alpha = 0.4f), fontSize = 10.sp)
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
     }
 }
 

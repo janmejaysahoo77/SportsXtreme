@@ -15,6 +15,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.animateDpAsState
@@ -86,13 +87,21 @@ class SelectTeamAorBActivity : ComponentActivity() {
         val teamSlot = intent.getStringExtra(EXTRA_TEAM_SLOT)?.takeIf { it == "B" } ?: "A"
         val selectedTeamId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID)
             ?: FRIENDLY_TEAM_OPTIONS.first().id
+        val finalSquadLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == RESULT_OK) {
+                setResult(RESULT_OK, result.data)
+                finish()
+            }
+        }
         setContent {
             SelectTeamAScreen(
                 teamSlot = teamSlot,
                 initialTeamId = selectedTeamId,
                 onBack = { finish() },
                 onNext = { selectedTeam ->
-                    startActivity(
+                    finalSquadLauncher.launch(
                         Intent(this, FinalSquadActivity::class.java)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID, selectedTeam.id)
@@ -101,10 +110,14 @@ class SelectTeamAorBActivity : ComponentActivity() {
                             .putExtras(intent.copyTeamSelectionExtras())
                     )
                 },
-                onViewDetails = {
-                    startActivity(
+                onViewDetails = { selectedTeam ->
+                    finalSquadLauncher.launch(
                         Intent(this, ViewDetailsScreenWhileStartMatch::class.java)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID, selectedTeam.id)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME, selectedTeam.name)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, teamSlot)
+                            .putExtras(intent.copyTeamSelectionExtras())
                     )
                 }
             )
@@ -128,8 +141,8 @@ private data class FriendlyTeamOption(
 )
 
 private val FRIENDLY_TEAM_OPTIONS = listOf(
-    FriendlyTeamOption("bhu", "Bhu"),
-    FriendlyTeamOption("dipesh-warrior-69", "Dipesh Warrior 69")
+    FriendlyTeamOption("friendly-team-a", "Team A"),
+    FriendlyTeamOption("friendly-team-b", "Team B")
 )
 
 @Composable
@@ -138,7 +151,7 @@ private fun SelectTeamAScreen(
     initialTeamId: String,
     onBack: () -> Unit,
     onNext: (FriendlyTeamOption) -> Unit,
-    onViewDetails: () -> Unit
+    onViewDetails: (FriendlyTeamOption) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var swipeAmount by remember { mutableStateOf(0f) }
@@ -224,7 +237,7 @@ private fun SelectTeamAScreen(
                     .shadow(20.dp, RoundedCornerShape(12.dp), clip = false)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Brush.horizontalGradient(listOf(TeamAAccent, Color(0xFF9BFF00))))
-                    .clickable(onClick = { onNext(selectedTeam) }),
+                    .clickable(onClick = { if (selectedTab == 0) onNext(selectedTeam) }),
                 contentAlignment = Alignment.Center
             ) {
                 Text(if (selectedTab == 0) "NEXT->" else "ADD TEAM", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black)
@@ -351,27 +364,27 @@ private fun TournamentTeamsContent(
     selectedTeamId: String,
     onTeamSelected: (String) -> Unit,
     onAddTeams: () -> Unit,
-    onViewDetails: () -> Unit
+    onViewDetails: (FriendlyTeamOption) -> Unit
 ) {
     SearchBox()
     LeagueHeader(onAddTeams)
     TeamRow(
-        initials = "BH",
-        title = "Bhu",
+        initials = "TA",
+        title = "Team A",
         subtitle = "Ready for Draft",
-        selected = selectedTeamId == "bhu",
+        selected = selectedTeamId == "friendly-team-a",
         color = Color(0xFF1E73FF),
-        onSelect = { onTeamSelected("bhu") },
-        onViewDetails = onViewDetails
+        onSelect = { onTeamSelected("friendly-team-a") },
+        onViewDetails = { onViewDetails(FRIENDLY_TEAM_OPTIONS[0]) }
     )
     TeamRow(
-        initials = "DW",
-        title = "Dipesh Warrior 69",
+        initials = "TB",
+        title = "Team B",
         subtitle = "Pending Entry",
-        selected = selectedTeamId == "dipesh-warrior-69",
+        selected = selectedTeamId == "friendly-team-b",
         color = Color(0xFF007A70),
-        onSelect = { onTeamSelected("dipesh-warrior-69") },
-        onViewDetails = onViewDetails
+        onSelect = { onTeamSelected("friendly-team-b") },
+        onViewDetails = { onViewDetails(FRIENDLY_TEAM_OPTIONS[1]) }
     )
 }
 

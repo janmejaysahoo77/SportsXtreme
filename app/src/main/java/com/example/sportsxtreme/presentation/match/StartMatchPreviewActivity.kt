@@ -141,7 +141,11 @@ private fun StartMatchPreviewScreen(
                     .padding(horizontal = 14.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                MatchHeroCard(teamA = teamA, teamB = teamB)
+                MatchHeroCard(
+                    title = match?.title.orEmpty(),
+                    teamA = teamA,
+                    teamB = teamB
+                )
                 MatchInformation(match = match)
                 MatchVenue(match = match)
                 BallTypeSection(match = match)
@@ -200,7 +204,11 @@ private fun PreviewTopBar(onBack: () -> Unit) {
 }
 
 @Composable
-private fun MatchHeroCard(teamA: PreviewSelectedTeam?, teamB: PreviewSelectedTeam?) {
+private fun MatchHeroCard(
+    title: String,
+    teamA: PreviewSelectedTeam?,
+    teamB: PreviewSelectedTeam?
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -238,7 +246,14 @@ private fun MatchHeroCard(teamA: PreviewSelectedTeam?, teamB: PreviewSelectedTea
                 .padding(horizontal = 24.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text("SUMMER CHAMPIONSHIP 2026", color = Color(0xFFE7D264), fontSize = 9.sp, fontWeight = FontWeight.Black)
+            Text(
+                title.ifBlank { "FRIENDLY MATCH" }.uppercase(),
+                color = Color(0xFFE7D264),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
         Row(
             modifier = Modifier
@@ -324,6 +339,7 @@ private fun MatchInformation(match: Match?) {
     val formatStr = match?.format?.name?.replace('_', ' ') ?: "Limited Overs"
     val isTest = match?.format?.name?.contains("TEST", ignoreCase = true) == true
     val oversStr = match?.overs?.toString() ?: "20"
+    val oversPerBowler = match?.overs?.let { ((it + 4) / 5).coerceAtLeast(1).toString() } ?: "-"
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionHeader("Match Information", "Configure match format and playing conditions.")
@@ -346,7 +362,7 @@ private fun MatchInformation(match: Match?) {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MatchInfoTile(oversStr, "TOTAL OVERS", selected = false, modifier = Modifier.weight(1f))
-                MatchInfoTile("4", "OVERS/BOWLER", selected = false, modifier = Modifier.weight(1f))
+                MatchInfoTile(oversPerBowler, "OVERS/BOWLER", selected = false, modifier = Modifier.weight(1f))
             }
         }
     }
@@ -385,7 +401,7 @@ private fun MatchInfoTile(title: String, label: String?, selected: Boolean, modi
 
 @Composable
 private fun MatchVenue(match: Match?) {
-    val venueName = match?.venue.orEmpty().ifBlank { "KRT Stadium, Bhubaneswar" }
+    val venueName = match?.venue.orEmpty().ifBlank { "Venue not set" }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PreviewPinIcon(Modifier.size(16.dp), Color(0xFFFF5F9E))
@@ -400,8 +416,7 @@ private fun MatchVenue(match: Match?) {
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            VenueField("CITY / TOWN", "Bhubaneswar") { PreviewPinIcon(Modifier.size(18.dp), PreviewAccent) }
-            VenueField("GROUND NAME", venueName) { PreviewGroundIcon(Modifier.size(18.dp), PreviewAccent) }
+            VenueField("MATCH VENUE", venueName) { PreviewGroundIcon(Modifier.size(18.dp), PreviewAccent) }
         }
     }
 }

@@ -70,17 +70,54 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import android.widget.Toast
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import com.example.sportsxtreme.domain.usecase.MatchUseCases
+import com.example.sportsxtreme.presentation.scoring.FinalPageBeforeScoringActivity
+import com.example.sportsxtreme.domain.model.TossDecision
 
+@AndroidEntryPoint
 class TossActivity : ComponentActivity() {
+    @Inject lateinit var matchUseCases: MatchUseCases
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+
+        val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
+        val viewModel: TossViewModel by viewModels {
+            TossViewModel.factory(matchId, matchUseCases)
+        }
+
         setContent {
+            val uiState by viewModel.uiState.collectAsState()
+
             TossScreen(
+                uiState = uiState,
+                onSelectWinner = { viewModel.selectWinner(it) },
+                onSelectDecision = { viewModel.selectDecision(it) },
                 onBack = { finish() },
-                onPlay = { startActivity(Intent(this, FinalPageBeforeScoringActivity::class.java)) }
+                onPlay = {
+                    viewModel.saveToss(
+                        matchId = matchId,
+                        onSuccess = {
+                            startActivity(
+                                Intent(this, FinalPageBeforeScoringActivity::class.java)
+                                    .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                            )
+                            finish()
+                        },
+                        onError = { msg ->
+                            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
             )
         }
     }
@@ -95,7 +132,16 @@ private val TossMuted = Color(0xFFAAB6C4)
 private val TossGold = Color(0xFFFFD36A)
 
 @Composable
-private fun TossScreen(onBack: () -> Unit, onPlay: () -> Unit) {
+private fun TossScreen(
+    uiState: TossUiState,
+    onSelectWinner: (String) -> Unit,
+    onSelectDecision: (TossDecision) -> Unit,
+    onBack: () -> Unit,
+    onPlay: () -> Unit
+) {
+    val match = uiState.match
+    val teamA = match?.teamA
+    val teamB = match?.teamB
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -124,8 +170,26 @@ private fun TossScreen(onBack: () -> Unit, onPlay: () -> Unit) {
                     modifier = Modifier.padding(top = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    TossTeamCard("DW", "Dipesh Warrior\n69", selected = true, color = Color(0xFF009B86), modifier = Modifier.weight(1f))
-                    TossTeamCard("BH", "Bhu", selected = false, color = Color(0xFF2476F2), modifier = Modifier.weight(1f))
+                    if (teamA != null) {
+                        TossTeamCard(
+                            initials = teamA.name.take(2).uppercase(),
+                            name = teamA.name,
+                            selected = uiState.selectedWinnerId == teamA.teamId,
+                            color = Color(0xFF009B86),
+                            modifier = Modifier.weight(1f),
+                            onClick = { onSelectWinner(teamA.teamId) }
+                        )
+                    }
+                    if (teamB != null) {
+                        TossTeamCard(
+                            initials = teamB.name.take(2).uppercase(),
+                            name = teamB.name,
+                            selected = uiState.selectedWinnerId == teamB.teamId,
+                            color = Color(0xFF2476F2),
+                            modifier = Modifier.weight(1f),
+                            onClick = { onSelectWinner(teamB.teamId) }
+                        )
+                    }
                 }
 
                 TossSectionTitle("WINNER OF THE TOSS ELECTED TO?", Modifier.padding(top = 32.dp))
@@ -135,8 +199,9 @@ private fun TossScreen(onBack: () -> Unit, onPlay: () -> Unit) {
                 ) {
                     TossChoiceCard(
                         title = "Bat",
-                        selected = false,
-                        modifier = Modifier.weight(1f)
+                        selected = uiState.selectedDecision == TossDecision.BAT,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onSelectDecision(TossDecision.BAT) }
                     ) {
                         Box(
                             modifier = Modifier
@@ -150,8 +215,9 @@ private fun TossScreen(onBack: () -> Unit, onPlay: () -> Unit) {
                     }
                     TossChoiceCard(
                         title = "Bowl",
-                        selected = true,
-                        modifier = Modifier.weight(1f)
+                        selected = uiState.selectedDecision == TossDecision.FIELD,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onSelectDecision(TossDecision.FIELD) }
                     ) {
                         Box(
                             modifier = Modifier
@@ -264,7 +330,7 @@ private fun TossSectionTitle(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun TossTeamCard(initials: String, name: String, selected: Boolean, color: Color, modifier: Modifier = Modifier) {
+private fun TossTeamCard(initials: String, name: String, selected: Boolean, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit = {}) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -300,7 +366,7 @@ private fun TossTeamCard(initials: String, name: String, selected: Boolean, colo
                     center = Offset(size.width * 0.5f, size.height * 0.5f)
                 )
             }
-            .clickable(interactionSource = interactionSource, indication = null, onClick = {}),
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -327,7 +393,7 @@ private fun TossTeamCard(initials: String, name: String, selected: Boolean, colo
 }
 
 @Composable
-private fun TossChoiceCard(title: String, selected: Boolean, modifier: Modifier = Modifier, icon: @Composable () -> Unit) {
+private fun TossChoiceCard(title: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit = {}, icon: @Composable () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -362,7 +428,7 @@ private fun TossChoiceCard(title: String, selected: Boolean, modifier: Modifier 
                     center = Offset(size.width * 0.5f, size.height * 0.44f)
                 )
             }
-            .clickable(interactionSource = interactionSource, indication = null, onClick = {}),
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {

@@ -2,6 +2,7 @@ package com.example.sportsxtreme.data.di
 
 import com.example.sportsxtreme.domain.repository.MatchRepository
 import com.example.sportsxtreme.domain.repository.ScoringRepository
+import com.example.sportsxtreme.domain.repository.TeamRepository
 import com.example.sportsxtreme.domain.usecase.CreateMatchUseCase
 import com.example.sportsxtreme.domain.usecase.FinishInningsUseCase
 import com.example.sportsxtreme.domain.usecase.FinishMatchUseCase
@@ -29,13 +30,14 @@ object MatchUseCaseModule {
     @Provides
     fun provideMatchUseCases(
         matchRepository: MatchRepository,
-        scoringRepository: ScoringRepository
+        scoringRepository: ScoringRepository,
+        teamRepository: TeamRepository
     ): MatchUseCases {
         return MatchUseCases(
             createMatch = CreateMatchUseCase(matchRepository),
             updateMatchSettings = UpdateMatchSettingsUseCase(matchRepository),
             updateMatchDetails = UpdateMatchDetailsUseCase(matchRepository),
-            updateMatchTeams = UpdateMatchTeamsUseCase(matchRepository),
+            updateMatchTeams = UpdateMatchTeamsUseCase(matchRepository, teamRepository),
             selectPlayingXI = SelectPlayingXIUseCase(matchRepository),
             saveToss = SaveTossUseCase(matchRepository),
             selectOpeningPlayers = SelectOpeningPlayersUseCase(matchRepository),

@@ -15,6 +15,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -73,11 +74,23 @@ class ViewDetailsScreenWhileStartMatch : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val finalSquadLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == RESULT_OK) {
+                setResult(RESULT_OK, result.data)
+                finish()
+            }
+        }
         setContent {
             ViewDetailsStartMatchScreen(
                 onBack = { finish() },
                 onAddPlayer = { startActivity(Intent(this, AddPlayerActivity::class.java)) },
-                onNext = { startActivity(Intent(this, FinalSquadActivity::class.java)) }
+                onNext = {
+                    finalSquadLauncher.launch(
+                        Intent(this, FinalSquadActivity::class.java).putExtras(intent)
+                    )
+                }
             )
         }
     }

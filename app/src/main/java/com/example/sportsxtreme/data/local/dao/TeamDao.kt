@@ -22,5 +22,5 @@ interface TeamDao {
     fun observeTeam(teamId: String): Flow<TeamEntity?>
 
     @Query("SELECT * FROM teams WHERE type = 'FRIENDLY_TEST' ORDER BY isTeamA DESC, teamName")
-    suspend fun getFriendlyTestTeams(): List<TeamEntity>
+    fun observeFriendlyTestTeams(): Flow<List<TeamEntity>>
 }

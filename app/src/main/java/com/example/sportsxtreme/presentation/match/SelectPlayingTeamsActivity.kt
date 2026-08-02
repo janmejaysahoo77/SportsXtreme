@@ -16,6 +16,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -94,14 +95,24 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         val teamA = intent.toSelectedTeam(EXTRA_TEAM_A_ID, EXTRA_TEAM_A_NAME)
         val teamB = intent.toSelectedTeam(EXTRA_TEAM_B_ID, EXTRA_TEAM_B_NAME)
         val viewModel: TeamSelectionViewModel by viewModels {
-            TeamSelectionViewModel.factory(matchId, matchUseCases)
+            TeamSelectionViewModel.factory(matchId, matchUseCases, teamA, teamB)
         }
+
+        val addTeamLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == android.app.Activity.RESULT_OK) {
+                val data = result.data ?: return@registerForActivityResult
+
+                data.toSelectedTeam(EXTRA_TEAM_A_ID, EXTRA_TEAM_A_NAME)?.let { viewModel.setSelectedTeamA(it) }
+                data.toSelectedTeam(EXTRA_TEAM_B_ID, EXTRA_TEAM_B_NAME)?.let { viewModel.setSelectedTeamB(it) }
+            }
+        }
+
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             SelectPlayingTeamsScreen(
                 match = uiState.match,
-                teamA = teamA,
-                teamB = teamB,
+                teamA = uiState.selectedTeamA,
+                teamB = uiState.selectedTeamB,
                 onBack = { finish() },
                 onOpenStartMatchPreview = { selectedTeamA, selectedTeamB ->
                     viewModel.updateMatchTeams(
@@ -121,20 +132,20 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                     )
                 },
                 onSelectTeamA = {
-                    startActivity(
+                    addTeamLauncher.launch(
                         Intent(this, SelectTeamAorBActivity::class.java)
                             .putExtra(SelectTeamAorBActivity.EXTRA_TEAM_SLOT, "A")
                             .putExtra(EXTRA_MATCH_ID, matchId)
-                            .putExtra(EXTRA_SELECTED_TEAM_ID, teamA?.id)
+                            .putExtra(EXTRA_SELECTED_TEAM_ID, uiState.selectedTeamA?.id)
                             .putExtras(intent.copyTeamSelectionExtras())
                     )
                 },
                 onSelectTeamB = {
-                    startActivity(
+                    addTeamLauncher.launch(
                         Intent(this, SelectTeamAorBActivity::class.java)
                             .putExtra(SelectTeamAorBActivity.EXTRA_TEAM_SLOT, "B")
                             .putExtra(EXTRA_MATCH_ID, matchId)
-                            .putExtra(EXTRA_SELECTED_TEAM_ID, teamB?.id)
+                            .putExtra(EXTRA_SELECTED_TEAM_ID, uiState.selectedTeamB?.id)
                             .putExtras(intent.copyTeamSelectionExtras())
                     )
                 }
@@ -153,11 +164,6 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         const val EXTRA_TEAM_B_NAME = "team_b_name"
     }
 }
-
-private data class SelectedTeam(
-    val id: String,
-    val name: String
-)
 
 private fun Intent.toSelectedTeam(idKey: String, nameKey: String): SelectedTeam? {
     val id = getStringExtra(idKey).orEmpty()
@@ -192,18 +198,12 @@ private fun SelectPlayingTeamsScreen(
 ) {
     val bothTeamsSelected = teamA != null && teamB != null
     var showStartMatchFade by rememberSaveable { mutableStateOf(false) }
-    var previewOpened by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(bothTeamsSelected) {
+    LaunchedEffect(teamA?.id, teamB?.id) {
         showStartMatchFade = false
         if (bothTeamsSelected) {
             delay(250)
             showStartMatchFade = true
-            delay(2500)
-            if (!previewOpened) {
-                previewOpened = true
-                onOpenStartMatchPreview(requireNotNull(teamA), requireNotNull(teamB))
-            }
         }
     }
 
@@ -252,7 +252,12 @@ private fun SelectPlayingTeamsScreen(
                     }
                 }
             }
-            StartMatchFadeAnimationWillOpen(visible = showStartMatchFade)
+            StartMatchFadeAnimationWillOpen(
+                visible = showStartMatchFade,
+                onStartMatch = {
+                    onOpenStartMatchPreview(requireNotNull(teamA), requireNotNull(teamB))
+                }
+            )
             MatchPreviewCard(teamA = teamA, teamB = teamB, modifier = Modifier.padding(top = 39.dp))
             Spacer(Modifier.height(42.dp))
         }
@@ -489,18 +494,27 @@ private fun TemporaryTeamLogo(team: SelectedTeam, modifier: Modifier = Modifier)
 }
 
 @Composable
-private fun StartMatchFadeAnimationWillOpen(visible: Boolean) {
+private fun StartMatchFadeAnimationWillOpen(visible: Boolean, onStartMatch: () -> Unit) {
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(tween(600)) + scaleIn(initialScale = 0.92f, animationSpec = tween(600))
     ) {
-        Text(
-            "MATCH READY",
-            color = TeamsAccent,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.padding(top = 24.dp)
-        )
+        Box(
+            modifier = Modifier
+                .padding(top = 24.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(TeamsAccent)
+                .clickable(onClick = onStartMatch)
+                .padding(horizontal = 22.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "START MATCH",
+                color = Color(0xFF111604),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black
+            )
+        }
     }
 }
 

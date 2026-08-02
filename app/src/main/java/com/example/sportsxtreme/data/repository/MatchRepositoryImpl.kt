@@ -14,6 +14,7 @@ import com.example.sportsxtreme.data.local.mapper.toDomain
 import com.example.sportsxtreme.data.local.mapper.toEntities
 import com.example.sportsxtreme.data.local.mapper.toEntity
 import com.example.sportsxtreme.data.local.mapper.toMatchTeam
+import com.example.sportsxtreme.data.remote.firestore.FirebaseFirestoreMatchSyncDataSource
 import com.example.sportsxtreme.domain.model.InningsStatus
 import com.example.sportsxtreme.domain.model.BallType
 import com.example.sportsxtreme.domain.model.Match
@@ -41,7 +42,8 @@ class MatchRepositoryImpl @Inject constructor(
     private val matchDao: MatchDao,
     private val teamDao: TeamDao,
     private val playerDao: PlayerDao,
-    private val inningsDao: InningsDao
+    private val inningsDao: InningsDao,
+    private val firestoreMatchSyncDataSource: FirebaseFirestoreMatchSyncDataSource
 ) : MatchRepository {
     override suspend fun createMatch(request: CreateMatchRequest): Resource<Match> = runCatching {
         val matchId = UUID.randomUUID().toString()
@@ -50,7 +52,7 @@ class MatchRepositoryImpl @Inject constructor(
             ensureMatchTeam(request.teamB)
             matchDao.insertMatch(request.toEntity(matchId))
         }
-        Resource.Success(loadMatch(matchId))
+        Resource.Success(loadAndSyncMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to create match") }
 
     override suspend fun updateMatchSettings(
@@ -70,7 +72,7 @@ class MatchRepositoryImpl @Inject constructor(
                 )
             )
         }
-        Resource.Success(loadMatch(matchId))
+        Resource.Success(loadAndSyncMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to update match settings") }
 
     override suspend fun updateMatchDetails(
@@ -90,7 +92,7 @@ class MatchRepositoryImpl @Inject constructor(
                 )
             )
         }
-        Resource.Success(loadMatch(matchId))
+        Resource.Success(loadAndSyncMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to update match details") }
 
     override suspend fun updateMatchTeams(
@@ -112,7 +114,7 @@ class MatchRepositoryImpl @Inject constructor(
                 )
             )
         }
-        Resource.Success(loadMatch(matchId))
+        Resource.Success(loadAndSyncMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to update match teams") }
 
     override suspend fun selectPlayingXI(
@@ -145,7 +147,7 @@ class MatchRepositoryImpl @Inject constructor(
                 )
             )
         }
-        Resource.Success(loadMatch(matchId))
+        Resource.Success(loadAndSyncMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to save playing XI") }
 
     override suspend fun saveToss(matchId: String, toss: Toss): Resource<Match> = runCatching {
@@ -170,7 +172,7 @@ class MatchRepositoryImpl @Inject constructor(
                 )
             )
         }
-        Resource.Success(loadMatch(matchId))
+        Resource.Success(loadAndSyncMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to save toss") }
 
     override suspend fun selectOpeningPlayers(
@@ -192,6 +194,7 @@ class MatchRepositoryImpl @Inject constructor(
                 )
             )
         }
+        loadAndSyncMatch(matchId)
         Resource.Success(matchStateFor(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to save opening players") }
 
@@ -219,6 +222,7 @@ class MatchRepositoryImpl @Inject constructor(
             }
             matchDao.updateMatch(match.copy(status = MatchStatus.LIVE.name, updatedAtEpochMs = now))
         }
+        loadAndSyncMatch(matchId)
         Resource.Success(matchStateFor(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to start match") }
 
@@ -231,6 +235,7 @@ class MatchRepositoryImpl @Inject constructor(
             inningsDao.updateInnings(innings.copy(status = InningsStatus.COMPLETED.name, completedAtEpochMs = now))
             matchDao.updateMatch(match.copy(status = MatchStatus.INNINGS_BREAK.name, updatedAtEpochMs = now))
         }
+        loadAndSyncMatch(matchId)
         Resource.Success(matchStateFor(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to finish innings") }
 
@@ -239,7 +244,7 @@ class MatchRepositoryImpl @Inject constructor(
             val match = requireMatch(matchId)
             matchDao.updateMatch(match.copy(status = MatchStatus.COMPLETED.name, updatedAtEpochMs = System.currentTimeMillis()))
         }
-        Resource.Success(loadMatch(matchId))
+        Resource.Success(loadAndSyncMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to finish match") }
 
     override fun observeMatch(matchId: String): Flow<Resource<Match>> = matchDao.observeMatch(matchId).map { match ->
@@ -275,6 +280,12 @@ class MatchRepositoryImpl @Inject constructor(
             teamBXI = playerDao.getPlayingXI(matchId, match.teamBId),
             innings = inningsDao.getInningsForMatch(matchId).map { it.toDomain() }
         )
+    }
+
+    private suspend fun loadAndSyncMatch(matchId: String): Match {
+        val match = loadMatch(matchId)
+        firestoreMatchSyncDataSource.sync(match).getOrThrow()
+        return match
     }
 
     private suspend fun matchStateFor(matchId: String): MatchState {
