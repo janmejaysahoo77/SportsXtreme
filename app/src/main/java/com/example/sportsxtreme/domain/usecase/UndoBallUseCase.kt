@@ -3,8 +3,9 @@ package com.example.sportsxtreme.domain.usecase
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.MatchState
 import com.example.sportsxtreme.domain.repository.ScoringRepository
+import javax.inject.Inject
 
-class UndoBallUseCase(private val repository: ScoringRepository) {
+class UndoBallUseCase @Inject constructor(private val repository: ScoringRepository) {
     suspend operator fun invoke(
         matchId: String,
         requestedByUserId: String,

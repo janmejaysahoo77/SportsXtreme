@@ -3,6 +3,7 @@ package com.example.sportsxtreme.data.repository
 import androidx.room.withTransaction
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.local.dao.InningsDao
+import com.example.sportsxtreme.data.local.dao.BallEventDao
 import com.example.sportsxtreme.data.local.dao.MatchDao
 import com.example.sportsxtreme.data.local.dao.PlayerDao
 import com.example.sportsxtreme.data.local.dao.TeamDao
@@ -43,6 +44,7 @@ class MatchRepositoryImpl @Inject constructor(
     private val teamDao: TeamDao,
     private val playerDao: PlayerDao,
     private val inningsDao: InningsDao,
+    private val ballEventDao: BallEventDao,
     private val firestoreMatchSyncDataSource: FirebaseFirestoreMatchSyncDataSource
 ) : MatchRepository {
     override suspend fun createMatch(request: CreateMatchRequest): Resource<Match> = runCatching {
@@ -298,20 +300,24 @@ class MatchRepositoryImpl @Inject constructor(
             if (teamId == match.teamAId) TeamSide.TEAM_A else TeamSide.TEAM_B
         ) }
         val legalBalls = latestInnings?.legalBalls ?: 0
+        val currentOverEvents = latestInnings?.let { innings ->
+            val events = ballEventDao.getBallEvents(matchId, innings.inningsId).map { it.toDomain() }
+            events.takeLastWhile { it.overNumber == events.lastOrNull()?.overNumber }
+        }.orEmpty()
         return MatchState(
             matchId = matchId,
             inningsId = latestInnings?.inningsId,
             matchStatus = MatchStatus.valueOf(match.status),
             battingTeam = battingTeam,
             bowlingTeam = bowlingTeam,
-            striker = match.strikerId?.let { playerDao.getPlayer(it)?.toDomain() },
-            nonStriker = match.nonStrikerId?.let { playerDao.getPlayer(it)?.toDomain() },
-            bowler = match.currentBowlerId?.let { playerDao.getPlayer(it)?.toDomain() },
+            striker = latestInnings?.strikerId?.let { playerDao.getPlayer(it)?.toDomain() },
+            nonStriker = latestInnings?.nonStrikerId?.let { playerDao.getPlayer(it)?.toDomain() },
+            bowler = latestInnings?.currentBowlerId?.let { playerDao.getPlayer(it)?.toDomain() },
             score = latestInnings?.score ?: 0,
             wickets = latestInnings?.wickets ?: 0,
             legalBalls = legalBalls,
             overs = Overs(legalBalls / 6, legalBalls % 6),
-            currentOverEvents = emptyList(),
+            currentOverEvents = currentOverEvents,
             target = latestInnings?.target,
             currentInnings = latestInnings?.toDomain(),
             updatedAtEpochMs = match.updatedAtEpochMs

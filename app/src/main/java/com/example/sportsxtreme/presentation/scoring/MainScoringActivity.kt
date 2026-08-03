@@ -14,6 +14,7 @@ import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,6 +40,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,16 +64,32 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class MainScoringActivity : ComponentActivity() {
+    private val scoringViewModel: ScoringViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         setContent {
-            MainScoringScreen(onBack = { finish() })
+            val uiState by scoringViewModel.uiState.collectAsState()
+            MainScoringScreen(
+                uiState = uiState,
+                onBack = { finish() },
+                onRun = scoringViewModel::recordRuns,
+                onExtra = scoringViewModel::recordExtra,
+                onWicket = scoringViewModel::recordWicket,
+                onUndo = scoringViewModel::undoLastBall
+            )
         }
+    }
+
+    companion object {
+        const val EXTRA_INNINGS_ID = "inningsId"
     }
 }
 
@@ -84,10 +102,22 @@ private val ScoringMuted = Color(0xFFAAB6C4)
 private val ScoringBlue = Color(0xFF00D2FF)
 
 @Composable
-private fun MainScoringScreen(onBack: () -> Unit) {
+private fun MainScoringScreen(
+    uiState: ScoringUiState,
+    onBack: () -> Unit,
+    onRun: (Int) -> Unit,
+    onExtra: (com.example.sportsxtreme.domain.model.ExtraType) -> Unit,
+    onWicket: () -> Unit,
+    onUndo: () -> Unit
+) {
     var showAdvanced by remember { mutableStateOf(false) }
     var showWagonWheel by remember { mutableStateOf(false) }
     var wagonRun by remember { mutableStateOf(0) }
+    val scorecard = uiState.scorecard
+    val matchState = uiState.matchState
+    val striker = scorecard?.batting?.firstOrNull { it.playerId == matchState?.striker?.id }
+    val nonStriker = scorecard?.batting?.firstOrNull { it.playerId == matchState?.nonStriker?.id }
+    val bowler = scorecard?.bowling?.firstOrNull { it.playerId == matchState?.bowler?.id }
 
     Box(
         modifier = Modifier
@@ -103,7 +133,13 @@ private fun MainScoringScreen(onBack: () -> Unit) {
             ScoringTopBar(onBack)
             Spacer(Modifier.weight(0.5f))
             // Score summary
-            ScoreSummaryCard(modifier = Modifier.padding(horizontal = 10.dp))
+            ScoreSummaryCard(
+                score = "${scorecard?.summary?.totalScore ?: 0}/${scorecard?.summary?.wickets ?: 0}",
+                overs = scorecard?.summary?.overs?.display ?: "0.0",
+                runRate = scorecard?.summary?.currentRunRate ?: 0.0,
+                target = scorecard?.summary?.target,
+                modifier = Modifier.padding(horizontal = 10.dp)
+            )
             Spacer(Modifier.weight(1f))
             // Batters + Bowler in a vertical list
             Column(
@@ -112,21 +148,21 @@ private fun MainScoringScreen(onBack: () -> Unit) {
                     .padding(horizontal = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                BatterMini("STRIKER", "Abhimanyu Majhi", "22", "(18)", ScoringAccent, Modifier)
-                BatterMini("NON-STR", "Ashwini Gita", "15", "(11)", ScoringStroke, Modifier)
-                BowlerMini(Modifier)
+                BatterMini("STRIKER", matchState?.striker?.displayName ?: "Select batter", (striker?.runs ?: 0).toString(), "(${striker?.balls ?: 0})", ScoringAccent, Modifier)
+                BatterMini("NON-STR", matchState?.nonStriker?.displayName ?: "Select batter", (nonStriker?.runs ?: 0).toString(), "(${nonStriker?.balls ?: 0})", ScoringStroke, Modifier)
+                BowlerMini(matchState?.bowler?.displayName ?: "Select bowler", bowler?.overs?.display ?: "0.0", bowler?.economy ?: 0.0, bowler?.wickets ?: 0, bowler?.runsConceded ?: 0, Modifier)
             }
             Spacer(Modifier.weight(2f))
             // Current over
-            CurrentOverCard(modifier = Modifier.padding(horizontal = 10.dp))
+            CurrentOverCard(matchState?.currentOverEvents.orEmpty(), modifier = Modifier.padding(horizontal = 10.dp))
             Spacer(Modifier.height(8.dp))
             // Run pad
             RunPad(
                 modifier = Modifier.padding(horizontal = 10.dp).padding(bottom = 4.dp),
-                onRunClick = { run ->
-                    wagonRun = run
-                    showWagonWheel = true
-                }
+                onRunClick = onRun,
+                onExtra = onExtra,
+                onWicket = onWicket,
+                onUndo = onUndo
             )
             // More actions bar
             MoreActionsBar(
@@ -189,7 +225,7 @@ private fun ScoringTopBar(onBack: () -> Unit) {
 
 // ── Score Summary ─────────────────────────────────────────
 @Composable
-private fun ScoreSummaryCard(modifier: Modifier = Modifier) {
+private fun ScoreSummaryCard(score: String, overs: String, runRate: Double, target: Int?, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -199,7 +235,7 @@ private fun ScoreSummaryCard(modifier: Modifier = Modifier) {
             .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("45/2", color = ScoringAccent, fontSize = 32.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+            Text(score, color = ScoringAccent, fontSize = 32.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.End) {
                 Box(
                     modifier = Modifier
@@ -209,9 +245,9 @@ private fun ScoreSummaryCard(modifier: Modifier = Modifier) {
                         .padding(horizontal = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("INNINGS 2", color = ScoringAccent, fontSize = 8.sp, fontWeight = FontWeight.Black)
+                    Text("$overs OV", color = ScoringAccent, fontSize = 8.sp, fontWeight = FontWeight.Black)
                 }
-                Text("CRR  6.25", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 6.dp))
+                Text("CRR  ${"%.2f".format(runRate)}", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 6.dp))
             }
         }
         Row(
@@ -224,8 +260,8 @@ private fun ScoreSummaryCard(modifier: Modifier = Modifier) {
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Target: 98", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
-            Text("Need 53 from 15 balls", color = ScoringAccent, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            Text("Target: ${target ?: "--"}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+            Text("LIVE", color = ScoringAccent, fontSize = 10.sp, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -269,7 +305,7 @@ private fun BatterMini(label: String, name: String, runs: String, balls: String,
 }
 
 @Composable
-private fun BowlerMini(modifier: Modifier) {
+private fun BowlerMini(name: String, overs: String, economy: Double, wickets: Int, runsConceded: Int, modifier: Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -282,11 +318,11 @@ private fun BowlerMini(modifier: Modifier) {
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text("BOWLER", color = ScoringBlue, fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 0.8.sp)
-            Text("D. Kumar Sahoo", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-            Text("2.3 Ov  Econ 6.0", color = ScoringMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 2.dp))
+            Text(name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            Text("$overs Ov  Econ ${"%.1f".format(economy)}", color = ScoringMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 2.dp))
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text("2/15", color = ScoringBlue, fontSize = 28.sp, fontWeight = FontWeight.Black)
+            Text("$wickets/$runsConceded", color = ScoringBlue, fontSize = 28.sp, fontWeight = FontWeight.Black)
             Box(
                 modifier = Modifier
                     .padding(top = 4.dp)
@@ -304,7 +340,8 @@ private fun BowlerMini(modifier: Modifier) {
 
 // ── Current Over ──────────────────────────────────────────
 @Composable
-private fun CurrentOverCard(modifier: Modifier = Modifier) {
+private fun CurrentOverCard(events: List<com.example.sportsxtreme.domain.model.BallEvent>, modifier: Modifier = Modifier) {
+    val lastEvent = events.lastOrNull()
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -316,14 +353,16 @@ private fun CurrentOverCard(modifier: Modifier = Modifier) {
             Text("CURRENT OVER", color = ScoringMuted, fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 1.4.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("LAST BALL: ", color = ScoringMuted, fontSize = 7.sp, fontWeight = FontWeight.Black)
-                Text("6 Runs", color = ScoringAccent, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                Text(lastEvent?.totalRuns?.let { "$it Runs" } ?: "--", color = ScoringAccent, fontSize = 9.sp, fontWeight = FontWeight.Black)
             }
         }
         Row(
             modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            listOf("4" to ScoringBlue, "0" to null, "1" to null, "2" to null, "3" to null, "6" to ScoringAccent).forEachIndexed { index, (value, col) ->
+            events.takeLast(6).map { it.totalRuns.toString() to if (it.totalRuns == 4) ScoringBlue else if (it.totalRuns == 6) ScoringAccent else null }
+                .let { values -> if (values.isEmpty()) List(6) { "--" to null } else values }
+                .forEachIndexed { index, (value, col) ->
                 val color = col ?: Color(0xFF222A3A)
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(
@@ -345,7 +384,13 @@ private fun CurrentOverCard(modifier: Modifier = Modifier) {
 
 // ── Run Pad ───────────────────────────────────────────────
 @Composable
-private fun RunPad(modifier: Modifier = Modifier, onRunClick: (Int) -> Unit) {
+private fun RunPad(
+    modifier: Modifier = Modifier,
+    onRunClick: (Int) -> Unit,
+    onExtra: (com.example.sportsxtreme.domain.model.ExtraType) -> Unit,
+    onWicket: () -> Unit,
+    onUndo: () -> Unit
+) {
     val rows = listOf(
         listOf("0", "1", "2"),
         listOf("3", "4\nFOUR", "6\nSIX"),
@@ -370,9 +415,16 @@ private fun RunPad(modifier: Modifier = Modifier, onRunClick: (Int) -> Unit) {
                         modifier = Modifier
                             .weight(1f)
                             .height(52.dp),
-                        onClick = if (run != null && run in 0..6 && run != 5) {
-                            { onRunClick(run) }
-                        } else null
+                        onClick = when {
+                            run != null && run in 0..6 && run != 5 -> { { onRunClick(run) } }
+                            label == "WD" -> { { onExtra(com.example.sportsxtreme.domain.model.ExtraType.WIDE) } }
+                            label == "NB" -> { { onExtra(com.example.sportsxtreme.domain.model.ExtraType.NO_BALL) } }
+                            label == "BYE" -> { { onExtra(com.example.sportsxtreme.domain.model.ExtraType.BYE) } }
+                            label == "LB" -> { { onExtra(com.example.sportsxtreme.domain.model.ExtraType.LEG_BYE) } }
+                            label == "OUT" -> onWicket
+                            label == "UNDO" -> onUndo
+                            else -> null
+                        }
                     )
                 }
             }

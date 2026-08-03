@@ -65,6 +65,7 @@ enum class DismissalType {
     TIMED_OUT,
     OBSTRUCTING_THE_FIELD,
     RETIRED_OUT,
+    RETIRED_HURT,
     OTHER
 }
 

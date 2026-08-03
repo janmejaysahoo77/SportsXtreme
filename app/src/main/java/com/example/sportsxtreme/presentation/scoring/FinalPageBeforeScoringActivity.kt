@@ -113,6 +113,7 @@ class FinalPageBeforeScoringActivity : ComponentActivity() {
                             startActivity(
                                 Intent(this, MainScoringActivity::class.java)
                                     .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                                    .putExtra(MainScoringActivity.EXTRA_INNINGS_ID, "${matchId}_innings_1")
                             )
                             finish()
                         },
