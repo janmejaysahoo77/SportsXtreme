@@ -19,7 +19,11 @@ class DeliverySyncScheduler @Inject constructor(
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
             .build()
-        workManager.enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.KEEP, request)
+        // REPLACE (not KEEP) so every ball recorded while a previous sync is
+        // still enqueued/running still triggers a fresh sync. KEEP silently
+        // drops the new request, which is why the friend's phone never saw
+        // the live scorecard update.
+        workManager.enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request)
     }
 
     private companion object {

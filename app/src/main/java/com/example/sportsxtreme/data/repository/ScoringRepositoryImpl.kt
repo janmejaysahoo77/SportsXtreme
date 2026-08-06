@@ -19,6 +19,7 @@ import com.example.sportsxtreme.domain.model.BattingScorecard
 import com.example.sportsxtreme.domain.model.BowlingScorecard
 import com.example.sportsxtreme.domain.model.DismissalType
 import com.example.sportsxtreme.domain.model.InningsScorecard
+import com.example.sportsxtreme.domain.model.LiveScorePayload
 import com.example.sportsxtreme.domain.model.MatchState
 import com.example.sportsxtreme.domain.model.MatchStatus
 import com.example.sportsxtreme.domain.model.Overs
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -50,6 +52,7 @@ class ScoringRepositoryImpl @Inject constructor(
 ) : ScoringRepository {
     override suspend fun recordBall(event: BallEvent): Resource<MatchState> = runCatching {
         localScoringStore.recordDelivery(event)
+        runCatching { publishLiveScore(event) }
         deliverySyncScheduler.enqueue()
         Resource.Success(matchStateFor(event.matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to save ball event") }
@@ -152,6 +155,51 @@ class ScoringRepositoryImpl @Inject constructor(
                 .collect { remoteDeliveries -> localScoringStore.reconcileRemoteDeliveries(remoteDeliveries) }
         }
         collect { state -> send(state) }
+    }
+
+    private suspend fun publishLiveScore(event: BallEvent) {
+        val scorecard = when (val result = observeScorecard(event.matchId, event.inningsId).first()) {
+            is Resource.Success -> requireNotNull(result.data)
+            is Resource.Error -> error(result.message ?: "Scorecard is not available")
+            is Resource.Loading -> error("Scorecard is still loading")
+        }
+        val match = requireNotNull(matchDao.getMatch(event.matchId)) { "Match not found" }
+        val teamA = teamDao.getTeam(match.teamAId)
+        val teamB = teamDao.getTeam(match.teamBId)
+        val summary = scorecard.summary
+        val striker = summary.strikerId?.let { playerDao.getPlayer(it) }
+        val nonStriker = summary.nonStrikerId?.let { playerDao.getPlayer(it) }
+        val bowler = summary.bowlerId?.let { playerDao.getPlayer(it) }
+        val bowlerScorecard = scorecard.bowling.firstOrNull { it.playerId == summary.bowlerId }
+
+        firestoreScoringDataSource.syncLiveScore(
+            matchId = event.matchId,
+            payload = LiveScorePayload(
+                matchId = event.matchId,
+                tournamentName = match.title,
+                teamAName = teamA?.teamName.orEmpty(),
+                teamBName = teamB?.teamName.orEmpty(),
+                teamAShortName = teamA?.shortName.orEmpty(),
+                teamBShortName = teamB?.shortName.orEmpty(),
+                status = match.status,
+                score = summary.totalScore,
+                wickets = summary.wickets,
+                overs = summary.overs.display,
+                currentRunRate = summary.currentRunRate,
+                requiredRunRate = summary.requiredRunRate,
+                target = summary.target,
+                strikerName = striker?.playerName,
+                strikerRuns = scorecard.batting.firstOrNull { it.playerId == summary.strikerId }?.runs ?: 0,
+                strikerBalls = scorecard.batting.firstOrNull { it.playerId == summary.strikerId }?.balls ?: 0,
+                nonStrikerName = nonStriker?.playerName,
+                bowlerName = bowler?.playerName,
+                bowlerOvers = bowlerScorecard?.overs?.display ?: "0.0",
+                bowlerRuns = bowlerScorecard?.runsConceded ?: 0,
+                bowlerWickets = bowlerScorecard?.wickets ?: 0,
+                matchStatusNote = if (match.status == MatchStatus.LIVE.name) "Powerplay" else null,
+                updatedAtEpochMs = summary.updatedAtEpochMs
+            )
+        )
     }
 
     private suspend fun matchStateFor(matchId: String): MatchState {

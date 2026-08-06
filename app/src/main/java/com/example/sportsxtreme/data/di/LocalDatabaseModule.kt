@@ -7,6 +7,7 @@ import com.example.sportsxtreme.data.local.dao.BallEventDao
 import com.example.sportsxtreme.data.local.dao.BattingDao
 import com.example.sportsxtreme.data.local.dao.BowlingDao
 import com.example.sportsxtreme.data.local.dao.InningsDao
+import com.example.sportsxtreme.data.local.dao.LiveMatchDao
 import com.example.sportsxtreme.data.local.dao.MatchDao
 import com.example.sportsxtreme.data.local.dao.MatchSummaryDao
 import com.example.sportsxtreme.data.local.dao.PlayerDao
@@ -31,7 +32,8 @@ object LocalDatabaseModule {
                 SportsXtremeDatabase.MIGRATION_1_2,
                 SportsXtremeDatabase.MIGRATION_2_3,
                 SportsXtremeDatabase.MIGRATION_3_4,
-                SportsXtremeDatabase.MIGRATION_4_5
+                SportsXtremeDatabase.MIGRATION_4_5,
+                SportsXtremeDatabase.MIGRATION_5_6
             )
             .build()
 
@@ -44,6 +46,7 @@ object LocalDatabaseModule {
     @Provides fun provideBowlingDao(database: SportsXtremeDatabase): BowlingDao = database.bowlingDao()
     @Provides fun provideMatchSummaryDao(database: SportsXtremeDatabase): MatchSummaryDao = database.matchSummaryDao()
     @Provides fun provideSyncQueueDao(database: SportsXtremeDatabase): SyncQueueDao = database.syncQueueDao()
+    @Provides fun provideLiveMatchDao(database: SportsXtremeDatabase): LiveMatchDao = database.liveMatchDao()
 
     @Provides
     @Singleton

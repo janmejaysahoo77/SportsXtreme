@@ -8,6 +8,7 @@ import com.example.sportsxtreme.data.local.dao.BallEventDao
 import com.example.sportsxtreme.data.local.dao.BattingDao
 import com.example.sportsxtreme.data.local.dao.BowlingDao
 import com.example.sportsxtreme.data.local.dao.InningsDao
+import com.example.sportsxtreme.data.local.dao.LiveMatchDao
 import com.example.sportsxtreme.data.local.dao.MatchDao
 import com.example.sportsxtreme.data.local.dao.MatchSummaryDao
 import com.example.sportsxtreme.data.local.dao.PlayerDao
@@ -17,6 +18,7 @@ import com.example.sportsxtreme.data.local.entity.BallEventEntity
 import com.example.sportsxtreme.data.local.entity.BattingEntity
 import com.example.sportsxtreme.data.local.entity.BowlingEntity
 import com.example.sportsxtreme.data.local.entity.InningsEntity
+import com.example.sportsxtreme.data.local.entity.LiveMatchEntity
 import com.example.sportsxtreme.data.local.entity.MatchEntity
 import com.example.sportsxtreme.data.local.entity.MatchSummaryEntity
 import com.example.sportsxtreme.data.local.entity.PlayerEntity
@@ -35,9 +37,10 @@ import com.example.sportsxtreme.data.local.entity.TeamEntity
         BattingEntity::class,
         BowlingEntity::class,
         MatchSummaryEntity::class,
-        SyncQueueEntity::class
+        SyncQueueEntity::class,
+        LiveMatchEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class SportsXtremeDatabase : RoomDatabase() {
@@ -50,8 +53,44 @@ abstract class SportsXtremeDatabase : RoomDatabase() {
     abstract fun bowlingDao(): BowlingDao
     abstract fun matchSummaryDao(): MatchSummaryDao
     abstract fun syncQueueDao(): SyncQueueDao
+    abstract fun liveMatchDao(): LiveMatchDao
 
     companion object {
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS live_matches (
+                        matchId TEXT NOT NULL,
+                        tournamentName TEXT NOT NULL,
+                        teamAName TEXT NOT NULL,
+                        teamBName TEXT NOT NULL,
+                        teamAShortName TEXT NOT NULL,
+                        teamBShortName TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        score INTEGER NOT NULL,
+                        wickets INTEGER NOT NULL,
+                        overs TEXT NOT NULL,
+                        currentRunRate REAL NOT NULL,
+                        requiredRunRate REAL,
+                        target INTEGER,
+                        strikerName TEXT,
+                        strikerRuns INTEGER NOT NULL,
+                        strikerBalls INTEGER NOT NULL,
+                        nonStrikerName TEXT,
+                        bowlerName TEXT,
+                        bowlerOvers TEXT NOT NULL,
+                        bowlerRuns INTEGER NOT NULL,
+                        bowlerWickets INTEGER NOT NULL,
+                        matchStatusNote TEXT,
+                        updatedAtEpochMs INTEGER NOT NULL,
+                        PRIMARY KEY(matchId)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(

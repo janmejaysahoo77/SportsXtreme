@@ -96,6 +96,9 @@
             android:name=".presentation.scoring.ViewAllScoreCardActivity"
             android:exported="false" />
         <activity
+            android:name=".presentation.home.MatchDetailActivity"
+            android:exported="false" />
+        <activity
             android:name=".presentation.media.XtremeMediaActivity"
             android:exported="false" />
         <activity

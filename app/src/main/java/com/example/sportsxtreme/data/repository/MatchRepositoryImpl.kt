@@ -16,6 +16,7 @@ import com.example.sportsxtreme.data.local.mapper.toEntities
 import com.example.sportsxtreme.data.local.mapper.toEntity
 import com.example.sportsxtreme.data.local.mapper.toMatchTeam
 import com.example.sportsxtreme.data.remote.firestore.FirebaseFirestoreMatchSyncDataSource
+import com.example.sportsxtreme.data.remote.firestore.FirestoreScoringDataSource
 import com.example.sportsxtreme.domain.model.InningsStatus
 import com.example.sportsxtreme.domain.model.BallType
 import com.example.sportsxtreme.domain.model.Match
@@ -23,6 +24,7 @@ import com.example.sportsxtreme.domain.model.MatchFormat
 import com.example.sportsxtreme.domain.model.MatchState
 import com.example.sportsxtreme.domain.model.MatchStatus
 import com.example.sportsxtreme.domain.model.MatchTeam
+import com.example.sportsxtreme.domain.model.LiveScorePayload
 import com.example.sportsxtreme.domain.model.Overs
 import com.example.sportsxtreme.domain.model.PlayingXI
 import com.example.sportsxtreme.domain.model.TeamSide
@@ -45,7 +47,8 @@ class MatchRepositoryImpl @Inject constructor(
     private val playerDao: PlayerDao,
     private val inningsDao: InningsDao,
     private val ballEventDao: BallEventDao,
-    private val firestoreMatchSyncDataSource: FirebaseFirestoreMatchSyncDataSource
+    private val firestoreMatchSyncDataSource: FirebaseFirestoreMatchSyncDataSource,
+    private val firestoreScoringDataSource: FirestoreScoringDataSource
 ) : MatchRepository {
     override suspend fun createMatch(request: CreateMatchRequest): Resource<Match> = runCatching {
         val matchId = UUID.randomUUID().toString()
@@ -224,7 +227,8 @@ class MatchRepositoryImpl @Inject constructor(
             }
             matchDao.updateMatch(match.copy(status = MatchStatus.LIVE.name, updatedAtEpochMs = now))
         }
-        loadAndSyncMatch(matchId)
+        val liveMatch = loadAndSyncMatch(matchId)
+        firestoreScoringDataSource.syncLiveScore(matchId, liveMatch.toInitialLiveScore())
         Resource.Success(matchStateFor(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to start match") }
 
@@ -288,6 +292,41 @@ class MatchRepositoryImpl @Inject constructor(
         val match = loadMatch(matchId)
         firestoreMatchSyncDataSource.sync(match).getOrThrow()
         return match
+    }
+
+    private suspend fun Match.toInitialLiveScore(): LiveScorePayload {
+        val currentInnings = innings.lastOrNull()
+        val legalBalls = currentInnings?.legalBalls ?: 0
+        val score = currentInnings?.score ?: 0
+        val striker = currentInnings?.strikerId?.let { playerDao.getPlayer(it) }
+        val nonStriker = currentInnings?.nonStrikerId?.let { playerDao.getPlayer(it) }
+        val bowler = currentInnings?.currentBowlerId?.let { playerDao.getPlayer(it) }
+
+        return LiveScorePayload(
+            matchId = id,
+            tournamentName = title,
+            teamAName = teamA.name,
+            teamBName = teamB.name,
+            teamAShortName = teamA.shortName,
+            teamBShortName = teamB.shortName,
+            status = status.name,
+            score = score,
+            wickets = currentInnings?.wickets ?: 0,
+            overs = Overs(legalBalls / 6, legalBalls % 6).display,
+            currentRunRate = if (legalBalls == 0) 0.0 else score * 6.0 / legalBalls,
+            requiredRunRate = null,
+            target = currentInnings?.target,
+            strikerName = striker?.playerName,
+            strikerRuns = 0,
+            strikerBalls = 0,
+            nonStrikerName = nonStriker?.playerName,
+            bowlerName = bowler?.playerName,
+            bowlerOvers = "0.0",
+            bowlerRuns = 0,
+            bowlerWickets = 0,
+            matchStatusNote = "Powerplay",
+            updatedAtEpochMs = updatedAtEpochMs
+        )
     }
 
     private suspend fun matchStateFor(matchId: String): MatchState {

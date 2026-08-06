@@ -55,7 +55,8 @@ import kotlin.math.max
 class HomeScreenView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-    private val topMode: TopMode = TopMode.SPORTS
+    private val topMode: TopMode = TopMode.SPORTS,
+    private val liveMatchViewModel: LiveMatchViewModel? = null
 ) : FrameLayout(context, attrs) {
 
     enum class TopMode { SPORTS, MEDIA, CART }
@@ -683,7 +684,7 @@ class HomeScreenView @JvmOverloads constructor(
                     when (topMode) {
                         TopMode.SPORTS -> {
                             content.addView(locationRow(context))
-                            content.addView(scoreCardsSection(context), blockParams(top = 6))
+                            content.addView(liveMatchesSection(), blockParams(top = 6))
                             content.addView(proPassCardsSection(context), blockParams(top = 8))
                             content.addView(personalizeGearSection(context), blockParams(top = 10))
                             content.addView(sectionHeader(context, "Sports Feed", null), blockParams(top = 14))
@@ -1614,6 +1615,19 @@ class HomeScreenView @JvmOverloads constructor(
                     setColor(primary)
                 }
             }, LinearLayout.LayoutParams(dp(58), dp(26)))
+        }
+    }
+
+    /**
+     * Builds the live matches section that replaces the old dummy scorecard.
+     *
+     * It renders real-time match summaries from Firestore (with Room offline
+     * cache). The ViewModel is injected from MainActivity; when unavailable the
+     * section simply shows the empty state.
+     */
+    private fun liveMatchesSection(): View {
+        return LiveMatchesSectionView(context).apply {
+            liveMatchViewModel?.let { bind(it) }
         }
     }
 

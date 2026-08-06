@@ -31,7 +31,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import com.example.sportsxtreme.presentation.home.HomeScreenView
+import com.example.sportsxtreme.presentation.home.LiveMatchViewModel
+import dagger.hilt.android.AndroidEntryPoint
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.common.Resource
@@ -46,6 +50,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private enum class Screen {
@@ -65,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private var emailVerificationScreenView: EmailVerificationScreenView? = null
     private var pendingOtpContact = ""
     private val authViewModel by lazy { AuthDependencies.authViewModel() }
+    private val liveMatchViewModel: LiveMatchViewModel by viewModels()
     private val locationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var currentScreen by mutableStateOf(Screen.Splash)
     private val locationPermissionLauncher = registerForActivityResult(
@@ -195,7 +201,7 @@ class MainActivity : ComponentActivity() {
 
             Screen.Home -> AndroidView(
                 factory = { context ->
-                    HomeScreenView(context).also {
+                    HomeScreenView(context, liveMatchViewModel = liveMatchViewModel).also {
                         homeScreenView = it
                     }
                 }

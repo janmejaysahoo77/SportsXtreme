@@ -1,5 +1,4 @@
 package com.example.sportsxtreme.data.remote.firestore
-
 import com.example.sportsxtreme.domain.model.BallEvent
 import com.example.sportsxtreme.domain.model.BallEventType
 import com.example.sportsxtreme.domain.model.Dismissal
@@ -7,10 +6,14 @@ import com.example.sportsxtreme.domain.model.DismissalType
 import com.example.sportsxtreme.domain.model.ExtraRun
 import com.example.sportsxtreme.domain.model.ExtraType
 import com.example.sportsxtreme.domain.model.InningsScorecard
+import com.example.sportsxtreme.domain.model.LiveScorePayload
 import com.example.sportsxtreme.domain.model.SyncState
+import com.google.android.gms.tasks.Task
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.WriteBatch
 import javax.inject.Inject
@@ -24,7 +27,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 
 @Singleton
 class FirebaseFirestoreScoringDataSource @Inject constructor(
-    private val firestore: FirebaseFirestore
+    private val firestore: FirebaseFirestore,
+    private val auth: FirebaseAuth
 ) : FirestoreScoringDataSource {
     override suspend fun syncDelivery(event: BallEvent, scorecard: InningsScorecard) {
         val match = firestore.collection(MATCHES_COLLECTION).document(event.matchId)
@@ -104,6 +108,57 @@ class FirebaseFirestoreScoringDataSource @Inject constructor(
             )
         }.commitAwait()
     }
+
+    override suspend fun syncLiveScore(matchId: String, payload: LiveScorePayload) {
+        val document = firestore.collection(MATCHES_COLLECTION).document(matchId)
+        val liveScore = payload.toFirestorePayload()
+
+        try {
+            document.update("liveScore", liveScore).await()
+        } catch (error: FirebaseFirestoreException) {
+            if (error.code != FirebaseFirestoreException.Code.NOT_FOUND) throw error
+
+            val ownerId = requireNotNull(auth.currentUser?.uid) {
+                "Sign in before publishing a live score"
+            }
+            document.set(
+                mapOf(
+                    "matchId" to matchId,
+                    "ownerId" to ownerId,
+                    "liveScore" to liveScore
+                ),
+                SetOptions.merge()
+            ).await()
+        }
+    }
+
+    private fun LiveScorePayload.toFirestorePayload(): Map<String, Any?> = mapOf(
+        "matchId" to matchId,
+        "tournamentName" to tournamentName,
+        "teamAName" to teamAName,
+        "teamBName" to teamBName,
+        "teamAShortName" to teamAShortName,
+        "teamBShortName" to teamBShortName,
+        "status" to status,
+        "score" to score,
+        "wickets" to wickets,
+        "overs" to overs,
+        "currentRunRate" to currentRunRate,
+        "requiredRunRate" to requiredRunRate,
+        "target" to target,
+        "strikerName" to strikerName,
+        "strikerRuns" to strikerRuns,
+        "strikerBalls" to strikerBalls,
+        "nonStrikerName" to nonStrikerName,
+        "bowlerName" to bowlerName,
+        "bowlerOvers" to bowlerOvers,
+        "bowlerRuns" to bowlerRuns,
+        "bowlerWickets" to bowlerWickets,
+        "matchStatusNote" to matchStatusNote,
+        "updatedAtEpochMs" to updatedAtEpochMs,
+        "syncedAt" to FieldValue.serverTimestamp()
+    )
+
 
     override fun observeBallEvents(matchId: String, inningsId: String): Flow<List<BallEvent>> = callbackFlow {
         val registration = firestore.collection(MATCHES_COLLECTION)
@@ -212,7 +267,15 @@ class FirebaseFirestoreScoringDataSource @Inject constructor(
             }
             .addOnFailureListener { error ->
                 if (continuation.isActive) continuation.resumeWithException(error)
-            }
+        }
+    }
+
+    private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { continuation ->
+        addOnSuccessListener { result ->
+            if (continuation.isActive) continuation.resume(result)
+        }.addOnFailureListener { error ->
+            if (continuation.isActive) continuation.resumeWithException(error)
+        }
     }
 
     private companion object {
