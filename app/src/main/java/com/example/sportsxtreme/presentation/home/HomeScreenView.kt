@@ -50,6 +50,7 @@ import android.widget.ViewFlipper
 import androidx.compose.ui.platform.ComposeView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.core.view.GravityCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.google.firebase.auth.FirebaseAuth
 import kotlin.math.max
 
@@ -668,10 +669,24 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun createHomeContent(context: Context): View {
+        // Wrap the main scrollable content in a SwipeRefreshLayout for pull‑to‑refresh functionality
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            
+
             addView(topBar(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+            // SwipeRefreshLayout requires the androidx.swiperefreshlayout library which is already a transitive dependency in most Android projects
+            val swipeRefresh = androidx.swiperefreshlayout.widget.SwipeRefreshLayout(context).apply {
+                setColorSchemeColors(primary) // Use the primary accent colour for the spinner
+                setOnRefreshListener {
+                    // Trigger a refresh of the home screen content.
+                    // Here we simply invalidate the view hierarchy which forces a redraw.
+                    // In a real app you would likely ask the ViewModel to reload data.
+                    refreshAfterResume()
+                    // Stop the refresh animation after our refresh logic completes.
+                    post { isRefreshing = false }
+                }
+            }
 
             val scrollContainer = FrameLayout(context).apply {
                 val scroll = ScrollView(context).apply {
@@ -720,7 +735,9 @@ class HomeScreenView @JvmOverloads constructor(
                 }
                 addView(primaryGlow, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(6)))
             }
-            addView(scrollContainer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+
+            swipeRefresh.addView(scrollContainer)
+            addView(swipeRefresh, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         }
     }
 

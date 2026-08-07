@@ -10,7 +10,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -42,7 +41,7 @@ class LiveMatchesSectionView @JvmOverloads constructor(
     private lateinit var placeholderContainer: FrameLayout
     private lateinit var placeholderTitle: TextView
     private lateinit var placeholderSubtitle: TextView
-    private lateinit var loadingBar: ProgressBar
+    private lateinit var skeletonContainer: LinearLayout
     private lateinit var offlineNote: TextView
 
     private var adapter: LiveMatchAdapter? = null
@@ -97,17 +96,34 @@ class LiveMatchesSectionView @JvmOverloads constructor(
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         )
 
-        // Placeholder container shown while loading or when there are no matches.
+        // Skeleton shimmer container shown while loading.
+        skeletonContainer = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            visibility = View.GONE
+            clipToPadding = false
+            setPadding(0, 0, dp(12), 0)
+
+            // Add 2 skeleton cards to fill the viewport.
+            repeat(2) { idx ->
+                val skeleton = SkeletonMatchCardView(context).apply {
+                    layoutParams = LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        if (idx > 0) leftMargin = dp(12)
+                    }
+                }
+                addView(skeleton)
+            }
+        }
+        addView(
+            skeletonContainer,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
+
+        // Placeholder container shown when there are no matches.
         placeholderContainer = FrameLayout(context).apply {
             visibility = View.GONE
             addView(LinearLayout(context).apply {
                 orientation = VERTICAL
                 gravity = Gravity.CENTER
-
-                loadingBar = ProgressBar(context).apply {
-                    visibility = View.GONE
-                }
-                addView(loadingBar, LinearLayout.LayoutParams(dp(34), dp(34)))
 
                 placeholderTitle = TextView(context).apply {
                     text = "No Live Matches Right Now"
@@ -201,19 +217,17 @@ class LiveMatchesSectionView @JvmOverloads constructor(
         offlineNote.visibility = if (state.isOffline && matches.isNotEmpty()) View.VISIBLE else View.GONE
 
         when {
-            // Loading: show spinner only when we have nothing cached yet.
+            // Loading: show skeleton shimmer cards when we have nothing cached yet.
             state.isLoading && matches.isEmpty() -> {
-                placeholderContainer.visibility = View.VISIBLE
-                loadingBar.visibility = View.VISIBLE
-                placeholderTitle.text = "Loading Live Matches…"
-                placeholderSubtitle.text = "Fetching the latest scores"
+                skeletonContainer.visibility = View.VISIBLE
+                placeholderContainer.visibility = View.GONE
                 recyclerView.visibility = View.GONE
             }
 
             // Empty state.
             matches.isEmpty() -> {
+                skeletonContainer.visibility = View.GONE
                 placeholderContainer.visibility = View.VISIBLE
-                loadingBar.visibility = View.GONE
                 placeholderTitle.text = "No Live Matches Right Now"
                 placeholderSubtitle.text = "Check Upcoming Matches"
                 recyclerView.visibility = View.GONE
@@ -221,8 +235,8 @@ class LiveMatchesSectionView @JvmOverloads constructor(
 
             // Live list.
             else -> {
+                skeletonContainer.visibility = View.GONE
                 placeholderContainer.visibility = View.GONE
-                loadingBar.visibility = View.GONE
                 recyclerView.visibility = View.VISIBLE
                 adapter?.submitList(matches)
             }

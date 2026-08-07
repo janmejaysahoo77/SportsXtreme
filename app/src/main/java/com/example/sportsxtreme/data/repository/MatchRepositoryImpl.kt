@@ -305,6 +305,9 @@ class MatchRepositoryImpl @Inject constructor(
         return LiveScorePayload(
             matchId = id,
             tournamentName = title,
+            teamAId = teamA.teamId,
+            teamBId = teamB.teamId,
+            battingTeamId = currentInnings?.battingTeamId,
             teamAName = teamA.name,
             teamBName = teamB.name,
             teamAShortName = teamA.shortName,

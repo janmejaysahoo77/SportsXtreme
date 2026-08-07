@@ -177,6 +177,9 @@ class ScoringRepositoryImpl @Inject constructor(
             payload = LiveScorePayload(
                 matchId = event.matchId,
                 tournamentName = match.title,
+                teamAId = match.teamAId,
+                teamBId = match.teamBId,
+                battingTeamId = match.battingTeamId,
                 teamAName = teamA?.teamName.orEmpty(),
                 teamBName = teamB?.teamName.orEmpty(),
                 teamAShortName = teamA?.shortName.orEmpty(),

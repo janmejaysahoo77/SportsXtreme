@@ -15,6 +15,9 @@ import androidx.room.PrimaryKey
 data class LiveMatchEntity(
     @PrimaryKey val matchId: String,
     val tournamentName: String,
+    val teamAId: String,
+    val teamBId: String,
+    val battingTeamId: String?,
     val teamAName: String,
     val teamBName: String,
     val teamAShortName: String,

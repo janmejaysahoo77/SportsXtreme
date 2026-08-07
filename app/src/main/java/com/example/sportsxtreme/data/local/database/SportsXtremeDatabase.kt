@@ -40,7 +40,7 @@ import com.example.sportsxtreme.data.local.entity.TeamEntity
         SyncQueueEntity::class,
         LiveMatchEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class SportsXtremeDatabase : RoomDatabase() {
@@ -274,6 +274,14 @@ abstract class SportsXtremeDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE ball_events_new RENAME TO ball_events")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_ball_events_matchId ON ball_events(matchId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_ball_events_inningsId ON ball_events(inningsId)")
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN teamAId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN teamBId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN battingTeamId TEXT DEFAULT NULL")
             }
         }
     }

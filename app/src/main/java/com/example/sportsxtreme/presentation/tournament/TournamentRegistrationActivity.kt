@@ -1,18 +1,19 @@
 package com.example.sportsxtreme.presentation.tournament
 
-import com.example.sportsxtreme.R
-import com.example.sportsxtreme.presentation.tournament.*
-import com.example.sportsxtreme.presentation.components.*
-import com.example.sportsxtreme.presentation.auth.*
-import com.example.sportsxtreme.presentation.scoring.*
-import com.example.sportsxtreme.presentation.match.*
-import com.example.sportsxtreme.presentation.media.*
-import com.example.sportsxtreme.presentation.home.*
-import com.example.sportsxtreme.presentation.team.*
-import com.example.sportsxtreme.presentation.profile.*
-import com.example.sportsxtreme.presentation.store.*
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -26,7 +27,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,14 +38,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,10 +65,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import kotlin.math.PI
-import kotlin.math.sin
+import androidx.activity.viewModels
+import com.example.sportsxtreme.R
+import com.example.sportsxtreme.domain.model.Tournament
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class TournamentRegistrationActivity : ComponentActivity() {
+    private val viewModel: TournamentRegistrationViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
@@ -79,9 +82,10 @@ class TournamentRegistrationActivity : ComponentActivity() {
         setContent {
             TournamentRegistrationScreen(
                 onBack = { finish() },
-                onNext = {
+                onNavigateNext = {
                     startActivity(Intent(this, TournamentRequirementsActivity::class.java))
-                }
+                },
+                viewModel = viewModel
             )
         }
     }
@@ -97,7 +101,21 @@ private val FormCyan = Color(0xFF4DE9FF)
 private val FormWarm = Color(0xFFFFB84D)
 
 @Composable
-private fun TournamentRegistrationScreen(onBack: () -> Unit, onNext: () -> Unit) {
+private fun TournamentRegistrationScreen(
+    onBack: () -> Unit,
+    onNavigateNext: () -> Unit,
+    viewModel: TournamentRegistrationViewModel
+) {
+    val tournamentState by viewModel.tournamentState.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(uiState) {
+        if (uiState is TournamentRegistrationViewModel.UiState.Success) {
+            viewModel.resetUiState()
+            onNavigateNext()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -124,12 +142,42 @@ private fun TournamentRegistrationScreen(onBack: () -> Unit, onNext: () -> Unit)
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             BannerUploader()
-            TournamentModePicker()
-            TournamentBasicFields()
-            TimelineCategorySection()
-            BallFormatSection()
-            SettingsSection()
-            NextButton(onClick = onNext)
+            TournamentModePicker(
+                selectedType = tournamentState.type,
+                onModeSelected = viewModel::updateMode
+            )
+            TournamentBasicFields(
+                state = tournamentState,
+                onFieldChange = viewModel::updateField
+            )
+            TimelineCategorySection(
+                date = tournamentState.startDate,
+                onDateChange = { viewModel.updateField(TournamentRegistrationViewModel.Field.START_DATE, it) }
+            )
+            BallFormatSection(
+                selectedBall = tournamentState.ballType,
+                onBallSelected = viewModel::updateBallType,
+                selectedFormat = tournamentState.matchForm,
+                onFormatSelected = viewModel::updateMatchForm
+            )
+            SettingsSection(
+                lookingForTeams = tournamentState.lookingForTeams,
+                onLookingForTeamsChange = viewModel::updateLookingForTeams
+            )
+            
+            if (uiState is TournamentRegistrationViewModel.UiState.Error) {
+                Text(
+                    text = (uiState as TournamentRegistrationViewModel.UiState.Error).message,
+                    color = Color.Red,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+            
+            NextButton(
+                isLoading = uiState is TournamentRegistrationViewModel.UiState.Loading,
+                onClick = viewModel::saveTournament
+            )
         }
     }
 }
@@ -173,24 +221,18 @@ private fun FormTopBar(onBack: () -> Unit) {
 
 @Composable
 private fun BannerUploader() {
-    val pulse = rememberPremiumPulse()
-    val glow = premiumGlowAlpha(pulse)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(156.dp)
             .shadow(14.dp, RoundedCornerShape(18.dp), clip = false)
-            .drawBehind {
-                drawCircle(FormAccent.copy(alpha = glow * 0.34f), radius = size.width * 0.34f, center = Offset(size.width * 0.12f, size.height * 1.05f))
-                drawCircle(FormCyan.copy(alpha = glow * 0.22f), radius = size.width * 0.25f, center = Offset(size.width * 0.92f, size.height * 0.08f))
-            }
             .clip(RoundedCornerShape(18.dp))
             .background(
                 Brush.linearGradient(
                     listOf(Color(0xFF14210B), Color(0xFF0B1A22), Color(0xFF101421))
                 )
             )
-            .border(1.2.dp, FormAccent.copy(alpha = 0.42f + glow * 0.32f), RoundedCornerShape(18.dp))
+            .border(1.2.dp, FormAccent.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
     ) {
         Image(
             painter = painterResource(id = R.drawable.ground),
@@ -256,7 +298,7 @@ private fun BannerUploader() {
 }
 
 @Composable
-private fun TournamentModePicker() {
+private fun TournamentModePicker(selectedType: String, onModeSelected: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Choose event type", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -264,17 +306,17 @@ private fun TournamentModePicker() {
                 title = "Tournament",
                 subtitle = "Knockout or league",
                 imageRes = R.drawable.tournamentlogo,
-                selected = true,
+                selected = selectedType == "Tournament",
                 accent = FormAccent,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f).clickable { onModeSelected("Tournament") }
             )
             ModeCard(
                 title = "Series",
                 subtitle = "Friendly matches",
                 imageRes = R.drawable.freindlymatch,
-                selected = false,
+                selected = selectedType == "Series",
                 accent = FormCyan,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f).clickable { onModeSelected("Series") }
             )
         }
     }
@@ -282,17 +324,10 @@ private fun TournamentModePicker() {
 
 @Composable
 private fun ModeCard(title: String, subtitle: String, imageRes: Int, selected: Boolean, accent: Color, modifier: Modifier) {
-    val pulse = rememberPremiumPulse(if (selected) 2400f else 3400f)
-    val glow = if (selected) premiumGlowAlpha(pulse) else 0f
     Box(
         modifier = modifier
             .height(154.dp)
             .shadow(if (selected) 12.dp else 4.dp, RoundedCornerShape(18.dp), clip = false)
-            .drawBehind {
-                if (selected) {
-                    drawCircle(accent.copy(alpha = glow * 0.28f), radius = size.width * 0.48f, center = Offset(size.width * 0.5f, size.height * 0.18f))
-                }
-            }
             .clip(RoundedCornerShape(18.dp))
             .background(
                 if (selected) {
@@ -301,7 +336,7 @@ private fun ModeCard(title: String, subtitle: String, imageRes: Int, selected: B
                     Brush.linearGradient(listOf(Color(0xFF101928), Color(0xFF0A101A)))
                 }
             )
-            .border(1.7.dp, if (selected) accent.copy(alpha = 0.76f + glow * 0.24f) else FormStroke, RoundedCornerShape(18.dp))
+            .border(1.7.dp, if (selected) accent.copy(alpha = 0.85f) else FormStroke, RoundedCornerShape(18.dp))
             .padding(13.dp)
     ) {
         if (selected) {
@@ -359,49 +394,113 @@ private fun ModeImageBubble(imageRes: Int, selected: Boolean, accent: Color) {
 }
 
 @Composable
-private fun TournamentBasicFields() {
+private fun TournamentBasicFields(state: Tournament, onFieldChange: (TournamentRegistrationViewModel.Field, String) -> Unit) {
     FormSection(title = "Tournament details") {
-        LabeledInput(label = "Tournament/Series Name", placeholder = "Enter name...")
+        LabeledInput(
+            label = "Tournament/Series Name",
+            placeholder = "Enter name...",
+            value = state.name,
+            onValueChange = { onFieldChange(TournamentRegistrationViewModel.Field.NAME, it) }
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LabeledInput(label = "City", placeholder = "Location", modifier = Modifier.weight(1f))
-            LabeledInput(label = "Ground", placeholder = "Stadium", modifier = Modifier.weight(1f))
+            LabeledInput(
+                label = "City",
+                placeholder = "Location",
+                value = state.city,
+                onValueChange = { onFieldChange(TournamentRegistrationViewModel.Field.CITY, it) },
+                modifier = Modifier.weight(1f),
+                trailingIcon = {
+                    androidx.compose.material3.Icon(
+                        painter = painterResource(id = R.drawable.baseline_edit_location_24),
+                        contentDescription = "Choose Location",
+                        tint = FormCyan,
+                        modifier = Modifier.size(20.dp).clickable { /* TODO: Choose location */ }
+                    )
+                }
+            )
+            LabeledInput(
+                label = "Ground",
+                placeholder = "Stadium",
+                value = state.ground,
+                onValueChange = { onFieldChange(TournamentRegistrationViewModel.Field.GROUND, it) },
+                modifier = Modifier.weight(1f),
+                trailingIcon = {
+                    androidx.compose.material3.Icon(
+                        painter = painterResource(id = R.drawable.baseline_edit_location_24),
+                        contentDescription = "Choose Ground",
+                        tint = FormCyan,
+                        modifier = Modifier.size(20.dp).clickable { /* TODO: Choose ground */ }
+                    )
+                }
+            )
         }
-        LabeledInput(label = "Organizer Name", placeholder = "Person or Club")
+        LabeledInput(
+            label = "Organizer Name",
+            placeholder = "Person or Club",
+            value = state.organizerName,
+            onValueChange = { onFieldChange(TournamentRegistrationViewModel.Field.ORGANIZER_NAME, it) }
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LabeledInput(label = "Phone", placeholder = "+1...", modifier = Modifier.weight(1f))
-            LabeledInput(label = "Email", placeholder = "example@email.com", modifier = Modifier.weight(1f))
+            LabeledInput(
+                label = "Phone",
+                placeholder = "+1...",
+                value = state.phone,
+                onValueChange = { onFieldChange(TournamentRegistrationViewModel.Field.PHONE, it) },
+                modifier = Modifier.weight(1f)
+            )
+            LabeledInput(
+                label = "Email",
+                placeholder = "example@email.com",
+                value = state.email,
+                onValueChange = { onFieldChange(TournamentRegistrationViewModel.Field.EMAIL, it) },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
 
 @Composable
-private fun TimelineCategorySection() {
+private fun TimelineCategorySection(date: String, onDateChange: (String) -> Unit) {
     FormSection(title = "Timeline & Category") {
-        DateBox("START DATE", "DD/MM/YYYY")
+        DateBox(
+            label = "START DATE",
+            value = date,
+            onValueChange = onDateChange
+        )
     }
 }
 
 @Composable
-private fun BallFormatSection() {
+private fun BallFormatSection(
+    selectedBall: String,
+    onBallSelected: (String) -> Unit,
+    selectedFormat: String,
+    onFormatSelected: (String) -> Unit
+) {
     FormSection(title = "Ball & Format") {
         SectionSmallLabel("BALL TYPE")
         Row(horizontalArrangement = Arrangement.spacedBy(17.dp), verticalAlignment = Alignment.CenterVertically) {
-            BallChoice("Tennis", R.drawable.tennisball, true)
-            BallChoice("Leather", R.drawable.leatherball, false)
-            BallChoice("Other", R.drawable.otherball, false)
+            BallChoice("Tennis", R.drawable.tennisball, selectedBall == "Tennis", Modifier.clickable { onBallSelected("Tennis") })
+            BallChoice("Leather", R.drawable.leatherball, selectedBall == "Leather", Modifier.clickable { onBallSelected("Leather") })
+            BallChoice("Other", R.drawable.otherball, selectedBall == "Other", Modifier.clickable { onBallSelected("Other") })
         }
         SectionSmallLabel("MATCH FORM")
-        ChipRow(listOf("Limited Overs", "Test", "T20", "ODI", "T10", "Box Cricket"), selectedIndex = 0)
+        ChipRow(
+            labels = listOf("Limited Overs", "Test", "T20", "ODI", "T10", "Box Cricket"),
+            selectedLabel = selectedFormat,
+            onLabelSelected = onFormatSelected
+        )
     }
 }
 
 @Composable
-private fun SettingsSection() {
+private fun SettingsSection(lookingForTeams: Boolean, onLookingForTeamsChange: (Boolean) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         TogglePanel(
             title = "Looking for more teams to join?",
             subtitle = "Teams can discover and request entry into your tournament.",
-            active = true
+            active = lookingForTeams,
+            modifier = Modifier.clickable { onLookingForTeamsChange(!lookingForTeams) }
         )
     }
 }
@@ -427,15 +526,22 @@ private fun FormSection(title: String, content: @Composable ColumnScope.() -> Un
 }
 
 @Composable
-private fun LabeledInput(label: String, placeholder: String, modifier: Modifier = Modifier) {
-    var value by remember { mutableStateOf("") }
+private fun LabeledInput(
+    label: String,
+    placeholder: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    trailingIcon: @Composable (() -> Unit)? = null
+) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
         RequiredTitle(label, compact = true)
         BasicTextField(
             value = value,
-            onValueChange = { value = it },
+            onValueChange = onValueChange,
             textStyle = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
             singleLine = true,
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
             decorationBox = { innerTextField ->
                 Box(
                     modifier = Modifier
@@ -449,10 +555,92 @@ private fun LabeledInput(label: String, placeholder: String, modifier: Modifier 
                         .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    if (value.isEmpty()) {
-                        Text(placeholder, color = Color(0xFF768784), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (value.isEmpty()) {
+                                Text(placeholder, color = Color(0xFF768784), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            innerTextField()
+                        }
+                        if (trailingIcon != null) {
+                            trailingIcon()
+                        }
                     }
-                    innerTextField()
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateBox(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    val datePickerState = rememberDatePickerState()
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                        onValueChange(sdf.format(Date(millis)))
+                    }
+                    showDatePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text(label, color = Color(0xFF99A9A5), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            textStyle = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+            singleLine = true,
+            readOnly = true,
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(FormField)
+                        .border(1.dp, Color(0xFF42526F), RoundedCornerShape(13.dp))
+                        .clickable { showDatePicker = true }
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CalendarIcon(Modifier.size(19.dp))
+                        Box(modifier = Modifier.padding(start = 10.dp)) {
+                            if (value.isEmpty()) {
+                                Text("DD/MM/YYYY", color = Color(0xFFE5ECE9), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                innerTextField()
+                            }
+                        }
+                    }
                 }
             }
         )
@@ -460,52 +648,32 @@ private fun LabeledInput(label: String, placeholder: String, modifier: Modifier 
 }
 
 @Composable
-private fun DateBox(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Text(label, color = Color(0xFF99A9A5), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-                .clip(RoundedCornerShape(13.dp))
-                .background(FormField)
-                .border(1.dp, Color(0xFF42526F), RoundedCornerShape(13.dp))
-                .padding(horizontal = 14.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CalendarIcon(Modifier.size(19.dp))
-                Text(value, color = Color(0xFFE5ECE9), fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChipRow(labels: List<String>, selectedIndex: Int) {
+private fun ChipRow(labels: List<String>, selectedLabel: String, onLabelSelected: (String) -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(7.dp)
     ) {
-        labels.forEachIndexed { index, label ->
+        labels.forEach { label ->
+            val isSelected = label == selectedLabel
             Box(
                 modifier = Modifier
                     .height(36.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(if (index == selectedIndex) FormAccent else Color(0xFF1A2231))
-                    .border(1.dp, if (index == selectedIndex) Color(0xFFDFFF6C) else Color(0xFF34405A), RoundedCornerShape(18.dp))
+                    .background(if (isSelected) FormAccent else Color(0xFF1A2231))
+                    .border(1.dp, if (isSelected) Color(0xFFDFFF6C) else Color(0xFF34405A), RoundedCornerShape(18.dp))
+                    .clickable { onLabelSelected(label) }
                     .padding(horizontal = 15.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(label, color = if (index == selectedIndex) Color(0xFF111604) else Color(0xFFBBC7C4), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                Text(label, color = if (isSelected) Color(0xFF111604) else Color(0xFFBBC7C4), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
     }
 }
 
 @Composable
-private fun BallChoice(label: String, imageRes: Int, selected: Boolean) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun BallChoice(label: String, imageRes: Int, selected: Boolean, modifier: Modifier = Modifier) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
         Box(
             modifier = Modifier
                 .size(58.dp)
@@ -527,9 +695,9 @@ private fun BallChoice(label: String, imageRes: Int, selected: Boolean) {
 }
 
 @Composable
-private fun TogglePanel(title: String, subtitle: String, active: Boolean) {
+private fun TogglePanel(title: String, subtitle: String, active: Boolean, modifier: Modifier = Modifier) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .shadow(7.dp, RoundedCornerShape(16.dp), clip = false)
             .clip(RoundedCornerShape(16.dp))
@@ -556,9 +724,7 @@ private fun TogglePanel(title: String, subtitle: String, active: Boolean) {
 }
 
 @Composable
-private fun NextButton(onClick: () -> Unit) {
-    val pulse = rememberPremiumPulse(2200f)
-    val shineX = 0.1f + pulse * 1.15f
+private fun NextButton(isLoading: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -566,21 +732,18 @@ private fun NextButton(onClick: () -> Unit) {
             .shadow(12.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(Brush.horizontalGradient(listOf(FormAccent, Color(0xFFDFFF6C), FormWarm)))
-            .drawBehind {
-                val startX = size.width * (shineX - 0.24f)
-                val endX = size.width * shineX
-                drawLine(
-                    color = Color.White.copy(alpha = 0.32f),
-                    start = Offset(startX, 0f),
-                    end = Offset(endX, size.height),
-                    strokeWidth = 26.dp.toPx(),
-                    cap = StrokeCap.Round
-                )
-            }
-            .clickable(onClick = onClick),
+            .clickable(enabled = !isLoading, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text("Next", color = Color(0xFF111604), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                color = Color(0xFF111604),
+                strokeWidth = 2.dp
+            )
+        } else {
+            Text("Next", color = Color(0xFF111604), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+        }
     }
 }
 
@@ -599,18 +762,16 @@ private fun SectionSmallLabel(text: String) {
 
 @Composable
 private fun AddBadge(modifier: Modifier = Modifier) {
-    val pulse = rememberPremiumPulse(2300f)
-    val glow = premiumGlowAlpha(pulse)
     Box(
         modifier = modifier
             .size(58.dp)
             .clip(CircleShape)
             .background(
                 Brush.radialGradient(
-                    listOf(FormAccent.copy(alpha = 0.14f + glow * 0.18f), Color(0xFF071109))
+                    listOf(FormAccent.copy(alpha = 0.22f), Color(0xFF071109))
                 )
             )
-            .border(2.dp, FormAccent.copy(alpha = 0.72f + glow * 0.28f), CircleShape),
+            .border(2.dp, FormAccent.copy(alpha = 0.85f), CircleShape),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -681,23 +842,4 @@ private fun ArrowIcon(modifier: Modifier, right: Boolean) {
         }
         drawPath(path, tint, style = stroke)
     }
-}
-
-@Composable
-private fun rememberPremiumPulse(durationMillis: Float = 2800f): Float {
-    var phase by remember { mutableStateOf(0f) }
-    LaunchedEffect(durationMillis) {
-        val start = withFrameNanos { it }
-        while (true) {
-            withFrameNanos { now ->
-                val elapsed = (now - start) / 1_000_000f
-                phase = (elapsed % durationMillis) / durationMillis
-            }
-        }
-    }
-    return phase
-}
-
-private fun premiumGlowAlpha(phase: Float): Float {
-    return (0.45f + 0.35f * sin((phase * 2f * PI).toFloat())).coerceIn(0.12f, 0.82f)
 }

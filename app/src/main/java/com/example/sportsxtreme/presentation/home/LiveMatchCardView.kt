@@ -329,12 +329,41 @@ class LiveMatchCardView @JvmOverloads constructor(
         teamAIcon.text = match.teamAShortName.ifBlank { match.teamAName }
         teamBIcon.text = match.teamBShortName.ifBlank { match.teamBName }
         val showScores = match.isLive || match.isCompleted
-        teamAScore.text = "${match.score}/${match.wickets}"
+        
+        if (match.battingTeamId != null) {
+            val isTeamABatting = match.battingTeamId == match.teamAId
+            if (isTeamABatting) {
+                teamAScore.text = "${match.score}/${match.wickets}"
+                teamAOvers.text = "${match.overs} OV"
+                
+                if (match.target != null) {
+                    teamBScore.text = "${match.target - 1}"
+                    teamBOvers.text = ""
+                } else {
+                    teamBScore.text = "--/--"
+                    teamBOvers.text = "0.0 OV"
+                }
+            } else {
+                teamBScore.text = "${match.score}/${match.wickets}"
+                teamBOvers.text = "${match.overs} OV"
+                
+                if (match.target != null) {
+                    teamAScore.text = "${match.target - 1}"
+                    teamAOvers.text = ""
+                } else {
+                    teamAScore.text = "--/--"
+                    teamAOvers.text = "0.0 OV"
+                }
+            }
+        } else {
+            teamAScore.text = "${match.score}/${match.wickets}"
+            teamBScore.text = "${match.score}/${match.wickets}"
+            teamAOvers.text = "${match.overs} OV"
+            teamBOvers.text = "${match.overs} OV"
+        }
+        
         teamAScore.visibility = if (showScores) View.VISIBLE else View.GONE
-        teamBScore.text = "${match.score}/${match.wickets}"
         teamBScore.visibility = if (showScores) View.VISIBLE else View.GONE
-        teamAOvers.text = "${match.overs} OV"
-        teamBOvers.text = "${match.overs} OV"
 
         crrText.text = String.format(Locale.US, "CRR %.2f", match.currentRunRate)
         rrrText.text = match.requiredRunRate?.let { String.format(Locale.US, "RRR %.2f", it) } ?: "RRR --"

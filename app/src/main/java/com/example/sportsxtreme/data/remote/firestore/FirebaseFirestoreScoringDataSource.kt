@@ -135,6 +135,9 @@ class FirebaseFirestoreScoringDataSource @Inject constructor(
     private fun LiveScorePayload.toFirestorePayload(): Map<String, Any?> = mapOf(
         "matchId" to matchId,
         "tournamentName" to tournamentName,
+        "teamAId" to teamAId,
+        "teamBId" to teamBId,
+        "battingTeamId" to battingTeamId,
         "teamAName" to teamAName,
         "teamBName" to teamBName,
         "teamAShortName" to teamAShortName,

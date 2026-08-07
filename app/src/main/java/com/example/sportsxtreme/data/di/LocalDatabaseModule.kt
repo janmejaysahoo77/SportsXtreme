@@ -33,7 +33,8 @@ object LocalDatabaseModule {
                 SportsXtremeDatabase.MIGRATION_2_3,
                 SportsXtremeDatabase.MIGRATION_3_4,
                 SportsXtremeDatabase.MIGRATION_4_5,
-                SportsXtremeDatabase.MIGRATION_5_6
+                SportsXtremeDatabase.MIGRATION_5_6,
+                SportsXtremeDatabase.MIGRATION_6_7
             )
             .build()
 

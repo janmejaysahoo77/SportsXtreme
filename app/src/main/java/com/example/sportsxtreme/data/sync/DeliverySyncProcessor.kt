@@ -98,6 +98,9 @@ class DeliverySyncProcessor @Inject constructor(
         return LiveScorePayload(
             matchId = matchId,
             tournamentName = match?.title ?: "",
+            teamAId = match?.teamAId ?: "",
+            teamBId = match?.teamBId ?: "",
+            battingTeamId = match?.battingTeamId,
             teamAName = teamA?.teamName ?: "",
             teamBName = teamB?.teamName ?: "",
             teamAShortName = teamA?.shortName ?: "",

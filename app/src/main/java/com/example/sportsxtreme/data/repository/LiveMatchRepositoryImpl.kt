@@ -69,6 +69,9 @@ class LiveMatchRepositoryImpl @Inject constructor(
     private fun LiveMatch.toEntity(): LiveMatchEntity = LiveMatchEntity(
         matchId = matchId,
         tournamentName = tournamentName,
+        teamAId = teamAId,
+        teamBId = teamBId,
+        battingTeamId = battingTeamId,
         teamAName = teamAName,
         teamBName = teamBName,
         teamAShortName = teamAShortName,
@@ -95,6 +98,9 @@ class LiveMatchRepositoryImpl @Inject constructor(
     private fun LiveMatchEntity.toDomain(): LiveMatch = LiveMatch(
         matchId = matchId,
         tournamentName = tournamentName,
+        teamAId = teamAId,
+        teamBId = teamBId,
+        battingTeamId = battingTeamId,
         teamAName = teamAName,
         teamBName = teamBName,
         teamAShortName = teamAShortName,

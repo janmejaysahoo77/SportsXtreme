@@ -10,6 +10,9 @@ package com.example.sportsxtreme.domain.model
 data class LiveMatch(
     val matchId: String,
     val tournamentName: String,
+    val teamAId: String,
+    val teamBId: String,
+    val battingTeamId: String?,
     val teamAName: String,
     val teamBName: String,
     val teamAShortName: String,
@@ -60,6 +63,9 @@ data class LiveMatch(
 data class LiveScorePayload(
     val matchId: String,
     val tournamentName: String,
+    val teamAId: String,
+    val teamBId: String,
+    val battingTeamId: String?,
     val teamAName: String,
     val teamBName: String,
     val teamAShortName: String,
@@ -85,6 +91,9 @@ data class LiveScorePayload(
     fun toDomain(): LiveMatch = LiveMatch(
         matchId = matchId,
         tournamentName = tournamentName,
+        teamAId = teamAId,
+        teamBId = teamBId,
+        battingTeamId = battingTeamId,
         teamAName = teamAName,
         teamBName = teamBName,
         teamAShortName = teamAShortName,

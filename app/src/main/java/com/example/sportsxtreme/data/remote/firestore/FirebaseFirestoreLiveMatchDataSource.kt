@@ -81,6 +81,9 @@ class FirebaseFirestoreLiveMatchDataSource @Inject constructor(
         return LiveScorePayload(
             matchId = matchId,
             tournamentName = liveScore["tournamentName"] as? String ?: "",
+            teamAId = liveScore["teamAId"] as? String ?: "",
+            teamBId = liveScore["teamBId"] as? String ?: "",
+            battingTeamId = liveScore["battingTeamId"] as? String,
             teamAName = liveScore["teamAName"] as? String ?: "",
             teamBName = liveScore["teamBName"] as? String ?: "",
             teamAShortName = liveScore["teamAShortName"] as? String ?: "",
