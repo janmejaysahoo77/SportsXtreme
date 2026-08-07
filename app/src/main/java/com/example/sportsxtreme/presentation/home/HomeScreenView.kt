@@ -50,6 +50,7 @@ import android.widget.ViewFlipper
 import androidx.compose.ui.platform.ComposeView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.core.view.GravityCompat
+import com.google.firebase.auth.FirebaseAuth
 import kotlin.math.max
 
 class HomeScreenView @JvmOverloads constructor(
@@ -182,9 +183,10 @@ class HomeScreenView @JvmOverloads constructor(
                     }, LinearLayout.LayoutParams(dp(28), dp(28)))
                 })
                 
-                // Name
+                // Name (dynamic from Firebase Auth)
+                val firebaseUser = FirebaseAuth.getInstance().currentUser
                 addView(TextView(context).apply {
-                    text = "Manoj Kumar Das"
+                    text = firebaseUser?.displayName?.ifBlank { "User" } ?: "User"
                     setTextColor(Color.WHITE)
                     textSize = 20f
                     typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
@@ -193,9 +195,9 @@ class HomeScreenView @JvmOverloads constructor(
                     topMargin = dp(16)
                 })
 
-                // ID
+                // UID (dynamic from Firebase Auth)
                 addView(TextView(context).apply {
-                    text = "56254585"
+                    text = firebaseUser?.uid?.takeLast(7)?.ifBlank { "" } ?: ""
                     setTextColor(Color.GRAY)
                     textSize = 12f
                     includeFontPadding = false

@@ -48,7 +48,7 @@ class LiveMatchViewModel @Inject constructor(
                             isLoading = false,
                             isOffline = false,
                             errorMessage = null,
-                            matches = resource.data.orEmpty()
+                            matches = resource.data.orEmpty().sortedByDescending { match -> match.updatedAtEpochMs }
                         )
                     }
 

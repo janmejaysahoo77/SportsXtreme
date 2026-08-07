@@ -1,0 +1,400 @@
+package com.example.sportsxtreme.presentation.home
+
+import android.animation.ObjectAnimator
+import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.util.AttributeSet
+import android.view.Gravity
+import android.view.View
+import android.view.animation.DecelerateInterpolator
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import com.example.sportsxtreme.domain.model.LiveMatch
+import com.example.sportsxtreme.domain.model.MatchStatus
+import java.util.Locale
+
+/**
+ * A single LIVE MATCH card used on the Home Screen.
+ *
+ * Renders the lightweight [LiveMatch] model with the existing SportsXtreme
+ * dark theme. The LIVE badge pulses subtly using an infinite alpha animation.
+ */
+class LiveMatchCardView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : FrameLayout(context, attrs) {
+
+    // SportsXtreme theme colors (mirrors HomeScreenView).
+    private val primary = Color.rgb(193, 255, 0)
+    private val cyan = Color.rgb(0, 210, 255)
+    private val mute = Color.rgb(130, 145, 142)
+
+    private lateinit var leagueText: TextView
+    private lateinit var statusText: TextView
+    private lateinit var liveDot: View
+    private lateinit var teamAIcon: TextView
+    private lateinit var teamBIcon: TextView
+    private lateinit var teamAScore: TextView
+    private lateinit var teamBScore: TextView
+    private lateinit var teamAOvers: TextView
+    private lateinit var teamBOvers: TextView
+    private lateinit var crrText: TextView
+    private lateinit var rrrText: TextView
+    private lateinit var targetText: TextView
+    private lateinit var batterText: TextView
+    private lateinit var bowlerText: TextView
+    private lateinit var noteText: TextView
+
+    init {
+        clipToOutline = true
+        background = GradientDrawable().apply {
+            cornerRadius = dp(14).toFloat()
+            setColor(Color.rgb(8, 28, 58))
+        }
+        elevation = dp(12).toFloat()
+
+        addView(buildContent())
+    }
+
+    private fun buildContent(): View {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(11), dp(14), dp(12))
+            val list = this
+
+            // Header: league name + status badge
+            list.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    leagueText = TextView(context).apply {
+                        text = "LIVE MATCH"
+                        setTextColor(Color.rgb(204, 217, 229))
+                        textSize = 11f
+                        letterSpacing = 0.08f
+                        typeface = Typeface.DEFAULT_BOLD
+                        includeFontPadding = false
+                    }
+                    addView(leagueText)
+                    addView(TextView(context).apply {
+                        text = "Friendly Match"
+                        setTextColor(Color.rgb(106, 121, 137))
+                        textSize = 8.2f
+                        typeface = Typeface.DEFAULT_BOLD
+                        includeFontPadding = false
+                    }.also { } , LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        topMargin = dp(4)
+                    })
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+                addView(statusBadge(), LinearLayout.LayoutParams(
+                    if (liveUpcoming) dp(86) else dp(64), dp(28)
+                ))
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+            // Teams row: Team A score | VS | Team B score
+            list.addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER
+                orientation = LinearLayout.HORIZONTAL
+                addView(teamPanel(true), LinearLayout.LayoutParams(0, dp(96), 1f))
+                addView(FrameLayout(context).apply {
+                    addView(TextView(context).apply {
+                        text = "VS"
+                        gravity = Gravity.CENTER
+                        setTextColor(Color.rgb(7, 14, 20))
+                        textSize = 10f
+                        typeface = Typeface.DEFAULT_BOLD
+                        background = GradientDrawable().apply {
+                            shape = GradientDrawable.OVAL
+                            setColor(primary)
+                        }
+                    }, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER))
+                }, LinearLayout.LayoutParams(dp(48), LinearLayout.LayoutParams.MATCH_PARENT))
+                addView(teamPanel(false), LinearLayout.LayoutParams(0, dp(96), 1f))
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(96)).apply {
+                topMargin = dp(10)
+            })
+
+            // Stats row: CRR | RRR | TARGET
+            list.addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER
+                crrText = statChip("CRR", "0.00")
+                addView(crrText)
+                rrrText = statChip("RRR", "--")
+                addView(rrrText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)).apply {
+                    leftMargin = dp(8)
+                })
+                targetText = statChip("TARGET", "--")
+                addView(targetText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)).apply {
+                    leftMargin = dp(8)
+                })
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(30)).apply {
+                topMargin = dp(9)
+            })
+
+            // Batter / Bowler row
+            list.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                batterText = playerChip("BAT", "—")
+                addView(batterText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                bowlerText = playerChip("BOWL", "—")
+                addView(bowlerText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(9)
+            })
+
+            // Status note (e.g. Need 14 runs from 16 balls / Innings Break)
+            noteText = TextView(context).apply {
+                gravity = Gravity.CENTER
+                setTextColor(Color.rgb(178, 191, 205))
+                textSize = 9f
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+            }
+            list.addView(noteText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(8)
+            })
+        }
+    }
+
+    /** Pulsing status badge: 🟢 LIVE / Completed / Starts at … */
+    private fun statusBadge(): View {
+        val badge = LinearLayout(context).apply {
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(Color.rgb(32, 38, 44))
+            }
+            statusText = TextView(context).apply {
+                text = "LIVE"
+                setTextColor(Color.WHITE)
+                textSize = 8.5f
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+            }
+            addView(statusText)
+        }.also { badge ->
+            liveDot = View(context).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.rgb(255, 62, 70))
+                }
+            }
+            badge.addView(liveDot, LinearLayout.LayoutParams(dp(7), dp(7)).apply {
+                rightMargin = dp(5)
+            })
+            badge.addView(statusText)
+        }
+        return badge
+    }
+
+    private fun teamPanel(isTeamA: Boolean): View {
+        return FrameLayout(context).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.argb(150, 23, 35, 47), Color.argb(160, 8, 15, 22))
+            ).apply {
+                cornerRadius = dp(10).toFloat()
+                val accent = if (isTeamA) primary else cyan
+                setStroke(dp(1), Color.argb(74, Color.red(accent), Color.green(accent), Color.blue(accent)))
+            }
+
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+
+                val iconText = if (isTeamA) "A" else "B"
+                addView(TextView(context).apply {
+                    text = iconText
+                    gravity = Gravity.CENTER
+                    setTextColor(if (isTeamA) primary else cyan)
+                    textSize = 12f
+                    typeface = Typeface.DEFAULT_BOLD
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        val accent = if (isTeamA) primary else cyan
+                        setColor(Color.argb(42, Color.red(accent), Color.green(accent), Color.blue(accent)))
+                        setStroke(dp(1), Color.argb(140, Color.red(accent), Color.green(accent), Color.blue(accent)))
+                    }
+                }, LinearLayout.LayoutParams(dp(32), dp(32)))
+
+                if (isTeamA) {
+                    teamAIcon = TextView(context).apply {
+                        text = ""
+                        gravity = Gravity.CENTER
+                        setTextColor(primary)
+                        textSize = 8f
+                        typeface = Typeface.DEFAULT_BOLD
+                        includeFontPadding = false
+                    }
+                    addView(teamAIcon, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+
+                    teamAScore = TextView(context).apply {
+                        text = "0/0"
+                        gravity = Gravity.CENTER
+                        setTextColor(Color.WHITE)
+                        textSize = 22f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                        includeFontPadding = false
+                    }
+                    addView(teamAScore, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+                    teamAOvers = TextView(context).apply {
+                        text = "0.0 OV"
+                        gravity = Gravity.CENTER
+                        setTextColor(Color.rgb(125, 139, 154))
+                        textSize = 7.5f
+                        typeface = Typeface.DEFAULT_BOLD
+                        includeFontPadding = false
+                    }
+                    addView(teamAOvers, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(1) })
+                } else {
+                    teamBIcon = TextView(context).apply {
+                        text = ""
+                        gravity = Gravity.CENTER
+                        setTextColor(cyan)
+                        textSize = 8f
+                        typeface = Typeface.DEFAULT_BOLD
+                        includeFontPadding = false
+                    }
+                    addView(teamBIcon, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+
+                    teamBScore = TextView(context).apply {
+                        text = "0/0"
+                        gravity = Gravity.CENTER
+                        setTextColor(Color.WHITE)
+                        textSize = 22f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                        includeFontPadding = false
+                    }
+                    addView(teamBScore, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+                    teamBOvers = TextView(context).apply {
+                        text = "0.0 OV"
+                        gravity = Gravity.CENTER
+                        setTextColor(Color.rgb(125, 139, 154))
+                        textSize = 7.5f
+                        typeface = Typeface.DEFAULT_BOLD
+                        includeFontPadding = false
+                    }
+                    addView(teamBOvers, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(1) })
+                }
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+    }
+
+    private fun statChip(label: String, initial: String): TextView {
+        return TextView(context).apply {
+            text = "$label $initial"
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(34, 34, 34))
+            textSize = 8f
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            setPadding(dp(9), 0, dp(9), 0)
+            background = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat()
+                setColor(Color.WHITE)
+                setStroke(dp(1), Color.argb(150, 0, 0, 0))
+            }
+        }
+    }
+
+    private fun playerChip(label: String, initial: String): TextView {
+        return TextView(context).apply {
+            text = "$label  $initial"
+            gravity = Gravity.START
+            setTextColor(Color.rgb(178, 191, 205))
+            textSize = 9f
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            setPadding(dp(6), dp(5), dp(6), dp(5))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(Color.argb(35, 0, 0, 0))
+            }
+        }
+    }
+
+    /** Binds a [LiveMatch] to this card and starts/stops the LIVE pulse. */
+    fun bind(match: LiveMatch) {
+        leagueText.text = match.tournamentName.ifBlank { "LIVE MATCH" }
+        statusText.text = when {
+            match.isLive -> "LIVE"
+            match.isCompleted -> "Completed"
+            else -> "Upcoming"
+        }
+        statusText.setTextColor(if (match.isLive) Color.rgb(255, 62, 70) else Color.WHITE)
+        liveDot.visibility = if (match.isLive) View.VISIBLE else View.GONE
+
+        teamAIcon.text = match.teamAShortName.ifBlank { match.teamAName }
+        teamBIcon.text = match.teamBShortName.ifBlank { match.teamBName }
+        teamAScore.text = "${match.score}/${match.wickets}"
+        teamAScore.visibility = if (match.isLive || match.isCompleted) View.VISIBLE else View.GONE
+        teamBOvers.text = "${match.overs} OV"
+
+        crrText.text = String.format(Locale.US, "CRR %.2f", match.currentRunRate)
+        rrrText.text = match.requiredRunRate?.let { String.format(Locale.US, "RRR %.2f", it) } ?: "RRR --"
+        targetText.text = match.target?.let { "TARGET $it" } ?: "TARGET --"
+
+        val batterLabel = match.strikerName?.let { "$it ${match.strikerRuns}(${match.strikerBalls})" } ?: "—"
+        batterText.text = "BAT  $batterLabel"
+        val bowlerLabel = match.bowlerName?.let { name ->
+            "$name ${match.bowlerOvers}-${match.bowlerRuns}-${match.bowlerWickets}"
+        } ?: "—"
+        bowlerText.text = "BOWL  $bowlerLabel"
+
+        noteText.text = when {
+            match.isLive && match.target != null && match.score < match.target ->
+                "Need ${match.target - match.score} runs from ${remainingBallsText(match)}"
+            match.isLive -> match.matchStatusNote ?: "Powerplay"
+            match.isCompleted -> "Match Completed"
+            match.isUpcoming -> "Starts at 4:30 PM"
+            else -> ""
+        }
+
+        // Start the pulse only when LIVE.
+        if (match.isLive) {
+            startLivePulse()
+        } else {
+            stopLivePulse()
+        }
+    }
+
+    private fun remainingBallsText(match: LiveMatch): String {
+        val overs = match.overs.split(".")
+        val balls = overs.getOrNull(0)?.toIntOrNull()?.let { it * 6 } ?: 0
+        val currentBall = overs.getOrNull(1)?.toIntOrNull() ?: 0
+        val total = (match.target?.let { 20 * 6 } ?: 120) - (balls + currentBall)
+        return "$total balls"
+    }
+
+    private var pulseAnimator: ObjectAnimator? = null
+
+    private fun startLivePulse() {
+        if (pulseAnimator?.isRunning == true) return
+        liveDot.alpha = 1f
+        pulseAnimator = ObjectAnimator.ofFloat(liveDot, View.ALPHA, 1f, 0.25f).apply {
+            duration = 700L
+            repeatCount = ObjectAnimator.INFINITE
+            repeatMode = ObjectAnimator.REVERSE
+            interpolator = DecelerateInterpolator()
+            start()
+        }
+    }
+
+    private fun stopLivePulse() {
+        pulseAnimator?.cancel()
+        pulseAnimator = null
+        liveDot.alpha = 1f
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+}

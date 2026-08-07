@@ -75,6 +75,9 @@ class LiveMatchesSectionView @JvmOverloads constructor(
                 setPadding(dp(10), dp(6), 0, dp(6))
                 isClickable = true
                 isFocusable = true
+                setOnClickListener {
+                    context.startActivity(android.content.Intent(context, com.example.sportsxtreme.presentation.scoring.ViewAllScoreCardActivity::class.java))
+                }
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             bottomMargin = dp(6)
