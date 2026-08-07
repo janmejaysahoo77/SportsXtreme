@@ -762,7 +762,18 @@ class HomeScreenView @JvmOverloads constructor(
                             leftMargin = dp(12)
                             rightMargin = dp(12)
                         })
-                        addView(LinearLayout(context).apply {
+
+                        // Tab row: "Host" | "Your Tournament"
+                        val hostTabButton = TextView(context)
+                        val yourTournamentTabButton = TextView(context)
+                        addView(hostTabRow(context, hostTabButton, yourTournamentTabButton), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                            leftMargin = dp(12)
+                            rightMargin = dp(12)
+                            topMargin = dp(12)
+                        })
+
+                        // Host tab content (existing UI, unchanged)
+                        val hostContent = LinearLayout(context).apply {
                             orientation = LinearLayout.VERTICAL
                             setPadding(dp(12), 0, dp(12), 0)
                             addView(hostArenaCard(
@@ -788,10 +799,104 @@ class HomeScreenView @JvmOverloads constructor(
                                 }
                             ), blockParams(top = 14))
                             addView(hostSecurityNote(context), blockParams(top = 18))
-                        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                        }
+                        addView(hostContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+                        // Your Tournament tab content (empty card)
+                        val yourTournamentContent = yourTournamentCard(context)
+                        addView(yourTournamentContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                            leftMargin = dp(12)
+                            rightMargin = dp(12)
+                            topMargin = dp(18)
+                        })
+                        yourTournamentContent.visibility = View.GONE
+
+                        // Tab switching
+                        hostTabButton.setOnClickListener {
+                            hostTabButton.isSelected = true
+                            yourTournamentTabButton.isSelected = false
+                            updateHostTabStyle(hostTabButton, true)
+                            updateHostTabStyle(yourTournamentTabButton, false)
+                            hostContent.visibility = View.VISIBLE
+                            yourTournamentContent.visibility = View.GONE
+                        }
+                        yourTournamentTabButton.setOnClickListener {
+                            hostTabButton.isSelected = false
+                            yourTournamentTabButton.isSelected = true
+                            updateHostTabStyle(hostTabButton, false)
+                            updateHostTabStyle(yourTournamentTabButton, true)
+                            hostContent.visibility = View.GONE
+                            yourTournamentContent.visibility = View.VISIBLE
+                        }
                     }, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
             }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        }
+    }
+
+    private fun hostTabRow(context: Context, hostTab: TextView, yourTournamentTab: TextView): View {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(Color.rgb(7, 14, 18))
+                setStroke(dp(1), Color.argb(60, 255, 255, 255))
+            }
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+
+            hostTab.apply {
+                text = "Host"
+                gravity = Gravity.CENTER
+                textSize = 11f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                includeFontPadding = false
+                isSelected = true
+                updateHostTabStyle(this, true)
+            }
+            addView(hostTab, LinearLayout.LayoutParams(0, dp(36), 1f))
+
+            yourTournamentTab.apply {
+                text = "Your Tournament"
+                gravity = Gravity.CENTER
+                textSize = 11f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                includeFontPadding = false
+                isSelected = false
+                updateHostTabStyle(this, false)
+            }
+            addView(yourTournamentTab, LinearLayout.LayoutParams(0, dp(36), 1f).apply {
+                leftMargin = dp(4)
+            })
+        }
+    }
+
+    private fun updateHostTabStyle(tab: TextView, active: Boolean) {
+        tab.background = GradientDrawable().apply {
+            cornerRadius = dp(8).toFloat()
+            setColor(if (active) primary else Color.TRANSPARENT)
+        }
+        tab.setTextColor(if (active) Color.rgb(8, 16, 7) else Color.rgb(142, 158, 153))
+    }
+
+    private fun yourTournamentCard(context: Context): View {
+        return FrameLayout(context).apply {
+            // Outer card
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(Color.rgb(7, 14, 18))
+                setStroke(dp(1), Color.argb(60, 255, 255, 255))
+            }
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+
+            // Inner card (empty)
+            addView(FrameLayout(context).apply {
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(8).toFloat()
+                    setColor(Color.rgb(11, 20, 28))
+                    setStroke(dp(1), Color.argb(40, 193, 255, 0))
+                }
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(160)))
         }
     }
 
