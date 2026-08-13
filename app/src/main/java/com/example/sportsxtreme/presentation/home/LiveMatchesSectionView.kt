@@ -17,6 +17,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.sportsxtreme.common.NestedHorizontalScrollHelper
 import com.example.sportsxtreme.domain.model.LiveMatch
 import kotlinx.coroutines.launch
 
@@ -90,6 +91,9 @@ class LiveMatchesSectionView @JvmOverloads constructor(
             overScrollMode = View.OVER_SCROLL_NEVER
             setHasFixedSize(false)
             clipToPadding = false
+            // Score updates should not animate a card beneath the user's finger.
+            itemAnimator = null
+            NestedHorizontalScrollHelper.installOnRecyclerView(this)
         }
         addView(
             recyclerView,

@@ -33,6 +33,7 @@ import android.util.AttributeSet
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
@@ -51,7 +52,9 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.core.view.GravityCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import com.example.sportsxtreme.common.NestedHorizontalScrollHelper
 import com.google.firebase.auth.FirebaseAuth
+import kotlin.math.abs
 import kotlin.math.max
 
 class HomeScreenView @JvmOverloads constructor(
@@ -668,77 +671,182 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 
+    /** Keeps a drag assigned to its first meaningful direction until it ends. */
+    private class HomeScrollView(context: Context) : ScrollView(context) {
+        private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+        private var downX = 0f
+        private var downY = 0f
+        private var isHorizontalGesture = false
+        private var directionLocked = false
+
+        override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = ev.x
+                    downY = ev.y
+                    isHorizontalGesture = false
+                    directionLocked = false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = abs(ev.x - downX)
+                    val dy = abs(ev.y - downY)
+                    if (!directionLocked && (dx > touchSlop || dy > touchSlop)) {
+                        directionLocked = true
+                        isHorizontalGesture = dx > dy
+                    }
+                    if (isHorizontalGesture) return false
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    isHorizontalGesture = false
+                    directionLocked = false
+                }
+            }
+            return super.onInterceptTouchEvent(ev)
+        }
+    }
+
+    /**
+     * SwipeRefreshLayout receives touch events before the nested ScrollView.
+     * It must apply the same direction lock so a diagonal horizontal swipe never
+     * becomes a pull-to-refresh gesture.
+     */
+    private class HomeSwipeRefreshLayout(context: Context) : SwipeRefreshLayout(context) {
+        private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+        private var downX = 0f
+        private var downY = 0f
+        private var isHorizontalGesture = false
+        private var directionLocked = false
+
+        override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = ev.x
+                    downY = ev.y
+                    isHorizontalGesture = false
+                    directionLocked = false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = abs(ev.x - downX)
+                    val dy = abs(ev.y - downY)
+                    if (!directionLocked && (dx > touchSlop || dy > touchSlop)) {
+                        directionLocked = true
+                        isHorizontalGesture = dx > dy
+                    }
+                    if (isHorizontalGesture) return false
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    isHorizontalGesture = false
+                    directionLocked = false
+                }
+            }
+            return super.onInterceptTouchEvent(ev)
+        }
+    }
+
     private fun createHomeContent(context: Context): View {
-        // Wrap the main scrollable content in a SwipeRefreshLayout for pull‑to‑refresh functionality
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
 
             addView(topBar(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-            // SwipeRefreshLayout requires the androidx.swiperefreshlayout library which is already a transitive dependency in most Android projects
-            val swipeRefresh = androidx.swiperefreshlayout.widget.SwipeRefreshLayout(context).apply {
-                setColorSchemeColors(primary) // Use the primary accent colour for the spinner
+            val scroll = HomeScrollView(context).apply {
+                clipToPadding = false
+                setPadding(0, 0, 0, dp(12))
+
+                val content = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(14), dp(6), dp(14), dp(14))
+                }
+
+                when (topMode) {
+                    TopMode.SPORTS -> {
+                        content.addView(locationRow(context))
+                        content.addView(liveMatchesSection(), blockParams(top = 6))
+                        content.addView(proPassCardsSection(context), blockParams(top = 8))
+                        content.addView(personalizeGearSection(context), blockParams(top = 10))
+                        content.addView(sectionHeader(context, "Sports Feed", null), blockParams(top = 14))
+                        content.addView(feedCard(context), blockParams(top = 8))
+                    }
+                    TopMode.MEDIA -> {
+                        content.addView(simpleTopModeScreen(context, context.getString(R.string.str_xtrememedia)))
+                    }
+                    TopMode.CART -> {
+                        content.addView(simpleTopModeScreen(context, context.getString(R.string.str_xtremecart)))
+                    }
+                }
+
+                addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+
+            // SwipeRefreshLayout must wrap the scrollable view directly. A non-scrollable
+            // FrameLayout child makes canChildScrollUp() always false, which steals vertical
+            // drags and breaks normal scrolling.
+            val swipeRefresh = HomeSwipeRefreshLayout(context).apply {
+                setColorSchemeColors(primary)
                 setOnRefreshListener {
-                    // Trigger a refresh of the home screen content.
-                    // Here we simply invalidate the view hierarchy which forces a redraw.
-                    // In a real app you would likely ask the ViewModel to reload data.
                     refreshAfterResume()
-                    // Stop the refresh animation after our refresh logic completes.
                     post { isRefreshing = false }
                 }
+                addView(
+                    scroll,
+                    ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                )
             }
 
-            val scrollContainer = FrameLayout(context).apply {
-                val scroll = ScrollView(context).apply {
-                    clipToPadding = false
-                    setPadding(0, 0, 0, dp(12))
-
-                    val content = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(dp(14), dp(6), dp(14), dp(14))
-                    }
-
-                    when (topMode) {
-                        TopMode.SPORTS -> {
-                            content.addView(locationRow(context))
-                            content.addView(liveMatchesSection(), blockParams(top = 6))
-                            content.addView(proPassCardsSection(context), blockParams(top = 8))
-                            content.addView(personalizeGearSection(context), blockParams(top = 10))
-                            content.addView(sectionHeader(context, "Sports Feed", null), blockParams(top = 14))
-                            content.addView(feedCard(context), blockParams(top = 8))
-                        }
-                        TopMode.MEDIA -> {
-                            content.addView(simpleTopModeScreen(context, context.getString(R.string.str_xtrememedia)))
-                        }
-                        TopMode.CART -> {
-                            content.addView(simpleTopModeScreen(context, context.getString(R.string.str_xtremecart)))
-                        }
-                    }
-
-                    addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-                }
-                addView(scroll, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-
-                val shadowGlow = View(context).apply {
-                    background = GradientDrawable(
-                        GradientDrawable.Orientation.TOP_BOTTOM,
-                        intArrayOf(Color.argb(140, 0, 0, 0), Color.TRANSPARENT)
+            val contentFrame = FrameLayout(context).apply {
+                addView(
+                    swipeRefresh,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
                     )
-                }
-                addView(shadowGlow, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(14)))
-                
-                val primaryGlow = View(context).apply {
-                    background = GradientDrawable(
-                        GradientDrawable.Orientation.TOP_BOTTOM,
-                        intArrayOf(Color.argb(45, 0, 126, 255), Color.TRANSPARENT)
+                )
+
+                addView(
+                    createScrollEdgeGlow(
+                        context,
+                        intArrayOf(Color.argb(140, 0, 0, 0), Color.TRANSPARENT),
+                        dp(14)
                     )
-                }
-                addView(primaryGlow, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(6)))
+                )
+                addView(
+                    createScrollEdgeGlow(
+                        context,
+                        intArrayOf(Color.argb(45, 0, 126, 255), Color.TRANSPARENT),
+                        dp(6)
+                    )
+                )
             }
 
-            swipeRefresh.addView(scrollContainer)
-            addView(swipeRefresh, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(contentFrame, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         }
+    }
+
+    private fun createScrollEdgeGlow(context: Context, colors: IntArray, heightPx: Int): View {
+        return View(context).apply {
+            isClickable = false
+            isFocusable = false
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                colors
+            )
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                heightPx
+            )
+        }
+    }
+
+    private fun configureHorizontalScroll(scrollView: HorizontalScrollView): HorizontalScrollView {
+        scrollView.isHorizontalScrollBarEnabled = false
+        scrollView.clipToPadding = false
+        scrollView.overScrollMode = View.OVER_SCROLL_NEVER
+        NestedHorizontalScrollHelper.installOnScrollView(scrollView)
+        return scrollView
     }
 
     private fun createHostContent(context: Context): View {
@@ -1784,10 +1892,7 @@ class HomeScreenView @JvmOverloads constructor(
                 bottomMargin = dp(5)
             })
 
-            addView(HorizontalScrollView(context).apply {
-                isHorizontalScrollBarEnabled = false
-                clipToPadding = false
-                overScrollMode = View.OVER_SCROLL_NEVER
+            addView(configureHorizontalScroll(HorizontalScrollView(context)).apply {
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     setPadding(0, 0, dp(14), dp(2))
@@ -2027,10 +2132,7 @@ class HomeScreenView @JvmOverloads constructor(
         val red = Color.rgb(255, 62, 70)
         val purple = Color.rgb(156, 82, 255)
         val gold = Color.rgb(255, 215, 0)
-        return HorizontalScrollView(context).apply {
-            isHorizontalScrollBarEnabled = false
-            clipToPadding = false
-            overScrollMode = View.OVER_SCROLL_NEVER
+        return configureHorizontalScroll(HorizontalScrollView(context)).apply {
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, 0, dp(14), dp(2))
@@ -2587,9 +2689,7 @@ class HomeScreenView @JvmOverloads constructor(
                     }
                 })
 
-                addView(HorizontalScrollView(context).apply {
-                    isHorizontalScrollBarEnabled = false
-                    clipToPadding = false
+                addView(configureHorizontalScroll(HorizontalScrollView(context)).apply {
                     val row = LinearLayout(context).apply {
                         orientation = LinearLayout.HORIZONTAL
                         addView(gearProductCard(context, R.drawable.jersey1, "Performance SleeveLess", null), LinearLayout.LayoutParams(dp(152), dp(252)).apply { rightMargin = dp(12) })

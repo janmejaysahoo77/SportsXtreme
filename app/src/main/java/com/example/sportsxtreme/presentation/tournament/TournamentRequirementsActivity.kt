@@ -39,12 +39,10 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,8 +65,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import kotlin.math.PI
-import kotlin.math.sin
 
 class TournamentRequirementsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,10 +73,29 @@ class TournamentRequirementsActivity : ComponentActivity() {
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         setContent {
-            TournamentRequirementsScreen(onBack = { finish() })
+            TournamentRequirementsScreen(
+                summary = TournamentRequirementSummary(
+                    date = intent.getStringExtra(EXTRA_START_DATE).orEmpty(),
+                    matchForm = intent.getStringExtra(EXTRA_MATCH_FORM).orEmpty(),
+                    ballType = intent.getStringExtra(EXTRA_BALL_TYPE).orEmpty()
+                ),
+                onBack = { finish() }
+            )
         }
     }
+
+    companion object {
+        const val EXTRA_START_DATE = "tournament_start_date"
+        const val EXTRA_MATCH_FORM = "tournament_match_form"
+        const val EXTRA_BALL_TYPE = "tournament_ball_type"
+    }
 }
+
+private data class TournamentRequirementSummary(
+    val date: String,
+    val matchForm: String,
+    val ballType: String
+)
 
 private val ReqAccent = Color(0xFFC1FF00)
 private val ReqBg = Color(0xFF010509)
@@ -92,7 +107,7 @@ private val ReqCyan = Color(0xFF4DE9FF)
 private val ReqGold = Color(0xFFFFB84D)
 
 @Composable
-private fun TournamentRequirementsScreen(onBack: () -> Unit) {
+private fun TournamentRequirementsScreen(summary: TournamentRequirementSummary, onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -111,7 +126,7 @@ private fun TournamentRequirementsScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             RequirementHeroCard()
-            RequirementStatsRow()
+            RequirementStatsRow(summary)
             TournamentDetailsSection()
             WinningPrizeSection()
             FormatSection()
@@ -162,16 +177,14 @@ private fun RequirementsTopBar(onBack: () -> Unit) {
 
 @Composable
 private fun RequirementHeroCard() {
-    val pulse = rememberReqPremiumPulse()
-    val glow = reqPremiumGlowAlpha(pulse)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(178.dp)
             .shadow(16.dp, RoundedCornerShape(20.dp), clip = false)
             .drawBehind {
-                drawCircle(ReqAccent.copy(alpha = glow * 0.32f), radius = size.width * 0.36f, center = Offset(size.width * 0.12f, size.height * 1.02f))
-                drawCircle(ReqCyan.copy(alpha = glow * 0.2f), radius = size.width * 0.27f, center = Offset(size.width * 0.94f, size.height * 0.08f))
+                drawCircle(ReqAccent.copy(alpha = 0.13f), radius = size.width * 0.36f, center = Offset(size.width * 0.12f, size.height * 1.02f))
+                drawCircle(ReqCyan.copy(alpha = 0.08f), radius = size.width * 0.27f, center = Offset(size.width * 0.94f, size.height * 0.08f))
             }
             .clip(RoundedCornerShape(20.dp))
             .background(
@@ -179,7 +192,7 @@ private fun RequirementHeroCard() {
                     listOf(Color(0xFF17260D), Color(0xFF0B1A22), Color(0xFF111523))
                 )
             )
-            .border(1.2.dp, ReqAccent.copy(alpha = 0.42f + glow * 0.32f), RoundedCornerShape(20.dp))
+            .border(1.2.dp, ReqAccent.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
     ) {
         Image(
             painter = painterResource(id = R.drawable.prizeimage_onboarding4),
@@ -233,33 +246,31 @@ private fun StepBadge(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun RequirementStatsRow() {
+private fun RequirementStatsRow(summary: TournamentRequirementSummary) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        StatCard("12 Jun", "Date", ReqAccent, Modifier.weight(1f))
-        StatCard("T20", "Match Form", ReqCyan, Modifier.weight(1f))
-        StatCard("Tennis", "Ball Type", ReqGold, Modifier.weight(1f))
+        StatCard(summary.date.ifBlank { "Not set" }, "Date", ReqAccent, Modifier.weight(1f))
+        StatCard(summary.matchForm.ifBlank { "Not set" }, "Match Form", ReqCyan, Modifier.weight(1f))
+        StatCard(summary.ballType.ifBlank { "Not set" }, "Ball Type", ReqGold, Modifier.weight(1f))
     }
 }
 
 @Composable
 private fun StatCard(value: String, label: String, accent: Color, modifier: Modifier) {
-    val pulse = rememberReqPremiumPulse(2600f)
-    val glow = reqPremiumGlowAlpha(pulse)
     Column(
         modifier = modifier
             .height(82.dp)
             .shadow(8.dp, RoundedCornerShape(16.dp), clip = false)
             .drawBehind {
-                drawCircle(accent.copy(alpha = glow * 0.22f), radius = size.width * 0.5f, center = Offset(size.width * 0.5f, size.height * 0.05f))
+                drawCircle(accent.copy(alpha = 0.1f), radius = size.width * 0.5f, center = Offset(size.width * 0.5f, size.height * 0.05f))
             }
             .clip(RoundedCornerShape(16.dp))
             .background(Brush.verticalGradient(listOf(Color(0xFF101827), Color(0xFF0B111C))))
-            .border(1.dp, accent.copy(alpha = 0.42f + glow * 0.3f), RoundedCornerShape(16.dp))
+            .border(1.dp, accent.copy(alpha = 0.58f), RoundedCornerShape(16.dp))
             .padding(12.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(value, color = accent, fontSize = 21.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        Text(value, color = accent, fontSize = if (value.length > 7) 15.sp else 21.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(label, color = Color(0xFFBFCBC7), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
@@ -338,8 +349,6 @@ private fun TermsPanel() {
 
 @Composable
 private fun ContinueButton() {
-    val pulse = rememberReqPremiumPulse(2200f)
-    val shineX = 0.1f + pulse * 1.15f
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -347,17 +356,6 @@ private fun ContinueButton() {
             .shadow(12.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(Brush.horizontalGradient(listOf(ReqAccent, Color(0xFFDFFF6C), ReqGold)))
-            .drawBehind {
-                val startX = size.width * (shineX - 0.24f)
-                val endX = size.width * shineX
-                drawLine(
-                    color = Color.White.copy(alpha = 0.32f),
-                    start = Offset(startX, 0f),
-                    end = Offset(endX, size.height),
-                    strokeWidth = 26.dp.toPx(),
-                    cap = StrokeCap.Round
-                )
-            }
             .clickable { },
         contentAlignment = Alignment.Center
     ) {
@@ -372,8 +370,6 @@ private fun ReqSection(
     iconRes: Int? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val pulse = rememberReqPremiumPulse(3200f)
-    val glow = reqPremiumGlowAlpha(pulse)
     Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionIcon(iconRes)
@@ -403,7 +399,7 @@ private fun ReqSection(
                 .fillMaxWidth()
                 .shadow(8.dp, RoundedCornerShape(17.dp), clip = false)
                 .drawBehind {
-                    drawCircle(ReqCyan.copy(alpha = glow * 0.08f), radius = size.width * 0.42f, center = Offset(size.width * 0.9f, 0f))
+                    drawCircle(ReqCyan.copy(alpha = 0.04f), radius = size.width * 0.42f, center = Offset(size.width * 0.9f, 0f))
                 }
                 .clip(RoundedCornerShape(17.dp))
                 .background(Brush.verticalGradient(listOf(Color(0xFF101827), ReqPanel)))
@@ -522,14 +518,12 @@ private fun SmallBadge(active: Boolean) {
 
 @Composable
 private fun SectionIcon(iconRes: Int?) {
-    val pulse = rememberReqPremiumPulse(2400f)
-    val glow = reqPremiumGlowAlpha(pulse)
     Box(
         modifier = Modifier
             .size(34.dp)
             .clip(RoundedCornerShape(11.dp))
             .background(Brush.radialGradient(listOf(Color(0x334DE9FF), Color(0xFF101827))))
-            .border(1.dp, ReqCyan.copy(alpha = 0.34f + glow * 0.32f), RoundedCornerShape(11.dp))
+            .border(1.dp, ReqCyan.copy(alpha = 0.52f), RoundedCornerShape(11.dp))
             .padding(6.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -583,23 +577,4 @@ private fun ReqArrowIcon(modifier: Modifier, right: Boolean) {
         }
         drawPath(path, tint, style = stroke)
     }
-}
-
-@Composable
-private fun rememberReqPremiumPulse(durationMillis: Float = 2800f): Float {
-    var phase by remember { mutableStateOf(0f) }
-    LaunchedEffect(durationMillis) {
-        val start = withFrameNanos { it }
-        while (true) {
-            withFrameNanos { now ->
-                val elapsed = (now - start) / 1_000_000f
-                phase = (elapsed % durationMillis) / durationMillis
-            }
-        }
-    }
-    return phase
-}
-
-private fun reqPremiumGlowAlpha(phase: Float): Float {
-    return (0.45f + 0.35f * sin((phase * 2f * PI).toFloat())).coerceIn(0.12f, 0.82f)
 }

@@ -82,8 +82,13 @@ class TournamentRegistrationActivity : ComponentActivity() {
         setContent {
             TournamentRegistrationScreen(
                 onBack = { finish() },
-                onNavigateNext = {
-                    startActivity(Intent(this, TournamentRequirementsActivity::class.java))
+                onNavigateNext = { tournament ->
+                    startActivity(
+                        Intent(this, TournamentRequirementsActivity::class.java)
+                            .putExtra(TournamentRequirementsActivity.EXTRA_START_DATE, tournament.startDate)
+                            .putExtra(TournamentRequirementsActivity.EXTRA_MATCH_FORM, tournament.matchForm)
+                            .putExtra(TournamentRequirementsActivity.EXTRA_BALL_TYPE, tournament.ballType)
+                    )
                 },
                 viewModel = viewModel
             )
@@ -103,7 +108,7 @@ private val FormWarm = Color(0xFFFFB84D)
 @Composable
 private fun TournamentRegistrationScreen(
     onBack: () -> Unit,
-    onNavigateNext: () -> Unit,
+    onNavigateNext: (Tournament) -> Unit,
     viewModel: TournamentRegistrationViewModel
 ) {
     val tournamentState by viewModel.tournamentState.collectAsState()
@@ -112,7 +117,7 @@ private fun TournamentRegistrationScreen(
     LaunchedEffect(uiState) {
         if (uiState is TournamentRegistrationViewModel.UiState.Success) {
             viewModel.resetUiState()
-            onNavigateNext()
+            onNavigateNext(tournamentState)
         }
     }
 
