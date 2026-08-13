@@ -36,6 +36,33 @@
             android:name=".presentation.clubs.MyClubsLandingPageActivity"
             android:exported="false" />
         <activity
+            android:name=".presentation.clubs.OwnedClubPageActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.ClubMemberPageActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.AddMemberInClubActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.SquadInClubActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.AddTeamInsideSquadActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.MatchesPlayedByClubActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.ClubAnalyticsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.ClubsTournamentPlayedActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.PlayerInsideSquadOfAClub"
+            android:exported="false" />
+        <activity
             android:name=".presentation.team.QRForPlayerAddingActivity"
             android:exported="false" />
         <activity
