@@ -30,6 +30,12 @@
             android:name=".presentation.auth.PhooneNumberAfterGoogleLogin"
             android:exported="false" />
         <activity
+            android:name=".presentation.clubs.ClubLandingActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.MyClubsLandingPageActivity"
+            android:exported="false" />
+        <activity
             android:name=".presentation.team.QRForPlayerAddingActivity"
             android:exported="false" />
         <activity

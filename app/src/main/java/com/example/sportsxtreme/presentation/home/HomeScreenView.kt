@@ -11,6 +11,7 @@ import com.example.sportsxtreme.presentation.home.*
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
+import com.example.sportsxtreme.presentation.clubs.ClubLandingActivity
 import android.content.Intent
 import android.content.Context
 import android.graphics.Bitmap
@@ -26,6 +27,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -78,6 +80,7 @@ class HomeScreenView @JvmOverloads constructor(
     )
 
     private enum class DrawerAction {
+        GO_TO_CLUB,
         ADD_TOURNAMENT,
         START_MATCH
     }
@@ -324,6 +327,7 @@ class HomeScreenView @JvmOverloads constructor(
 
                     // Drawer Items
                     val items = listOf(
+                        DrawerItem("GO TO CLUB", DrawerIconView.Icon.BUILDING, isFeatured = true, hasChevron = true, action = DrawerAction.GO_TO_CLUB),
                         DrawerItem("Add a Tournament/Series", DrawerIconView.Icon.PLUS_CIRCLE, badge = "FREE", action = DrawerAction.ADD_TOURNAMENT),
                         DrawerItem("Start A Match", DrawerIconView.Icon.BAT, badge = "FREE", action = DrawerAction.START_MATCH),
                         DrawerItem("Go Live", DrawerIconView.Icon.VIDEO),
@@ -341,7 +345,15 @@ class HomeScreenView @JvmOverloads constructor(
                     )
 
                     items.forEach { item ->
-                        addView(createDrawerItemView(context, item), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)))
+                        addView(
+                            createDrawerItemView(context, item),
+                            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(if (item.isFeatured) 58 else 48)).apply {
+                                if (item.isFeatured) {
+                                    topMargin = dp(2)
+                                    bottomMargin = dp(6)
+                                }
+                            }
+                        )
                     }
 
                     // Expanded Sub-items (Hardcoded expanded for visual matching)
@@ -380,6 +392,8 @@ class HomeScreenView @JvmOverloads constructor(
         val badge: String? = null,
         val hasDot: Boolean = false,
         val isExpandable: Boolean = false,
+        val isFeatured: Boolean = false,
+        val hasChevron: Boolean = false,
         val action: DrawerAction? = null
     )
 
@@ -387,12 +401,32 @@ class HomeScreenView @JvmOverloads constructor(
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            if (item.isFeatured) {
+                val blueGlow = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setGradientType(GradientDrawable.RADIAL_GRADIENT)
+                    setGradientRadius(dp(180).toFloat())
+                    setColors(intArrayOf(Color.argb(125, 0, 166, 255), Color.TRANSPARENT))
+                }
+                val clubSurface = GradientDrawable(
+                    GradientDrawable.Orientation.LEFT_RIGHT,
+                    intArrayOf(Color.rgb(5, 75, 118), Color.rgb(10, 41, 70))
+                ).apply {
+                    cornerRadius = dp(10).toFloat()
+                    setStroke(dp(1), Color.rgb(0, 184, 255))
+                }
+                background = LayerDrawable(arrayOf(blueGlow, clubSurface)).apply {
+                    setLayerInset(1, dp(3), dp(3), dp(3), dp(3))
+                }
+                setPadding(dp(15), 0, dp(15), 0)
+            }
             isClickable = item.action != null
             isFocusable = item.action != null
             item.action?.let { action ->
                 setOnClickListener {
                     drawerLayout.closeDrawer(GravityCompat.START)
                     when (action) {
+                        DrawerAction.GO_TO_CLUB -> context.startActivity(Intent(context, ClubLandingActivity::class.java))
                         DrawerAction.ADD_TOURNAMENT -> context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
                         DrawerAction.START_MATCH -> context.startActivity(Intent(context, StartMatchActivity::class.java))
                     }
@@ -400,13 +434,14 @@ class HomeScreenView @JvmOverloads constructor(
             }
             
             addView(DrawerIconView(context, item.icon).apply {
-                setTint(Color.rgb(200, 210, 215))
+                setTint(if (item.isFeatured) Color.rgb(111, 222, 255) else Color.rgb(200, 210, 215))
             }, LinearLayout.LayoutParams(dp(22), dp(22)))
 
             addView(TextView(context).apply {
                 text = item.label
-                setTextColor(Color.rgb(220, 230, 235))
+                setTextColor(if (item.isFeatured) Color.WHITE else Color.rgb(220, 230, 235))
                 textSize = 14f
+                if (item.isFeatured) typeface = Typeface.DEFAULT_BOLD
                 includeFontPadding = false
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                 leftMargin = dp(16)
@@ -440,6 +475,12 @@ class HomeScreenView @JvmOverloads constructor(
                     setTint(Color.WHITE) // Should be UP arrow, but we use RIGHT_ARROW and rotate it
                     rotation = -90f
                 }, LinearLayout.LayoutParams(dp(16), dp(16)))
+            }
+
+            if (item.hasChevron) {
+                addView(DrawerIconView(context, DrawerIconView.Icon.RIGHT_ARROW).apply {
+                    setTint(Color.rgb(126, 225, 255))
+                }, LinearLayout.LayoutParams(dp(18), dp(18)))
             }
         }
     }
