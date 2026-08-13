@@ -13,6 +13,7 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.content.Intent
 import android.os.Bundle
+import androidx.activity.viewModels
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -36,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,22 +62,30 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class LeagueTournamentFlowActivity : ComponentActivity() {
+    private val viewModel: TournamentFlowViewModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID).orEmpty()
+        viewModel.load(tournamentId)
         setContent {
             LeagueTournamentFlowScreen(
                 onBack = { finish() },
+                viewModel = viewModel,
                 onContinue = {
                     startActivity(Intent(this, LeagueMatchSetupActivity::class.java))
                 }
             )
         }
     }
+
+    companion object { const val EXTRA_TOURNAMENT_ID = "tournament_id" }
 }
 
 private val FlowAccent = Color(0xFFC1FF00)
@@ -87,7 +97,8 @@ private val FlowStroke = Color(0xFF28344A)
 private val FlowMuted = Color(0xFF9AA9A6)
 
 @Composable
-private fun LeagueTournamentFlowScreen(onBack: () -> Unit, onContinue: () -> Unit) {
+private fun LeagueTournamentFlowScreen(onBack: () -> Unit, viewModel: TournamentFlowViewModel, onContinue: () -> Unit) {
+    val tournament by viewModel.tournament.collectAsState()
     var advancedOpen by remember { mutableStateOf(false) }
     var qualifiers by remember {
         mutableStateOf(
@@ -128,7 +139,7 @@ private fun LeagueTournamentFlowScreen(onBack: () -> Unit, onContinue: () -> Uni
                     lineHeight = 15.sp,
                     fontWeight = FontWeight.SemiBold
                 )
-                TournamentHeaderCard()
+                TournamentHeaderCard(tournament)
                 SectionLabel("RECOMMENDED STAGES", "MOST LEAGUE TOURNAMENTS FOLLOW THIS STRUCTURE")
                 RecommendedStageList()
                 TournamentFlowPreview()
@@ -180,7 +191,7 @@ private fun FlowTopBar(onBack: () -> Unit) {
 }
 
 @Composable
-private fun TournamentHeaderCard() {
+private fun TournamentHeaderCard(tournament: com.example.sportsxtreme.domain.model.Tournament?) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -230,7 +241,7 @@ private fun TournamentHeaderCard() {
                 .background(FlowAccent)
         )
         Column(modifier = Modifier.padding(start = 13.dp).weight(1f)) {
-            Text("Dubai Premier League", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Text(tournament?.name?.ifBlank { "Tournament" } ?: "Loading tournament...", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black, maxLines = 1)
             Box(
                 modifier = Modifier
                     .padding(top = 5.dp)
@@ -245,9 +256,9 @@ private fun TournamentHeaderCard() {
                 horizontalArrangement = Arrangement.spacedBy(17.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                HeaderMetric("Dubai", FlowGlyph.PIN)
-                HeaderMetric("8\nTeams", FlowGlyph.TEAMS)
-                HeaderMetric("CHAMPIONSHIP", FlowGlyph.TROPHY)
+                HeaderMetric(tournament?.city?.ifBlank { "Location" } ?: "Location", FlowGlyph.PIN)
+                HeaderMetric("${tournament?.requirements?.numberOfTeams?.ifBlank { "-" } ?: "-"}\nTeams", FlowGlyph.TEAMS)
+                HeaderMetric(tournament?.requirements?.tournamentFormat?.uppercase() ?: "TOURNAMENT", FlowGlyph.TROPHY)
             }
         }
         Box(

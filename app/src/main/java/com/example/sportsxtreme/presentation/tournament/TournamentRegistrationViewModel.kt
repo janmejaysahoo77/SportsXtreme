@@ -74,6 +74,7 @@ class TournamentRegistrationViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = createTournamentUseCase(_tournamentState.value)) {
                 is Resource.Success -> {
+                    _tournamentState.value = result.data ?: _tournamentState.value
                     _uiState.value = UiState.Success
                 }
                 is Resource.Error -> {

@@ -2,7 +2,9 @@ package com.example.sportsxtreme.data.remote.firestore
 
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.Tournament
+import com.example.sportsxtreme.domain.model.TournamentRequirements
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 
@@ -18,5 +20,24 @@ class FirebaseFirestoreTournamentDataSource @Inject constructor(
         } catch (e: Exception) {
             Resource.Error(e.message ?: "An error occurred while creating tournament")
         }
+    }
+
+    suspend fun updateTournamentRequirements(tournamentId: String, requirements: TournamentRequirements): Resource<Unit> = try {
+        require(tournamentId.isNotBlank()) { "Tournament ID is missing" }
+        firestore.collection("tournaments").document(tournamentId)
+            .set(mapOf("requirements" to requirements), SetOptions.merge()).await()
+        Resource.Success(Unit)
+    } catch (e: Exception) {
+        Resource.Error(e.message ?: "Unable to save tournament requirements")
+    }
+
+    suspend fun getTournament(tournamentId: String): Resource<Tournament> = try {
+        val snapshot = firestore.collection("tournaments").document(tournamentId).get().await()
+        val tournament = snapshot.toObject(Tournament::class.java)
+            ?.copy(id = snapshot.id)
+            ?: return Resource.Error("Tournament was not found")
+        Resource.Success(tournament)
+    } catch (e: Exception) {
+        Resource.Error(e.message ?: "Unable to load tournament")
     }
 }

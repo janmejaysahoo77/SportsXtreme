@@ -75,6 +75,9 @@
             android:name=".presentation.match.FriendlyMatchDetailsActivity"
             android:exported="false" />
         <activity
+            android:name=".presentation.tournament.RegisterTournamentFinalPageActivity"
+            android:exported="false" />
+        <activity
             android:name=".presentation.tournament.LeagueTournamentFlowActivity"
             android:exported="false" />
         <activity

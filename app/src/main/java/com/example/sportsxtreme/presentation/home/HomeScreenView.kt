@@ -988,24 +988,97 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun yourTournamentCard(context: Context): View {
-        return FrameLayout(context).apply {
-            // Outer card
-            background = GradientDrawable().apply {
-                cornerRadius = dp(12).toFloat()
-                setColor(Color.rgb(7, 14, 18))
-                setStroke(dp(1), Color.argb(60, 255, 255, 255))
-            }
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-
-            // Inner card (empty)
-            addView(FrameLayout(context).apply {
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(8).toFloat()
-                    setColor(Color.rgb(11, 20, 28))
-                    setStroke(dp(1), Color.argb(40, 193, 255, 0))
-                }
-            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(160)))
+        val content = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(2), dp(2), dp(2), dp(8))
         }
+        val allContent = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+
+        content.addView(LinearLayout(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundedBackground(Color.rgb(18, 29, 46), dp(12))
+            setPadding(dp(13), dp(10), dp(8), dp(10))
+            addView(TextView(context).apply {
+                text = "Do you want to register?"
+                setTextColor(Color.rgb(205, 215, 226)); textSize = 11f; typeface = Typeface.DEFAULT_BOLD
+            }, LinearLayout.LayoutParams(0, dp(32), 1f))
+            addView(tournamentPill(context, "REGISTER", true), LinearLayout.LayoutParams(dp(82), dp(30)))
+        }, blockParams())
+
+        val filters = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(13), 0, dp(13))
+        }
+        val filterNames = listOf("ALL", "ONGOING", "UPCOMING", "COMPLETED", "HIGHLIGHTS")
+        val filterButtons = mutableListOf<TextView>()
+        filterNames.forEachIndexed { index, label ->
+            val button = tournamentPill(context, label, index == 0)
+            filterButtons += button
+            filters.addView(button, LinearLayout.LayoutParams(if (index == 0) dp(43) else dp(83), dp(30)).apply { rightMargin = dp(7) })
+            button.setOnClickListener {
+                filterButtons.forEachIndexed { buttonIndex, tab -> updateTournamentFilterStyle(tab, buttonIndex == index) }
+                allContent.visibility = if (index == 0) View.VISIBLE else View.GONE
+            }
+        }
+        content.addView(HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false; addView(filters)
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)))
+
+        allContent.addView(tournamentSearch(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)))
+        allContent.addView(tournamentOverviewCard(context, "PREMIER LEAGUE\n2024", "T20 CHAMPIONSHIP", "ONGOING", "12 / 16", "Today, 4 PM", "MANAGE TOURNAMENT"), blockParams(top = 12))
+        allContent.addView(tournamentOverviewCard(context, "WEEKEND BASH", "LOCAL KNOCKOUT", "UPCOMING", "2 Days", "₹5,000", "VIEW DETAILS"), blockParams(top = 14))
+        content.addView(allContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        return content
+    }
+
+    private fun roundedBackground(color: Int, radius: Int, strokeColor: Int? = null): GradientDrawable = GradientDrawable().apply {
+        cornerRadius = radius.toFloat(); setColor(color); strokeColor?.let { setStroke(dp(1), it) }
+    }
+
+    private fun tournamentPill(context: Context, text: String, active: Boolean): TextView = TextView(context).apply {
+        this.text = text; gravity = Gravity.CENTER; textSize = 9f; includeFontPadding = false
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD); updateTournamentFilterStyle(this, active)
+    }
+
+    private fun updateTournamentFilterStyle(tab: TextView, active: Boolean) {
+        tab.background = roundedBackground(if (active) primary else Color.rgb(18, 29, 46), dp(18), if (active) null else Color.rgb(39, 54, 78))
+        tab.setTextColor(if (active) Color.rgb(10, 22, 10) else Color.rgb(159, 175, 195))
+    }
+
+    private fun tournamentSearch(context: Context): View = TextView(context).apply {
+        text = "⌕   Search tournament / series...                         ⚙"
+        gravity = Gravity.CENTER_VERTICAL; textSize = 11f; setTextColor(Color.rgb(145, 161, 184)); setPadding(dp(14), 0, dp(14), 0)
+        background = roundedBackground(Color.rgb(18, 29, 46), dp(12), Color.rgb(57, 86, 72))
+    }
+
+    private fun tournamentOverviewCard(context: Context, title: String, subtitle: String, status: String, leftLabel: String, rightLabel: String, action: String): View {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(13), dp(13), dp(13), dp(12))
+            background = roundedBackground(Color.rgb(12, 25, 43), dp(13), Color.rgb(36, 63, 85))
+            addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(context).apply { text = "🏆"; textSize = 20f }, LinearLayout.LayoutParams(dp(29), dp(34)))
+                addView(LinearLayout(context).apply { orientation = LinearLayout.VERTICAL
+                    addView(TextView(context).apply { text = title; setTextColor(Color.WHITE); textSize = 13f; typeface = Typeface.DEFAULT_BOLD; maxLines = 2 })
+                    addView(TextView(context).apply { text = subtitle; setTextColor(Color.rgb(161, 185, 142)); textSize = 8f; typeface = Typeface.DEFAULT_BOLD })
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(tournamentPill(context, status, false), LinearLayout.LayoutParams(dp(58), dp(23)))
+            })
+            addView(LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, dp(12))
+                addView(tournamentMetric(context, if (status == "ONGOING") "TEAMS" else "STARTS IN", leftLabel), LinearLayout.LayoutParams(0, dp(50), 1f).apply { rightMargin = dp(8) })
+                addView(tournamentMetric(context, if (status == "ONGOING") "NEXT MATCH" else "PRIZE POOL", rightLabel), LinearLayout.LayoutParams(0, dp(50), 1f))
+            })
+            addView(TextView(context).apply { text = action + "  ⊙"; gravity = Gravity.CENTER; textSize = 10f; typeface = Typeface.DEFAULT_BOLD; setTextColor(if (action == "MANAGE TOURNAMENT") Color.rgb(11, 24, 10) else primary)
+                background = roundedBackground(if (action == "MANAGE TOURNAMENT") primary else Color.TRANSPARENT, dp(18), if (action == "MANAGE TOURNAMENT") null else Color.rgb(74, 105, 57))
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(38)))
+        }
+    }
+
+    private fun tournamentMetric(context: Context, label: String, value: String): View = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL; setPadding(dp(9), dp(7), dp(6), dp(4)); background = roundedBackground(Color.rgb(22, 36, 57), dp(7))
+        addView(TextView(context).apply { text = label; setTextColor(Color.rgb(131, 150, 175)); textSize = 7f; typeface = Typeface.DEFAULT_BOLD })
+        addView(TextView(context).apply { text = value; setTextColor(Color.WHITE); textSize = 11f; typeface = Typeface.DEFAULT_BOLD })
     }
 
     private fun hostTopStrip(context: Context): View {

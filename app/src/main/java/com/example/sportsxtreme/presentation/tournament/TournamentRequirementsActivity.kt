@@ -12,7 +12,10 @@ import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
+import android.content.Intent
+import android.media.MediaPlayer
 import androidx.activity.ComponentActivity
+import androidx.activity.viewModels
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -43,6 +46,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,10 +68,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.rememberLottieComposition
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.domain.model.Tournament
+import com.example.sportsxtreme.domain.model.TournamentRequirements
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class TournamentRequirementsActivity : ComponentActivity() {
+    private val viewModel: TournamentRequirementsViewModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
@@ -75,10 +88,22 @@ class TournamentRequirementsActivity : ComponentActivity() {
         setContent {
             TournamentRequirementsScreen(
                 summary = TournamentRequirementSummary(
+                    tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID).orEmpty(),
                     date = intent.getStringExtra(EXTRA_START_DATE).orEmpty(),
                     matchForm = intent.getStringExtra(EXTRA_MATCH_FORM).orEmpty(),
                     ballType = intent.getStringExtra(EXTRA_BALL_TYPE).orEmpty()
                 ),
+                viewModel = viewModel,
+                onSaved = { tournamentId, needsOfficials ->
+                    val destination = if (needsOfficials) {
+                        Intent(this, LeagueTournamentFlowActivity::class.java)
+                            .putExtra(LeagueTournamentFlowActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                    } else {
+                        Intent(this, RegisterTournamentFinalPageActivity::class.java)
+                            .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                    }
+                    startActivity(destination)
+                },
                 onBack = { finish() }
             )
         }
@@ -86,12 +111,14 @@ class TournamentRequirementsActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_START_DATE = "tournament_start_date"
+        const val EXTRA_TOURNAMENT_ID = "tournament_id"
         const val EXTRA_MATCH_FORM = "tournament_match_form"
         const val EXTRA_BALL_TYPE = "tournament_ball_type"
     }
 }
 
 private data class TournamentRequirementSummary(
+    val tournamentId: String,
     val date: String,
     val matchForm: String,
     val ballType: String
@@ -107,7 +134,28 @@ private val ReqCyan = Color(0xFF4DE9FF)
 private val ReqGold = Color(0xFFFFB84D)
 
 @Composable
-private fun TournamentRequirementsScreen(summary: TournamentRequirementSummary, onBack: () -> Unit) {
+private fun TournamentRequirementsScreen(
+    summary: TournamentRequirementSummary,
+    viewModel: TournamentRequirementsViewModel,
+    onSaved: (String, Boolean) -> Unit,
+    onBack: () -> Unit
+) {
+    var requirements by remember { mutableStateOf(TournamentRequirements()) }
+    var showSuccessAnimation by remember { mutableStateOf(false) }
+    val uiState by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(uiState) {
+        if (uiState is TournamentRequirementsViewModel.UiState.Saved) {
+            val savedTournament = (uiState as TournamentRequirementsViewModel.UiState.Saved).tournament
+            viewModel.reset()
+            if (requirements.needsOfficials) {
+                onSaved(savedTournament.id, true)
+            } else {
+                showSuccessAnimation = true
+            }
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -127,14 +175,82 @@ private fun TournamentRequirementsScreen(summary: TournamentRequirementSummary, 
         ) {
             RequirementHeroCard()
             RequirementStatsRow(summary)
-            TournamentDetailsSection()
-            WinningPrizeSection()
-            FormatSection()
-            NotesSection()
-            SmartFeaturesSection()
+            TournamentDetailsSection(requirements) { requirements = it }
+            WinningPrizeSection(requirements) { requirements = it }
+            FormatSection(requirements) { requirements = it }
+            NotesSection(requirements) { requirements = it }
+            SmartFeaturesSection(
+                requirements = requirements,
+                onRequirementsChange = { requirements = it }
+            )
             TermsPanel()
-            ContinueButton()
+            if (uiState is TournamentRequirementsViewModel.UiState.Error) {
+                Text((uiState as TournamentRequirementsViewModel.UiState.Error).message, color = Color.Red, fontSize = 13.sp)
+            }
+            ContinueButton(
+                showContinue = requirements.needsOfficials,
+                isSaving = uiState is TournamentRequirementsViewModel.UiState.Loading,
+                onClick = {
+                    viewModel.save(
+                        Tournament(
+                            id = summary.tournamentId,
+                            startDate = summary.date,
+                            matchForm = summary.matchForm,
+                            ballType = summary.ballType
+                        ),
+                        requirements
+                    )
+                }
+            )
         }
+    }
+    if (showSuccessAnimation) {
+        SuccessAnimationOverlay(
+            onFinished = { onSaved(summary.tournamentId, false) }
+        )
+    }
+    }
+}
+
+@Composable
+private fun SuccessAnimationOverlay(onFinished: () -> Unit) {
+    val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.success))
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val cheerPlayer = remember { MediaPlayer.create(context, R.raw.success_sound) }
+    var cheerReleased by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        cheerPlayer.start()
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            if (!cheerReleased) {
+                if (cheerPlayer.isPlaying) cheerPlayer.stop()
+                cheerPlayer.release()
+                cheerReleased = true
+            }
+        }
+    }
+    LaunchedEffect(composition) {
+        if (composition != null) {
+            kotlinx.coroutines.delay(2200)
+            if (cheerPlayer.isPlaying) {
+                cheerPlayer.stop()
+            }
+            cheerPlayer.release()
+            cheerReleased = true
+            onFinished()
+        }
+    }
+    Box(
+        modifier = Modifier.fillMaxSize().background(ReqBg.copy(alpha = 0.96f)),
+        contentAlignment = Alignment.Center
+    ) {
+        LottieAnimation(
+            composition = composition,
+            iterations = 1,
+            modifier = Modifier.size(260.dp)
+        )
     }
 }
 
@@ -276,50 +392,60 @@ private fun StatCard(value: String, label: String, accent: Color, modifier: Modi
 }
 
 @Composable
-private fun TournamentDetailsSection() {
+private fun TournamentDetailsSection(requirements: TournamentRequirements, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Tournament Details", "ENTRY") {
-        ReqInput("Tournament Location", "Bhubaneswar, Odisha")
+        ReqInput("Tournament Location", "Bhubaneswar, Odisha", requirements.location) { onChange(requirements.copy(location = it)) }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ReqInput("Entry Fee", "Rs 999", Modifier.weight(1f))
-            ReqInput("Number of Teams", "10", Modifier.weight(1f))
+            ReqInput("Entry Fee", "Rs 999", requirements.entryFee, Modifier.weight(1f)) { onChange(requirements.copy(entryFee = it)) }
+            ReqInput("Number of Teams", "10", requirements.numberOfTeams, Modifier.weight(1f)) { onChange(requirements.copy(numberOfTeams = it)) }
         }
-        ReqInput("Match Duration", "How many hours is one match?")
+        ReqInput("Match Duration", "How many hours is one match?", requirements.matchDuration) { onChange(requirements.copy(matchDuration = it)) }
         InfoPanel("Only the organizer can edit team information after the tournament is created.")
     }
 }
 
 @Composable
-private fun WinningPrizeSection() {
+private fun WinningPrizeSection(requirements: TournamentRequirements, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Winning Prize", "REWARDS", iconRes = R.drawable.tournamentlogo) {
-        ChipRowReq(listOf("Cash", "Trophy", "Both"), selectedIndex = 0)
-        ReqInput("Prize Pool", "Rs 50,000")
-        ReqInput("Runner-up Prize", "Rs 10,000")
+        ChipRowReq(listOf("Cash", "Trophy", "Both"), requirements.prizeType) { onChange(requirements.copy(prizeType = it)) }
+        ReqInput("Prize Pool", "Rs 50,000", requirements.prizePool) { onChange(requirements.copy(prizePool = it)) }
+        ReqInput("Runner-up Prize", "Rs 10,000", requirements.runnerUpPrize) { onChange(requirements.copy(runnerUpPrize = it)) }
     }
 }
 
 @Composable
-private fun FormatSection() {
+private fun FormatSection(requirements: TournamentRequirements, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Tournament Format", "FIXTURES") {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SelectBox("League", selected = false, modifier = Modifier.weight(1f))
-            SelectBox("Knockout", selected = true, modifier = Modifier.weight(1f))
+            SelectBox("League", selected = requirements.tournamentFormat == "League", modifier = Modifier.weight(1f)) { onChange(requirements.copy(tournamentFormat = "League")) }
+            SelectBox("Knockout", selected = requirements.tournamentFormat == "Knockout", modifier = Modifier.weight(1f)) { onChange(requirements.copy(tournamentFormat = "Knockout")) }
         }
         InfoPanel("Knockout teams are eliminated after one loss. League format keeps all teams in the race longer.")
     }
 }
 
 @Composable
-private fun NotesSection() {
+private fun NotesSection(requirements: TournamentRequirements, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Tournament Notes", "RULES") {
-        ReqInput("Notes", "Add rules, prize breakdown, reporting time, dress code, or important instructions", minHeight = 96.dp)
+        ReqInput("Notes", "Add rules, prize breakdown, reporting time, dress code, or important instructions", requirements.notes, minHeight = 96.dp) { onChange(requirements.copy(notes = it)) }
     }
 }
 
 @Composable
-private fun SmartFeaturesSection() {
+private fun SmartFeaturesSection(
+    requirements: TournamentRequirements,
+    onRequirementsChange: (TournamentRequirements) -> Unit
+) {
     ReqSection("Smart Features", "PUBLIC FEED", iconRes = R.drawable.organiserss) {
-        ToggleLine("Invite all the players of my previous tournaments", "Notify past players and teams instantly.", true)
-        ToggleLine("Do you need officials? Umpire, scorer, streamer", "Post to the officials feed and find match staff faster.", false)
+        ToggleLine("Invite all the players of my previous tournaments", "Notify past players and teams instantly.", requirements.invitePreviousPlayers) {
+            onRequirementsChange(requirements.copy(invitePreviousPlayers = !requirements.invitePreviousPlayers))
+        }
+        ToggleLine(
+            text = "Do you need officials? Umpire, scorer, streamer",
+            helper = "Post to the officials feed and find match staff faster.",
+            active = requirements.needsOfficials,
+            onClick = { onRequirementsChange(requirements.copy(needsOfficials = !requirements.needsOfficials)) }
+        )
     }
 }
 
@@ -348,7 +474,7 @@ private fun TermsPanel() {
 }
 
 @Composable
-private fun ContinueButton() {
+private fun ContinueButton(showContinue: Boolean, isSaving: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -356,10 +482,10 @@ private fun ContinueButton() {
             .shadow(12.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(Brush.horizontalGradient(listOf(ReqAccent, Color(0xFFDFFF6C), ReqGold)))
-            .clickable { },
+            .clickable(enabled = !isSaving, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text("Continue", color = Color(0xFF111604), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+        Text(if (isSaving) "Saving..." else if (showContinue) "Continue" else "Done", color = Color(0xFF111604), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
 
@@ -412,13 +538,12 @@ private fun ReqSection(
 }
 
 @Composable
-private fun ReqInput(label: String, placeholder: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp) {
-    var value by remember { mutableStateOf("") }
+private fun ReqInput(label: String, placeholder: String, value: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp, onValueChange: (String) -> Unit) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Text(label, color = Color(0xFF99A9A5), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
         BasicTextField(
             value = value,
-            onValueChange = { value = it },
+            onValueChange = onValueChange,
             textStyle = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
             singleLine = minHeight <= 56.dp,
             decorationBox = { innerTextField ->
@@ -443,32 +568,34 @@ private fun ReqInput(label: String, placeholder: String, modifier: Modifier = Mo
 }
 
 @Composable
-private fun ChipRowReq(labels: List<String>, selectedIndex: Int) {
+private fun ChipRowReq(labels: List<String>, selectedLabel: String, onLabelSelected: (String) -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         labels.forEachIndexed { index, label ->
             Box(
                 modifier = Modifier
                     .height(38.dp)
                     .clip(RoundedCornerShape(19.dp))
-                    .background(if (index == selectedIndex) ReqAccent else Color(0xFF1A2231))
-                    .border(1.dp, if (index == selectedIndex) Color(0xFFDFFF6C) else Color(0xFF34405A), RoundedCornerShape(19.dp))
+                    .background(if (label == selectedLabel) ReqAccent else Color(0xFF1A2231))
+                    .border(1.dp, if (label == selectedLabel) Color(0xFFDFFF6C) else Color(0xFF34405A), RoundedCornerShape(19.dp))
+                    .clickable { onLabelSelected(label) }
                     .padding(horizontal = 17.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(label, color = if (index == selectedIndex) Color(0xFF111604) else Color(0xFFBBC7C4), fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                Text(label, color = if (label == selectedLabel) Color(0xFF111604) else Color(0xFFBBC7C4), fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
     }
 }
 
 @Composable
-private fun SelectBox(label: String, selected: Boolean, modifier: Modifier) {
+private fun SelectBox(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Box(
         modifier = modifier
             .height(54.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(if (selected) ReqAccent else Color(0xFF1A2231))
-            .border(1.dp, if (selected) Color(0xFFDFFF6C) else Color(0xFF34405A), RoundedCornerShape(14.dp)),
+            .border(1.dp, if (selected) Color(0xFFDFFF6C) else Color(0xFF34405A), RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(label, color = if (selected) Color(0xFF111604) else Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
@@ -492,8 +619,15 @@ private fun InfoPanel(text: String) {
 }
 
 @Composable
-private fun ToggleLine(text: String, helper: String, active: Boolean) {
-    Row(verticalAlignment = Alignment.Top) {
+private fun ToggleLine(text: String, helper: String, active: Boolean, onClick: (() -> Unit)? = null) {
+    Row(
+        modifier = if (onClick != null) Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(4.dp) else Modifier,
+        verticalAlignment = Alignment.Top
+    ) {
         SmallBadge(active = active)
         Column(modifier = Modifier.padding(start = 10.dp)) {
             Text(text, color = Color.White, fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.ExtraBold)

@@ -88,6 +88,7 @@ class TournamentRegistrationActivity : ComponentActivity() {
                             .putExtra(TournamentRequirementsActivity.EXTRA_START_DATE, tournament.startDate)
                             .putExtra(TournamentRequirementsActivity.EXTRA_MATCH_FORM, tournament.matchForm)
                             .putExtra(TournamentRequirementsActivity.EXTRA_BALL_TYPE, tournament.ballType)
+                            .putExtra(TournamentRequirementsActivity.EXTRA_TOURNAMENT_ID, tournament.id)
                     )
                 },
                 viewModel = viewModel
