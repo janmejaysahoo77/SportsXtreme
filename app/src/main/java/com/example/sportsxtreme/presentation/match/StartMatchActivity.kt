@@ -154,35 +154,37 @@ private fun StartMatchScreen(
                 MatchTypeCard("Tournament Match", "Part of a tournament or league competition.", MatchIcon.BAT, selectedType == 0) { selectedType = 0 }
                 MatchTypeCard("Series Match", "Create a multi-match series between teams.", MatchIcon.BAT, selectedType == 1) { selectedType = 1 }
                 MatchTypeCard("Friendly Match", "Casual, Practice & Quick Setup", MatchIcon.HANDSHAKE, selectedType == 2) { selectedType = 2 }
-                SectionTitle("SELECT TOURNAMENT", "SEE ALL")
-                TournamentCard(
-                    title = "Dubai Premier League",
-                    subtitle = "ACTIVE SEASON 2024",
-                    imageRes = R.drawable.ground,
-                    selected = selectedTournament == 0
-                ) { selectedTournament = 0 }
-                TournamentCard(
-                    title = "KPL Knockout",
-                    subtitle = "REGISTRATION OPEN",
-                    imageRes = null,
-                    selected = selectedTournament == 1
-                ) { selectedTournament = 1 }
-                SectionTitle("SELECT TOURNAMENT STAGE")
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    StageCard(
-                        title = "ROUND ROBIN\nLEAGUE",
-                        subtitle = "Every team plays every other team.",
-                        icon = MatchIcon.REFRESH,
-                        selected = selectedStage == 0,
-                        modifier = Modifier.weight(1f)
-                    ) { selectedStage = 0 }
-                    StageCard(
-                        title = "KNOCKOUT",
-                        subtitle = "Lose once and the team is eliminated.",
-                        icon = MatchIcon.TROPHY,
-                        selected = selectedStage == 1,
-                        modifier = Modifier.weight(1f)
-                    ) { selectedStage = 1 }
+                if (selectedType != 2) {
+                    SectionTitle("SELECT TOURNAMENT", "SEE ALL")
+                    TournamentCard(
+                        title = "Dubai Premier League",
+                        subtitle = "ACTIVE SEASON 2024",
+                        imageRes = R.drawable.ground,
+                        selected = selectedTournament == 0
+                    ) { selectedTournament = 0 }
+                    TournamentCard(
+                        title = "KPL Knockout",
+                        subtitle = "REGISTRATION OPEN",
+                        imageRes = null,
+                        selected = selectedTournament == 1
+                    ) { selectedTournament = 1 }
+                    SectionTitle("SELECT TOURNAMENT STAGE")
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StageCard(
+                            title = "ROUND ROBIN\nLEAGUE",
+                            subtitle = "Every team plays every other team.",
+                            icon = MatchIcon.REFRESH,
+                            selected = selectedStage == 0,
+                            modifier = Modifier.weight(1f)
+                        ) { selectedStage = 0 }
+                        StageCard(
+                            title = "KNOCKOUT",
+                            subtitle = "Lose once and the team is eliminated.",
+                            icon = MatchIcon.TROPHY,
+                            selected = selectedStage == 1,
+                            modifier = Modifier.weight(1f)
+                        ) { selectedStage = 1 }
+                    }
                 }
                 SetupPreview()
                 InfoNotice("Your selected format will unlock team setup, toss, and live scoring controls.")
@@ -222,7 +224,7 @@ private fun StartMatchTopBar(onBack: () -> Unit) {
             modifier = Modifier.padding(start = 15.dp).weight(1f),
             maxLines = 1
         )
-        HelpIcon(Modifier.size(20.dp))
+        Spacer(Modifier.size(20.dp))
     }
 }
 

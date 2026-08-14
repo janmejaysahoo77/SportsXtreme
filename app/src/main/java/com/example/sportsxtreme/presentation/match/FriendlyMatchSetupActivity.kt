@@ -334,7 +334,7 @@ private fun FriendlyTopBar(onBack: () -> Unit) {
             fontSize = 16.sp,
             fontWeight = FontWeight.Black
         )
-        FriendlyHelpIcon(Modifier.size(21.dp))
+        Spacer(Modifier.size(21.dp))
     }
 }
 

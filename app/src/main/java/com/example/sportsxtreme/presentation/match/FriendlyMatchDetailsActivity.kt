@@ -1,13 +1,22 @@
 package com.example.sportsxtreme.presentation.match
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.annotation.SuppressLint
+import android.location.Geocoder
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Bundle
+import android.os.Looper
 import android.widget.Toast
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.compose.foundation.Canvas
@@ -31,6 +40,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,6 +50,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,10 +86,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import kotlin.coroutines.resume
 
 @AndroidEntryPoint
 class FriendlyMatchDetailsActivity : ComponentActivity() {
@@ -139,14 +154,46 @@ private fun FriendlyMatchDetailsScreen(
     isLoading: Boolean
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var ground by remember { mutableIntStateOf(0) }
     var date by remember { mutableIntStateOf(0) }
     var timeMode by remember { mutableIntStateOf(1) }
     var venue by remember { mutableStateOf("KRT Stadium, Bhubaneswar") }
     var customVenue by remember { mutableStateOf("") }
     var showVenueDialog by remember { mutableStateOf(false) }
+    var showGroundPicker by remember { mutableStateOf(false) }
+    var showLocationConfirmation by remember { mutableStateOf(false) }
+    var groundSearch by remember { mutableStateOf("") }
     var matchDateEpochMs by remember { mutableLongStateOf(startOfToday()) }
     var matchTime by remember { mutableStateOf("06:30 PM") }
+    val applyCurrentLocation: (String?) -> Unit = { locationLabel ->
+        if (locationLabel == null) {
+            Toast.makeText(context, "Unable to find your current location. Please enable location services and try again.", Toast.LENGTH_LONG).show()
+        } else {
+            ground = 1
+            venue = locationLabel
+        }
+    }
+    val locationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) {
+            coroutineScope.launch { applyCurrentLocation(fetchCurrentLocationLabel(context)) }
+        } else {
+            Toast.makeText(context, "Location permission is needed to use your current location.", Toast.LENGTH_LONG).show()
+        }
+    }
+    val requestCurrentLocation: () -> Unit = {
+        val hasLocationPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (hasLocationPermission) {
+            coroutineScope.launch { applyCurrentLocation(fetchCurrentLocationLabel(context)) }
+        } else {
+            locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
+    }
     val openTimePicker = {
         val calendar = Calendar.getInstance()
         TimePickerDialog(context, { _, hour, minute ->
@@ -167,23 +214,25 @@ private fun FriendlyMatchDetailsScreen(
         Column(Modifier.fillMaxSize()) {
             DetailsTopBar(onBack)
             Column(
-                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
+                Column {
+                    Text("Set up your match", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                    Text("Choose the venue, date and start time.", color = DetailsMuted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                }
                 DetailsHeading("Ground Selection", DetailsIcon.LOCATION)
                 DetailsOptionCard("Select Existing Ground", "KRT Stadium, Bhubaneswar", ground == 0) {
-                    ground = 0
-                    venue = "KRT Stadium, Bhubaneswar"
+                    showGroundPicker = true
                 }
                 DetailsOptionCard("Use Current Location", null, ground == 1) {
-                    ground = 1
-                    venue = "Current Location"
+                    showLocationConfirmation = true
                 }
                 DetailsOptionCard("Add New Ground", null, ground == 2) {
                     showVenueDialog = true
                 }
                 DetailsHeading("Match Date", DetailsIcon.CALENDAR)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                     DetailsDateCard("Today", formatShortDate(startOfToday()), date == 0, Modifier.weight(1f)) {
                         date = 0
                         matchDateEpochMs = startOfToday()
@@ -201,7 +250,7 @@ private fun FriendlyMatchDetailsScreen(
                     }
                 }
                 DetailsHeading("Match Time", DetailsIcon.CLOCK)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     DetailsTimeChip("Now", timeMode == 0) {
                         timeMode = 0
                         matchTime = formatMatchTime(Calendar.getInstance())
@@ -214,16 +263,16 @@ private fun FriendlyMatchDetailsScreen(
                 }
                 DetailsTimeCard(matchTime, openTimePicker)
                 DetailsSnapshot(venue, matchDateEpochMs, matchTime)
-                Spacer(Modifier.height(70.dp))
+                Spacer(Modifier.height(82.dp))
             }
         }
         Box(
             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .background(Brush.verticalGradient(listOf(Color.Transparent, DetailsBg, DetailsBg)))
-                .padding(horizontal = 10.dp, vertical = 14.dp)
+                .padding(horizontal = 16.dp, vertical = 16.dp)
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(26.dp))
+                modifier = Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp))
                     .background(Brush.horizontalGradient(listOf(Color(0xFFD8FF37), DetailsAccent, Color(0xFF9AFF00))))
                     .clickable(
                         enabled = !isLoading && venue.isNotBlank() && matchDateEpochMs > 0L && matchTime.isNotBlank(),
@@ -231,8 +280,8 @@ private fun FriendlyMatchDetailsScreen(
                     ),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(if (isLoading) "SAVING DETAILS..." else "CONTINUE", color = Color(0xFF122004), fontSize = 13.sp, fontWeight = FontWeight.Black)
-                DetailsArrow(Modifier.padding(start = 9.dp).size(17.dp), true, Color(0xFF122004))
+                Text(if (isLoading) "SAVING DETAILS..." else "CONTINUE", color = Color(0xFF122004), fontSize = 15.sp, fontWeight = FontWeight.Black)
+                DetailsArrow(Modifier.padding(start = 10.dp).size(20.dp), true, Color(0xFF122004))
             }
         }
         if (showVenueDialog) {
@@ -264,85 +313,226 @@ private fun FriendlyMatchDetailsScreen(
                 }
             )
         }
+        if (showGroundPicker) {
+            GroundPickerDialog(
+                searchQuery = groundSearch,
+                onSearchQueryChange = { groundSearch = it },
+                onGroundSelected = { selectedGround ->
+                    ground = 0
+                    venue = selectedGround
+                    showGroundPicker = false
+                    groundSearch = ""
+                },
+                onDismiss = {
+                    showGroundPicker = false
+                    groundSearch = ""
+                }
+            )
+        }
+        if (showLocationConfirmation) {
+            LocationConfirmationDialog(
+                onConfirm = {
+                    showLocationConfirmation = false
+                    requestCurrentLocation()
+                },
+                onDismiss = { showLocationConfirmation = false }
+            )
+        }
+    }
+}
+
+@Composable
+private fun GroundPickerDialog(
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onGroundSelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val grounds = listOf("KRT Stadium, Bhubaneswar")
+    val matchingGrounds = grounds.filter { it.contains(searchQuery.trim(), ignoreCase = true) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DetailsCard,
+        titleContentColor = Color.White,
+        textContentColor = DetailsMuted,
+        title = { Text("Select ground", fontSize = 20.sp, fontWeight = FontWeight.Black) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Choose a saved ground for this match.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Search grounds") },
+                    placeholder = { Text("Type to search") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = DetailsAccent,
+                        unfocusedBorderColor = DetailsBorder,
+                        focusedLabelColor = DetailsAccent,
+                        unfocusedLabelColor = DetailsMuted,
+                        cursorColor = DetailsAccent
+                    )
+                )
+                matchingGrounds.forEach { ground ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF142019))
+                            .border(1.dp, Color(0xFF6F9427), RoundedCornerShape(12.dp)).clickable { onGroundSelected(ground) }
+                            .padding(horizontal = 14.dp, vertical = 15.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        DetailsIconCanvas(DetailsIcon.LOCATION, Modifier.size(21.dp), DetailsAccent)
+                        Text(ground, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 11.dp).weight(1f))
+                        DetailsIconCanvas(DetailsIcon.CHECK, Modifier.size(19.dp), DetailsAccent)
+                    }
+                }
+                if (matchingGrounds.isEmpty()) {
+                    Text("No grounds match your search.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("CLOSE", color = DetailsAccent) } }
+    )
+}
+
+@Composable
+private fun LocationConfirmationDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DetailsCard,
+        titleContentColor = Color.White,
+        textContentColor = DetailsMuted,
+        title = { Text("Use current location?", fontSize = 20.sp, fontWeight = FontWeight.Black) },
+        text = { Text("We'll ask for location access to use your current ground location.", fontSize = 14.sp, fontWeight = FontWeight.SemiBold) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("FETCH LOCATION", color = DetailsAccent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("NOT NOW", color = DetailsMuted) } }
+    )
+}
+
+@SuppressLint("MissingPermission")
+private suspend fun fetchCurrentLocationLabel(context: android.content.Context): String? {
+    val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
+    val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+    val lastKnownLocation = providers.mapNotNull { provider ->
+        runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()
+    }.maxByOrNull { location -> location.time }
+    val location = lastKnownLocation ?: requestFreshLocation(locationManager) ?: return null
+    return withContext(Dispatchers.IO) {
+        val address = runCatching {
+            @Suppress("DEPRECATION")
+            Geocoder(context, Locale.getDefault()).getFromLocation(location.latitude, location.longitude, 1)?.firstOrNull()
+        }.getOrNull()
+        listOfNotNull(address?.featureName, address?.locality, address?.adminArea)
+            .distinct()
+            .joinToString(", ")
+            .ifBlank { "%.4f, %.4f".format(Locale.US, location.latitude, location.longitude) }
+    }
+}
+
+@SuppressLint("MissingPermission")
+private suspend fun requestFreshLocation(locationManager: LocationManager): Location? {
+    val enabledProviders = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        .filter { provider -> runCatching { locationManager.isProviderEnabled(provider) }.getOrDefault(false) }
+    if (enabledProviders.isEmpty()) return null
+    return withTimeoutOrNull(12_000L) {
+        suspendCancellableCoroutine<Location?> { continuation ->
+            val listener = object : LocationListener {
+                override fun onLocationChanged(location: Location) {
+                    if (continuation.isActive) continuation.resume(location)
+                    locationManager.removeUpdates(this)
+                }
+            }
+            continuation.invokeOnCancellation { locationManager.removeUpdates(listener) }
+            var requestStarted = false
+            enabledProviders.forEach { provider ->
+                runCatching {
+                    locationManager.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
+                    requestStarted = true
+                }
+            }
+            if (!requestStarted && continuation.isActive) continuation.resume(null)
+        }
     }
 }
 
 @Composable
 private fun DetailsTopBar(onBack: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().height(48.dp).background(Color(0xEA06101A)).padding(horizontal = 10.dp),
+        modifier = Modifier.fillMaxWidth().height(64.dp).background(Color(0xEA06101A)).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        DetailsArrow(Modifier.size(18.dp).clickable(onClick = onBack), false, DetailsAccent)
+        DetailsArrow(Modifier.size(24.dp).clickable(onClick = onBack), false, DetailsAccent)
         Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Match Details", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
-            Text("CONFIGURE MATCH LOGISTICS", color = DetailsMuted, fontSize = 6.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp)
+            Text("Match Details", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            Text("CONFIGURE MATCH LOGISTICS", color = DetailsMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
         }
-        DetailsIconCanvas(DetailsIcon.INFO, Modifier.size(17.dp), DetailsMuted)
+        DetailsIconCanvas(DetailsIcon.INFO, Modifier.size(22.dp), DetailsMuted)
     }
 }
 
 @Composable
 private fun DetailsHeading(title: String, icon: DetailsIcon) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        DetailsIconCanvas(icon, Modifier.size(16.dp), DetailsAccent)
-        Text(title, color = Color(0xFFE1E8E4), fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 5.dp))
+        DetailsIconCanvas(icon, Modifier.size(20.dp), DetailsAccent)
+        Text(title, color = Color(0xFFE1E8E4), fontSize = 16.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 8.dp))
     }
 }
 
 @Composable
 private fun DetailsOptionCard(title: String, subtitle: String?, selected: Boolean, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().height(53.dp).clip(RoundedCornerShape(10.dp))
+        modifier = Modifier.fillMaxWidth().height(68.dp).clip(RoundedCornerShape(14.dp))
             .background(if (selected) Color(0xFF142019) else DetailsCard)
-            .border(if (selected) 1.5.dp else 1.dp, if (selected) Color(0xFF6F9427) else DetailsBorder, RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick).padding(horizontal = 11.dp),
+            .border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF6F9427) else DetailsBorder, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(if (selected) Color(0xFF668900) else Color(0xFF1B2736)), contentAlignment = Alignment.Center) {
-            DetailsIconCanvas(DetailsIcon.LOCATION, Modifier.size(16.dp), if (selected) DetailsAccent else DetailsMuted)
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(if (selected) Color(0xFF668900) else Color(0xFF1B2736)), contentAlignment = Alignment.Center) {
+            DetailsIconCanvas(DetailsIcon.LOCATION, Modifier.size(21.dp), if (selected) DetailsAccent else DetailsMuted)
         }
-        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
-            Text(title, color = if (selected) Color.White else Color(0xFF8C989A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            subtitle?.let { Text(it, color = DetailsAccent, fontSize = 7.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 2.dp)) }
+        Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+            Text(title, color = if (selected) Color.White else Color(0xFFB1BCB8), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            subtitle?.let { Text(it, color = DetailsAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp)) }
         }
-        if (selected) DetailsIconCanvas(DetailsIcon.CHECK, Modifier.size(16.dp), DetailsAccent)
+        if (selected) DetailsIconCanvas(DetailsIcon.CHECK, Modifier.size(20.dp), DetailsAccent)
     }
 }
 
 @Composable
 private fun DetailsDateCard(title: String, subtitle: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Column(
-        modifier = modifier.height(53.dp).clip(RoundedCornerShape(10.dp)).background(if (selected) Color(0xFF152019) else DetailsCard)
-            .border(if (selected) 1.5.dp else 1.dp, if (selected) Color(0xFF71962B) else DetailsBorder, RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick).padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally
+        modifier = modifier.height(76.dp).clip(RoundedCornerShape(14.dp)).background(if (selected) Color(0xFF152019) else DetailsCard)
+            .border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF71962B) else DetailsBorder, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick).padding(vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        DetailsIconCanvas(DetailsIcon.CALENDAR, Modifier.size(13.dp), if (selected) DetailsAccent else DetailsMuted)
-        Text(title, color = if (selected) DetailsAccent else Color(0xFF9FA9A8), fontSize = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 3.dp))
-        Text(subtitle, color = DetailsMuted, fontSize = 6.sp, fontWeight = FontWeight.Bold)
+        DetailsIconCanvas(DetailsIcon.CALENDAR, Modifier.size(18.dp), if (selected) DetailsAccent else DetailsMuted)
+        Text(title, color = if (selected) DetailsAccent else Color(0xFFB5BFBB), fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 5.dp))
+        Text(subtitle, color = DetailsMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
 private fun DetailsTimeChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
-        modifier = Modifier.height(23.dp).clip(RoundedCornerShape(14.dp)).background(if (selected) Color(0xFF1A2814) else DetailsCard)
-            .border(1.dp, if (selected) Color(0xFF6E9428) else DetailsBorder, RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(horizontal = 11.dp),
+        modifier = Modifier.height(34.dp).clip(RoundedCornerShape(18.dp)).background(if (selected) Color(0xFF1A2814) else DetailsCard)
+            .border(if (selected) 1.5.dp else 1.dp, if (selected) Color(0xFF6E9428) else DetailsBorder, RoundedCornerShape(18.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center
-    ) { Text(label, color = if (selected) DetailsAccent else DetailsMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold) }
+    ) { Text(label, color = if (selected) DetailsAccent else DetailsMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 }
 
 @Composable
 private fun DetailsTimeCard(matchTime: String, onEditTime: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().height(55.dp).clip(RoundedCornerShape(10.dp)).background(DetailsCard)
-            .border(1.dp, DetailsBorder, RoundedCornerShape(10.dp)).padding(horizontal = 13.dp), verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier.fillMaxWidth().height(76.dp).clip(RoundedCornerShape(14.dp)).background(DetailsCard)
+            .border(1.dp, DetailsBorder, RoundedCornerShape(14.dp)).padding(horizontal = 17.dp), verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(matchTime.substringBefore(" "), color = Color.White, fontSize = 24.sp)
-        Text(matchTime.substringAfter(" ", ""), color = DetailsAccent, fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 5.dp, top = 6.dp))
+        Text(matchTime.substringBefore(" "), color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
+        Text(matchTime.substringAfter(" ", ""), color = DetailsAccent, fontSize = 15.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 6.dp, top = 10.dp))
         Spacer(Modifier.weight(1f))
-        Box(Modifier.size(25.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF1A2838)).clickable(onClick = onEditTime), contentAlignment = Alignment.Center) {
-            DetailsIconCanvas(DetailsIcon.EDIT, Modifier.size(13.dp), DetailsMuted)
+        Box(Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)).background(Color(0xFF1A2838)).clickable(onClick = onEditTime), contentAlignment = Alignment.Center) {
+            DetailsIconCanvas(DetailsIcon.EDIT, Modifier.size(18.dp), DetailsMuted)
         }
     }
 }
@@ -350,15 +540,28 @@ private fun DetailsTimeCard(matchTime: String, onEditTime: () -> Unit) {
 @Composable
 private fun DetailsSnapshot(venue: String, matchDateEpochMs: Long, matchTime: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(Color(0xDD091522)).border(1.dp, DetailsBorder, RoundedCornerShape(9.dp))
-            .drawBehind { drawLine(DetailsAccent, Offset(0f, 8.dp.toPx()), Offset(0f, size.height - 8.dp.toPx()), 3.dp.toPx()) }.padding(horizontal = 14.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xDD091522)).border(1.dp, DetailsBorder, RoundedCornerShape(14.dp))
+            .drawBehind { drawLine(DetailsAccent, Offset(0f, 12.dp.toPx()), Offset(0f, size.height - 12.dp.toPx()), 4.dp.toPx()) }.padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text("MATCH SNAPSHOT", color = DetailsMuted, fontSize = 6.sp, fontWeight = FontWeight.Black, letterSpacing = 0.8.sp)
-            Text("Friendly • Today • KRT Stadium", color = Color(0xFFCFD8D4), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+            Text("MATCH SNAPSHOT", color = DetailsMuted, fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 0.9.sp)
+            Text(
+                "Friendly match • ${formatShortDate(matchDateEpochMs)}",
+                color = Color(0xFFCFD8D4),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+            Text(
+                venue,
+                color = DetailsAccent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 3.dp)
+            )
         }
-        Text(matchTime, color = DetailsAccent, fontSize = 13.sp, fontWeight = FontWeight.Black)
+        Text(matchTime, color = DetailsAccent, fontSize = 16.sp, fontWeight = FontWeight.Black)
     }
 }
 
