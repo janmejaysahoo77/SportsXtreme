@@ -13,6 +13,8 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.widget.Toast
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -50,6 +52,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -66,6 +72,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -81,6 +88,12 @@ import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.delay
+import com.example.sportsxtreme.domain.model.TeamSide
+import com.example.sportsxtreme.domain.model.CreatedMatchInvite
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import android.graphics.Bitmap
 
 @AndroidEntryPoint
 class SelectPlayingTeamsActivity : ComponentActivity() {
@@ -96,15 +109,6 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         val teamB = intent.toSelectedTeam(EXTRA_TEAM_B_ID, EXTRA_TEAM_B_NAME)
         val viewModel: TeamSelectionViewModel by viewModels {
             TeamSelectionViewModel.factory(matchId, matchUseCases, teamA, teamB)
-        }
-
-        val addTeamLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == android.app.Activity.RESULT_OK) {
-                val data = result.data ?: return@registerForActivityResult
-
-                data.toSelectedTeam(EXTRA_TEAM_A_ID, EXTRA_TEAM_A_NAME)?.let { viewModel.setSelectedTeamA(it) }
-                data.toSelectedTeam(EXTRA_TEAM_B_ID, EXTRA_TEAM_B_NAME)?.let { viewModel.setSelectedTeamB(it) }
-            }
         }
 
         setContent {
@@ -131,26 +135,19 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                         }
                     )
                 },
-                onSelectTeamA = {
-                    addTeamLauncher.launch(
-                        Intent(this, SelectTeamAorBActivity::class.java)
-                            .putExtra(SelectTeamAorBActivity.EXTRA_TEAM_SLOT, "A")
-                            .putExtra(EXTRA_MATCH_ID, matchId)
-                            .putExtra(EXTRA_SELECTED_TEAM_ID, uiState.selectedTeamA?.id)
-                            .putExtras(intent.copyTeamSelectionExtras())
-                    )
-                },
-                onSelectTeamB = {
-                    addTeamLauncher.launch(
-                        Intent(this, SelectTeamAorBActivity::class.java)
-                            .putExtra(SelectTeamAorBActivity.EXTRA_TEAM_SLOT, "B")
-                            .putExtra(EXTRA_MATCH_ID, matchId)
-                            .putExtra(EXTRA_SELECTED_TEAM_ID, uiState.selectedTeamB?.id)
-                            .putExtras(intent.copyTeamSelectionExtras())
-                    )
-                }
+                onSelectTeamA = { openInviteScreen("A", matchId) },
+                onSelectTeamB = { openInviteScreen("B", matchId) }
             )
         }
+    }
+
+    private fun openInviteScreen(teamSlot: String, matchId: String) {
+        startActivity(
+            Intent(this, SelectTeamAorBActivity::class.java)
+                .putExtra(SelectTeamAorBActivity.EXTRA_TEAM_SLOT, teamSlot)
+                .putExtra(EXTRA_MATCH_ID, matchId)
+                .putExtras(intent.copyTeamSelectionExtras())
+        )
     }
 
     companion object {
@@ -196,10 +193,16 @@ private fun SelectPlayingTeamsScreen(
     onSelectTeamA: () -> Unit,
     onSelectTeamB: () -> Unit
 ) {
-    val bothTeamsSelected = teamA != null && teamB != null
+    val claimedTeamA = match?.teamAClaim?.let { SelectedTeam(match.teamA.teamId, it.displayName) }
+    val claimedTeamB = match?.teamBClaim?.let { SelectedTeam(match.teamB.teamId, it.displayName) }
+    val displayedTeamA = claimedTeamA ?: teamA
+    val displayedTeamB = claimedTeamB ?: teamB
+    val onTeamAClick: () -> Unit = if (claimedTeamA == null) onSelectTeamA else ({})
+    val onTeamBClick: () -> Unit = if (claimedTeamB == null) onSelectTeamB else ({})
+    val bothTeamsSelected = displayedTeamA != null && displayedTeamB != null
     var showStartMatchFade by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(teamA?.id, teamB?.id) {
+    LaunchedEffect(displayedTeamA?.id, displayedTeamB?.id) {
         showStartMatchFade = false
         if (bothTeamsSelected) {
             delay(250)
@@ -242,23 +245,27 @@ private fun SelectPlayingTeamsScreen(
                 },
                 label = "team-selection-layout"
             ) { showMatchup ->
-                if (showMatchup) {
-                    SelectedTeamsMatchup(teamA = requireNotNull(teamA), teamB = requireNotNull(teamB))
+                if (showMatchup && displayedTeamA != null && displayedTeamB != null) {
+                    SelectedTeamsMatchup(teamA = displayedTeamA, teamB = displayedTeamB)
                 } else {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        TeamSlot(team = teamA, emptyLabel = "SELECT TEAM A", onClick = onSelectTeamA)
+                        TeamSlot(team = displayedTeamA, emptyLabel = "TEAM A", onClick = onTeamAClick)
                         VersusBadge(Modifier.padding(vertical = 24.dp))
-                        TeamSlot(team = teamB, emptyLabel = "SELECT TEAM B", onClick = onSelectTeamB)
+                        TeamSlot(team = displayedTeamB, emptyLabel = "TEAM B", onClick = onTeamBClick)
                     }
                 }
             }
             StartMatchFadeAnimationWillOpen(
                 visible = showStartMatchFade,
                 onStartMatch = {
-                    onOpenStartMatchPreview(requireNotNull(teamA), requireNotNull(teamB))
+                    val selectedA = displayedTeamA
+                    val selectedB = displayedTeamB
+                    if (selectedA != null && selectedB != null) {
+                        onOpenStartMatchPreview(selectedA, selectedB)
+                    }
                 }
             )
-            MatchPreviewCard(teamA = teamA, teamB = teamB, modifier = Modifier.padding(top = 39.dp))
+            MatchPreviewCard(teamA = displayedTeamA, teamB = displayedTeamB, modifier = Modifier.padding(top = 39.dp))
             Spacer(Modifier.height(42.dp))
         }
     }

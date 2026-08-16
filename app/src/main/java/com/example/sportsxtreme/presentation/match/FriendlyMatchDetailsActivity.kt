@@ -10,6 +10,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.os.Looper
+import android.provider.Settings
 import android.widget.Toast
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
@@ -163,6 +164,7 @@ private fun FriendlyMatchDetailsScreen(
     var showVenueDialog by remember { mutableStateOf(false) }
     var showGroundPicker by remember { mutableStateOf(false) }
     var showLocationConfirmation by remember { mutableStateOf(false) }
+    var showLocationSettingsDialog by remember { mutableStateOf(false) }
     var groundSearch by remember { mutableStateOf("") }
     var matchDateEpochMs by remember { mutableLongStateOf(startOfToday()) }
     var matchTime by remember { mutableStateOf("06:30 PM") }
@@ -174,13 +176,29 @@ private fun FriendlyMatchDetailsScreen(
             venue = locationLabel
         }
     }
+    val fetchAndApplyCurrentLocation: () -> Unit = {
+        coroutineScope.launch { applyCurrentLocation(fetchCurrentLocationLabel(context)) }
+    }
+    val locationSettingsLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (isDeviceLocationEnabled(context)) {
+            fetchAndApplyCurrentLocation()
+        } else {
+            Toast.makeText(context, "Turn on Location to use your current location.", Toast.LENGTH_LONG).show()
+        }
+    }
     val locationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (granted) {
-            coroutineScope.launch { applyCurrentLocation(fetchCurrentLocationLabel(context)) }
+            if (isDeviceLocationEnabled(context)) {
+                fetchAndApplyCurrentLocation()
+            } else {
+                showLocationSettingsDialog = true
+            }
         } else {
             Toast.makeText(context, "Location permission is needed to use your current location.", Toast.LENGTH_LONG).show()
         }
@@ -189,7 +207,11 @@ private fun FriendlyMatchDetailsScreen(
         val hasLocationPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (hasLocationPermission) {
-            coroutineScope.launch { applyCurrentLocation(fetchCurrentLocationLabel(context)) }
+            if (isDeviceLocationEnabled(context)) {
+                fetchAndApplyCurrentLocation()
+            } else {
+                showLocationSettingsDialog = true
+            }
         } else {
             locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
@@ -225,7 +247,11 @@ private fun FriendlyMatchDetailsScreen(
                 DetailsOptionCard("Select Existing Ground", "KRT Stadium, Bhubaneswar", ground == 0) {
                     showGroundPicker = true
                 }
-                DetailsOptionCard("Use Current Location", null, ground == 1) {
+                DetailsOptionCard(
+                    "Use Current Location",
+                    if (ground == 1) venue else null,
+                    ground == 1
+                ) {
                     showLocationConfirmation = true
                 }
                 DetailsOptionCard("Add New Ground", null, ground == 2) {
@@ -338,6 +364,15 @@ private fun FriendlyMatchDetailsScreen(
                 onDismiss = { showLocationConfirmation = false }
             )
         }
+        if (showLocationSettingsDialog) {
+            LocationSettingsDialog(
+                onConfirm = {
+                    showLocationSettingsDialog = false
+                    locationSettingsLauncher.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                },
+                onDismiss = { showLocationSettingsDialog = false }
+            )
+        }
     }
 }
 
@@ -409,6 +444,26 @@ private fun LocationConfirmationDialog(onConfirm: () -> Unit, onDismiss: () -> U
         confirmButton = { TextButton(onClick = onConfirm) { Text("FETCH LOCATION", color = DetailsAccent) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("NOT NOW", color = DetailsMuted) } }
     )
+}
+
+@Composable
+private fun LocationSettingsDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DetailsCard,
+        titleContentColor = Color.White,
+        textContentColor = DetailsMuted,
+        title = { Text("Turn on location", fontSize = 20.sp, fontWeight = FontWeight.Black) },
+        text = { Text("Location services are off. Turn them on in Settings to fetch your current location.", fontSize = 14.sp, fontWeight = FontWeight.SemiBold) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("OPEN SETTINGS", color = DetailsAccent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL", color = DetailsMuted) } }
+    )
+}
+
+private fun isDeviceLocationEnabled(context: android.content.Context): Boolean {
+    val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
+    return listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        .any { provider -> runCatching { locationManager.isProviderEnabled(provider) }.getOrDefault(false) }
 }
 
 @SuppressLint("MissingPermission")

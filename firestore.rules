@@ -12,23 +12,84 @@ rules_version = '2';
 // DEPLOY: firebase deploy --only firestore:rules
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSignedIn() { return request.auth != null; }
+    function unchangedClaims() {
+      return request.resource.data.get('teamAClaim', null) == resource.data.get('teamAClaim', null)
+        && request.resource.data.get('teamBClaim', null) == resource.data.get('teamBClaim', null);
+    }
+    function validClaim(claim) {
+      return claim.keys().hasOnly(['userId', 'displayName', 'replacedDummyPlayerId', 'claimedAt'])
+        && claim.userId == request.auth.uid
+        && claim.displayName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
+        && claim.replacedDummyPlayerId is string
+        && claim.claimedAt == request.time;
+    }
 
-    // ---------- Matches: public read, authenticated write ----------
+    // ---------- Matches: authenticated read, owner write ----------
     // The Home screen listens to the whole collection with a SnapshotListener.
     // That requires collection-level read access for every authenticated user,
     // otherwise the friend's phone gets a permission-denied error and the
     // live scorecard never appears.
     match /matches/{matchId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update: if request.auth != null;
-      allow delete: if request.auth != null;
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && unchangedClaims()
+        || isSignedIn() && resource.data.get('teamAClaim', null) == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamAClaim', 'updatedAtEpochMs'])
+        && validClaim(request.resource.data.teamAClaim)
+        && resource.data.get('teamBClaim', {}).get('userId', '') != request.auth.uid
+        && getAfter(/databases/$(database)/documents/matchInvites/$(matchId + '-team_a')).data.status == 'CLAIMED'
+        && getAfter(/databases/$(database)/documents/matchInvites/$(matchId + '-team_a')).data.claimedByUserId == request.auth.uid
+        || isSignedIn() && resource.data.get('teamBClaim', null) == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamBClaim', 'updatedAtEpochMs'])
+        && validClaim(request.resource.data.teamBClaim)
+        && resource.data.get('teamAClaim', {}).get('userId', '') != request.auth.uid
+        && getAfter(/databases/$(database)/documents/matchInvites/$(matchId + '-team_b')).data.status == 'CLAIMED'
+        && getAfter(/databases/$(database)/documents/matchInvites/$(matchId + '-team_b')).data.claimedByUserId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
     }
 
     // Subcollections under a match (deliveries, scorecard, entries, …)
     match /matches/{matchId}/{document=**} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow write: if request.auth != null && get(/databases/$(database)/documents/matches/$(matchId)).data.ownerId == request.auth.uid;
+    }
+
+    // ---------- Match invites: organiser-owned, creation-only in Phase 3A ----------
+    match /matchInvites/{inviteId} {
+      // Temporary Spark-plan lookup permission. Replace with callable Function lookup in production.
+      allow get, list: if isSignedIn();
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly([
+          'inviteId', 'matchId', 'teamSlot', 'organiserId', 'tokenHash', 'status',
+          'createdAt', 'expiresAt', 'claimedByUserId', 'claimedAt'
+        ])
+        && request.resource.data.inviteId == inviteId
+        && request.resource.data.organiserId == request.auth.uid
+        && request.resource.data.teamSlot in ['TEAM_A', 'TEAM_B']
+        && request.resource.data.status == 'OPEN'
+        && request.resource.data.tokenHash is string
+        && request.resource.data.tokenHash.size() == 64
+        && request.resource.data.claimedByUserId == null
+        && request.resource.data.claimedAt == null
+        && request.resource.data.createdAt <= request.time
+        && request.resource.data.expiresAt > request.time
+        && get(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.ownerId == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.status == 'OPEN'
+        && resource.data.expiresAt > request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claimedByUserId', 'claimedAt'])
+        && request.resource.data.status == 'CLAIMED'
+        && request.resource.data.claimedByUserId == request.auth.uid
+        && request.resource.data.claimedAt == request.time
+        && ((resource.data.teamSlot == 'TEAM_A'
+          && getAfter(/databases/$(database)/documents/matches/$(resource.data.matchId)).data.teamAClaim.userId == request.auth.uid)
+          || (resource.data.teamSlot == 'TEAM_B'
+          && getAfter(/databases/$(database)/documents/matches/$(resource.data.matchId)).data.teamBClaim.userId == request.auth.uid));
+      allow delete: if false;
     }
 
     // ---------- Tournaments: public read, authenticated write ----------

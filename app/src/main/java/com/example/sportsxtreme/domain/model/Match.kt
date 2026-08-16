@@ -20,8 +20,12 @@ data class Match(
     val overs: Int? = null,
     val venue: String? = null,
     val matchDateEpochMs: Long? = null,
-    val matchTime: String? = null
+    val matchTime: String? = null,
+    val teamAClaim: MatchSlotClaim? = null,
+    val teamBClaim: MatchSlotClaim? = null
 )
+
+data class MatchSlotClaim(val userId: String, val displayName: String, val replacedDummyPlayerId: String)
 
 data class MatchTeam(
     val teamId: String,
