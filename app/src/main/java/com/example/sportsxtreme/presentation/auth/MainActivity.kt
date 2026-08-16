@@ -13,6 +13,7 @@ import com.example.sportsxtreme.presentation.home.*
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
+import android.graphics.Color
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
@@ -101,9 +102,9 @@ class MainActivity : ComponentActivity() {
             isCustomSplashReady = true
             currentScreen = Screen.Login
         }
-        WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when (currentScreen) {

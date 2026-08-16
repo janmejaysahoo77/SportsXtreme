@@ -516,27 +516,46 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun createShell(context: Context): View {
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
+        return FrameLayout(context).apply {
             clipChildren = false
             clipToPadding = false
-            // Top padding removed to allow top bar to touch the top edge cleanly
 
-            contentHolder = FrameLayout(context)
-            addView(contentHolder, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+            contentHolder = FrameLayout(context).apply {
+                // Content flows behind the floating dock for a truly integrated look.
+                // We remove all padding to eliminate the "horizontal cutout" completely.
+                setPadding(0, 0, 0, 0)
+                clipToPadding = false
+            }
+            addView(contentHolder, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
+            // Professional Minimalist Floating Dock
+            // WRAP_CONTENT creates a "floating pill" instead of a "container bar"
             navRow = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
                 clipChildren = false
                 clipToPadding = false
-                setPadding(dp(8), dp(8), dp(8), dp(6))
+                
+                // Sleek Capsule Design: Perfectly circular ends
                 background = GradientDrawable().apply {
-                    setColor(Color.rgb(5, 9, 15))
-                    setStroke(dp(1), Color.argb(60, 255, 255, 255))
+                    setColor(Color.argb(240, 10, 16, 28)) // Deep navy translucency
+                    cornerRadius = dp(37).toFloat() // Perfectly semicircular for 74dp height
+                    setStroke(dp(1), Color.argb(40, 255, 255, 255))
                 }
+                
+                // Enhanced shadow for the taller dock
+                elevation = dp(10).toFloat()
+                
+                // Adjusted internal padding for the larger dock
+                setPadding(dp(20), dp(10), dp(20), dp(10))
             }
-            addView(navRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(72)))
+            
+            // Centered floating position with optimized height
+            val navParams = LayoutParams(LayoutParams.WRAP_CONTENT, dp(74)).apply {
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                bottomMargin = dp(28) // Slightly more clearance for the taller dock
+            }
+            addView(navRow, navParams)
 
             buildNav()
             showTab(0)
@@ -546,119 +565,47 @@ class HomeScreenView @JvmOverloads constructor(
     private fun buildNav() {
         navRow.removeAllViews()
         navItems.forEachIndexed { index, item ->
-            navRow.addView(navCell(item, index), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+            // Use consistent width for a balanced Telegram-style dock
+            navRow.addView(navCell(item, index), LinearLayout.LayoutParams(dp(62), LayoutParams.MATCH_PARENT))
         }
     }
 
     private fun navCell(item: NavItem, index: Int): View {
         val active = index == selectedIndex
-        if (index == 2) return hostFabCell(item, index)
-
+        
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             isClickable = true
             isFocusable = true
-            background = GradientDrawable().apply {
-                cornerRadius = dp(9).toFloat()
-                setColor(if (active) primary else Color.TRANSPARENT)
-            }
+            
+            val iconTint = if (active) primary else Color.rgb(160, 172, 185)
+            val textColor = if (active) primary else Color.rgb(130, 142, 155)
+
             addView(NavIconView(context, item.icon).apply {
-                setTint(if (active) Color.rgb(8, 16, 7) else Color.rgb(118, 127, 136))
-            }, LinearLayout.LayoutParams(dp(22), dp(22)))
+                setTint(iconTint)
+            }, LinearLayout.LayoutParams(dp(28), dp(28)))
+            
             addView(TextView(context).apply {
                 text = item.label
                 gravity = Gravity.CENTER
-                setTextColor(if (active) Color.rgb(8, 16, 7) else muted)
-                textSize = if (item.label.length > 9) 7.2f else 8.5f
-                includeFontPadding = false
+                setTextColor(textColor)
+                textSize = 9.2f
                 typeface = Typeface.create(Typeface.SANS_SERIF, if (active) Typeface.BOLD else Typeface.NORMAL)
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(5)
+                alpha = if (active) 1.0f else 0.75f
+            }, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(4)
             })
-            setOnClickListener { showTab(index) }
-        }
-    }
-
-    private fun hostFabCell(item: NavItem, index: Int): View {
-        return FrameLayout(context).apply {
-            clipChildren = false
-            clipToPadding = false
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { showTab(index) }
-
-            val glowView = View(context).apply {
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.argb(48, 193, 255, 0))
+            
+            setOnClickListener { 
+                if (selectedIndex != index) {
+                    showTab(index)
+                    // Premium scale animation
+                    this.scaleX = 0.9f
+                    this.scaleY = 0.9f
+                    this.animate().scaleX(1.0f).scaleY(1.0f).setDuration(200).start()
                 }
             }
-            addView(glowView, FrameLayout.LayoutParams(dp(74), dp(74), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-                topMargin = -dp(32)
-            })
-
-            val fabButton = FrameLayout(context).apply {
-                elevation = dp(10).toFloat()
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(primary)
-                    setStroke(dp(2), Color.rgb(230, 255, 110))
-                }
-                addView(NavIconView(context, item.icon).apply {
-                    setTint(Color.rgb(8, 16, 7))
-                }, FrameLayout.LayoutParams(dp(29), dp(29), Gravity.CENTER))
-                setOnClickListener { showTab(index) }
-            }
-
-            val pressFeedback = View.OnTouchListener { _, event ->
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        fabButton.animate().cancel()
-                        glowView.animate().cancel()
-                        fabButton.animate().scaleX(0.92f).scaleY(0.92f).setDuration(80L).start()
-                        glowView.animate().scaleX(1.08f).scaleY(1.08f).alpha(0.82f).setDuration(80L).start()
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        fabButton.animate().cancel()
-                        glowView.animate().cancel()
-                        fabButton.animate()
-                            .scaleX(1.05f)
-                            .scaleY(1.05f)
-                            .setDuration(70L)
-                            .withEndAction {
-                                fabButton.animate().scaleX(1f).scaleY(1f).setDuration(110L).start()
-                            }
-                            .start()
-                        glowView.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140L).start()
-                    }
-                    MotionEvent.ACTION_CANCEL -> {
-                        fabButton.animate().cancel()
-                        glowView.animate().cancel()
-                        fabButton.animate().scaleX(1f).scaleY(1f).setDuration(110L).start()
-                        glowView.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(110L).start()
-                    }
-                }
-                false
-            }
-
-            setOnTouchListener(pressFeedback)
-            fabButton.setOnTouchListener(pressFeedback)
-
-            addView(fabButton, FrameLayout.LayoutParams(dp(58), dp(58), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-                topMargin = -dp(24)
-            })
-
-            addView(TextView(context).apply {
-                text = item.label
-                gravity = Gravity.CENTER
-                setTextColor(primary)
-                textSize = 8.8f
-                includeFontPadding = false
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-                bottomMargin = dp(5)
-            })
         }
     }
 
