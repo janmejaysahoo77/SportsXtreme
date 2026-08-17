@@ -12,10 +12,13 @@ import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.animateDpAsState
@@ -48,8 +51,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +71,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -76,8 +84,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.domain.model.CreatedMatchInvite
+import com.example.sportsxtreme.domain.model.TeamSide
+import com.example.sportsxtreme.domain.model.Match
+import com.example.sportsxtreme.domain.usecase.MatchUseCases
+import com.example.sportsxtreme.common.Resource
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import android.graphics.Bitmap
+import android.widget.Toast
 
+@AndroidEntryPoint
 class SelectTeamAorBActivity : ComponentActivity() {
+    @Inject lateinit var matchUseCases: MatchUseCases
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
@@ -85,6 +107,10 @@ class SelectTeamAorBActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
         val teamSlot = intent.getStringExtra(EXTRA_TEAM_SLOT)?.takeIf { it == "B" } ?: "A"
+        val teamSide = if (teamSlot == "B") TeamSide.TEAM_B else TeamSide.TEAM_A
+        val inviteViewModel: MatchInviteViewModel by viewModels {
+            MatchInviteViewModel.factory(matchId, teamSide, matchUseCases)
+        }
         val selectedTeamId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID)
             ?: FRIENDLY_TEAM_OPTIONS.first().id
         val finalSquadLauncher = registerForActivityResult(
@@ -96,10 +122,21 @@ class SelectTeamAorBActivity : ComponentActivity() {
             }
         }
         setContent {
+            val inviteState by inviteViewModel.uiState.collectAsState()
+            val initialMatchResult: Resource<Match> = Resource.Loading()
+            val matchResult by matchUseCases.observeMatch(matchId)
+                .collectAsState(initial = initialMatchResult)
+            val claimedTeamAName = matchResult.data?.teamAClaim?.displayName
+            val claimedTeamBName = matchResult.data?.teamBClaim?.displayName
             SelectTeamAScreen(
                 teamSlot = teamSlot,
                 initialTeamId = selectedTeamId,
+                invite = inviteState.invite,
+                inviteError = inviteState.errorMessage,
                 onBack = { finish() },
+                claimedTeamAName = claimedTeamAName,
+                claimedTeamBName = claimedTeamBName,
+                claimedSlotName = if (teamSide == TeamSide.TEAM_A) claimedTeamAName else claimedTeamBName,
                 onNext = { selectedTeam ->
                     finalSquadLauncher.launch(
                         Intent(this, FinalSquadActivity::class.java)
@@ -119,6 +156,17 @@ class SelectTeamAorBActivity : ComponentActivity() {
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, teamSlot)
                             .putExtras(intent.copyTeamSelectionExtras())
                     )
+                },
+                onCopyInvite = { url ->
+                    (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("SportsXtreme invitation", url))
+                    Toast.makeText(this, "Invite link copied", Toast.LENGTH_SHORT).show()
+                },
+                onShareInvite = { url ->
+                    startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, "Join this SportsXtreme match: $url")
+                    }, "Share invitation"))
                 }
             )
         }
@@ -146,12 +194,64 @@ private val FRIENDLY_TEAM_OPTIONS = listOf(
 )
 
 @Composable
+private fun MatchInviteCard(
+    invite: CreatedMatchInvite?,
+    errorMessage: String?,
+    onCopy: (String) -> Unit,
+    onShare: (String) -> Unit
+) {
+    if (invite == null) {
+        if (!errorMessage.isNullOrBlank()) {
+            Text(errorMessage, color = Color(0xFFFFA3A3), fontSize = 12.sp)
+        } else {
+            Text("Creating invitation…", color = TeamAMuted, fontSize = 12.sp)
+        }
+        return
+    }
+    val bitmap = remember(invite.invitationUrl) { invitationQrBitmap(invite.invitationUrl) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(TeamACard)
+            .border(1.dp, Color(0xFF2A3E33), RoundedCornerShape(14.dp))
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("SCAN TO JOIN MATCH", color = TeamAAccent, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        Image(bitmap.asImageBitmap(), "Invitation QR code", Modifier.size(210.dp).padding(top = 12.dp))
+        Text("Scan this QR to join", color = Color.White, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        Text(invite.invitationUrl, color = TeamAMuted, fontSize = 10.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
+        Row(modifier = Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { onCopy(invite.invitationUrl) }) { Text("Copy Link") }
+            OutlinedButton(onClick = { onShare(invite.invitationUrl) }) { Text("Share") }
+        }
+    }
+}
+
+private fun invitationQrBitmap(value: String): Bitmap {
+    val matrix = QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 512, 512, mapOf(EncodeHintType.MARGIN to 1))
+    return Bitmap.createBitmap(matrix.width, matrix.height, Bitmap.Config.ARGB_8888).apply {
+        for (y in 0 until matrix.height) for (x in 0 until matrix.width) {
+            setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+        }
+    }
+}
+
+@Composable
 private fun SelectTeamAScreen(
     teamSlot: String,
     initialTeamId: String,
+    invite: CreatedMatchInvite?,
+    inviteError: String?,
     onBack: () -> Unit,
+    claimedTeamAName: String?,
+    claimedTeamBName: String?,
+    claimedSlotName: String?,
     onNext: (FriendlyTeamOption) -> Unit,
-    onViewDetails: (FriendlyTeamOption) -> Unit
+    onViewDetails: (FriendlyTeamOption) -> Unit,
+    onCopyInvite: (String) -> Unit,
+    onShareInvite: (String) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var swipeAmount by remember { mutableStateOf(0f) }
@@ -197,6 +297,9 @@ private fun SelectTeamAScreen(
                     .padding(horizontal = 12.dp, vertical = if (selectedTab == 0) 16.dp else 14.dp),
                 verticalArrangement = Arrangement.spacedBy(if (selectedTab == 0) 14.dp else 13.dp)
             ) {
+                if (claimedSlotName == null) {
+                    MatchInviteCard(invite, inviteError, onCopyInvite, onShareInvite)
+                }
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
@@ -211,6 +314,8 @@ private fun SelectTeamAScreen(
                         if (tab == 0) {
                             TournamentTeamsContent(
                                 selectedTeamId = selectedTeamId,
+                                teamAName = claimedTeamAName ?: "Team A",
+                                teamBName = claimedTeamBName ?: "Team B",
                                 onTeamSelected = { selectedTeamId = it },
                                 onAddTeams = { switchTab(1) },
                                 onViewDetails = onViewDetails
@@ -362,6 +467,8 @@ private fun TeamATabs(selectedTab: Int, onSelectTab: (Int) -> Unit) {
 @Composable
 private fun TournamentTeamsContent(
     selectedTeamId: String,
+    teamAName: String,
+    teamBName: String,
     onTeamSelected: (String) -> Unit,
     onAddTeams: () -> Unit,
     onViewDetails: (FriendlyTeamOption) -> Unit
@@ -370,7 +477,7 @@ private fun TournamentTeamsContent(
     LeagueHeader(onAddTeams)
     TeamRow(
         initials = "TA",
-        title = "Team A",
+        title = teamAName,
         subtitle = "Ready for Draft",
         selected = selectedTeamId == "friendly-team-a",
         color = Color(0xFF1E73FF),
@@ -379,7 +486,7 @@ private fun TournamentTeamsContent(
     )
     TeamRow(
         initials = "TB",
-        title = "Team B",
+        title = teamBName,
         subtitle = "Pending Entry",
         selected = selectedTeamId == "friendly-team-b",
         color = Color(0xFF007A70),

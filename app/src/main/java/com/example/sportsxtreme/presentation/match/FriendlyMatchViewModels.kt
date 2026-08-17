@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.Match
+import com.example.sportsxtreme.domain.model.CreatedMatchInvite
 import com.example.sportsxtreme.domain.model.MatchType
 import com.example.sportsxtreme.domain.model.Player
 import com.example.sportsxtreme.domain.model.TossDecision
@@ -87,6 +88,8 @@ data class TeamSelectionUiState(
     val match: Match? = null,
     val selectedTeamA: SelectedTeam? = null,
     val selectedTeamB: SelectedTeam? = null,
+    val activeInvite: CreatedMatchInvite? = null,
+    val isCreatingInvite: Boolean = false,
     val errorMessage: String? = null
 )
 
@@ -141,6 +144,29 @@ class TeamSelectionViewModel(
         _uiState.value = _uiState.value.copy(selectedTeamB = team)
     }
 
+    fun createInvite(side: com.example.sportsxtreme.domain.model.TeamSide) {
+        val matchId = _uiState.value.match?.id ?: return
+        if (_uiState.value.isCreatingInvite) return
+        scope.launch {
+            _uiState.value = _uiState.value.copy(isCreatingInvite = true, errorMessage = null)
+            when (val result = matchUseCases.createMatchInvite(matchId, side)) {
+                is Resource.Success -> _uiState.value = _uiState.value.copy(
+                    isCreatingInvite = false,
+                    activeInvite = result.data
+                )
+                is Resource.Error -> _uiState.value = _uiState.value.copy(
+                    isCreatingInvite = false,
+                    errorMessage = result.message ?: "Unable to create invitation"
+                )
+                is Resource.Loading -> Unit
+            }
+        }
+    }
+
+    fun dismissInvite() {
+        _uiState.value = _uiState.value.copy(activeInvite = null)
+    }
+
     fun updateMatchTeams(
         matchId: String,
         teamAId: String,
@@ -186,6 +212,43 @@ class TeamSelectionViewModel(
                     require(modelClass.isAssignableFrom(TeamSelectionViewModel::class.java))
                     return TeamSelectionViewModel(matchId, matchUseCases, initialTeamA, initialTeamB) as T
                 }
+            }
+    }
+}
+
+data class MatchInviteUiState(
+    val isLoading: Boolean = true,
+    val invite: CreatedMatchInvite? = null,
+    val errorMessage: String? = null
+)
+
+class MatchInviteViewModel(
+    matchId: String,
+    teamSide: com.example.sportsxtreme.domain.model.TeamSide,
+    private val matchUseCases: MatchUseCases
+) : ViewModel() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _uiState = MutableStateFlow(MatchInviteUiState())
+    val uiState: StateFlow<MatchInviteUiState> = _uiState.asStateFlow()
+
+    init {
+        scope.launch {
+            _uiState.value = when (val result = matchUseCases.createMatchInvite(matchId, teamSide)) {
+                is Resource.Success -> MatchInviteUiState(isLoading = false, invite = result.data)
+                is Resource.Error -> MatchInviteUiState(isLoading = false, errorMessage = result.message ?: "Unable to create invitation")
+                is Resource.Loading -> MatchInviteUiState()
+            }
+        }
+    }
+
+    override fun onCleared() = scope.cancel()
+
+    companion object {
+        fun factory(matchId: String, teamSide: com.example.sportsxtreme.domain.model.TeamSide, matchUseCases: MatchUseCases): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                    MatchInviteViewModel(matchId, teamSide, matchUseCases) as T
             }
     }
 }

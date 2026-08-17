@@ -15,6 +15,8 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.graphics.Color
 import android.content.Intent
+import android.util.Log
+import android.widget.Toast
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.location.Location
@@ -31,6 +33,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
@@ -71,6 +75,8 @@ class MainActivity : ComponentActivity() {
     private var emailVerificationScreenView: EmailVerificationScreenView? = null
     private var pendingOtpContact = ""
     private val authViewModel by lazy { AuthDependencies.authViewModel() }
+    private val inviteLinkViewModel: InviteLinkViewModel by viewModels()
+    private val inviteClaimViewModel: InviteClaimViewModel by viewModels()
     private val liveMatchViewModel: LiveMatchViewModel by viewModels()
     private val locationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var currentScreen by mutableStateOf(Screen.Splash)
@@ -94,6 +100,7 @@ class MainActivity : ComponentActivity() {
 
         super.onCreate(savedInstanceState)
         requestLocationPermissionAndUpdate()
+        receiveIncomingInviteToken(intent)
         val hasIncomingAuthLink = handleIncomingAuthLink(intent)
         if (intent.getStringExtra(EXTRA_START_DESTINATION) == DESTINATION_SPORT_SELECTION) {
             isCustomSplashReady = true
@@ -127,6 +134,22 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun SportsXtremeApp() {
+        val pendingInviteToken by inviteLinkViewModel.pendingInviteToken.collectAsState()
+        LaunchedEffect(pendingInviteToken) {
+            pendingInviteToken?.let { token ->
+                inviteClaimViewModel.claim(token) { result ->
+                    if (result is Resource.Error) {
+                        Log.e("MatchInvite", "Invite claim failed: ${result.message}")
+                        Toast.makeText(this@MainActivity, result.message ?: "Invite claim failed", Toast.LENGTH_LONG).show()
+                    } else if (result is Resource.Success) {
+                        result.data?.let { claim ->
+                            Log.d("MatchInvite", "Invite claimed: ${claim.matchId} ${claim.teamSlot}")
+                        }
+                    }
+                    inviteLinkViewModel.consumeInviteToken(token)
+                }
+            }
+        }
         when (currentScreen) {
             Screen.Splash -> AndroidView(
                 factory = { context ->
@@ -285,9 +308,28 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        receiveIncomingInviteToken(intent)
         if (handleIncomingAuthLink(intent)) {
             showLoginScreen()
         }
+    }
+
+    private fun receiveIncomingInviteToken(intent: Intent?) {
+        extractInviteToken(intent)?.let(inviteLinkViewModel::receiveInviteToken)
+    }
+
+    private fun extractInviteToken(intent: Intent?): String? {
+        val uri = intent?.data ?: return null
+        if (intent.action != Intent.ACTION_VIEW ||
+            uri.scheme != INVITE_SCHEME ||
+            uri.host != INVITE_HOST ||
+            uri.path != INVITE_PATH
+        ) {
+            return null
+        }
+        return uri.getQueryParameter(INVITE_QUERY_PARAMETER)
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
     }
 
     private fun handleIncomingAuthLink(intent: Intent?): Boolean {
@@ -426,6 +468,10 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_START_DESTINATION = "extra_start_destination"
         const val DESTINATION_SPORT_SELECTION = "sport_selection"
+        private const val INVITE_SCHEME = "https"
+        private const val INVITE_HOST = "sportsxtreme-95fbb.web.app"
+        private const val INVITE_PATH = "/join"
+        private const val INVITE_QUERY_PARAMETER = "invite"
         private const val LOCATION_FETCH_TIMEOUT_MS = 12000L
     }
 }

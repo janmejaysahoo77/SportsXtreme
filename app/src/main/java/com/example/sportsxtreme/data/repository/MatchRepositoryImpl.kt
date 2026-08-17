@@ -16,6 +16,7 @@ import com.example.sportsxtreme.data.local.mapper.toEntities
 import com.example.sportsxtreme.data.local.mapper.toEntity
 import com.example.sportsxtreme.data.local.mapper.toMatchTeam
 import com.example.sportsxtreme.data.remote.firestore.FirebaseFirestoreMatchSyncDataSource
+import com.example.sportsxtreme.data.remote.firestore.FirebaseFirestoreMatchClaimsDataSource
 import com.example.sportsxtreme.data.remote.firestore.FirestoreScoringDataSource
 import com.example.sportsxtreme.domain.model.InningsStatus
 import com.example.sportsxtreme.domain.model.BallType
@@ -35,6 +36,7 @@ import com.example.sportsxtreme.domain.repository.CreateMatchRequest
 import com.example.sportsxtreme.domain.repository.MatchRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -48,6 +50,7 @@ class MatchRepositoryImpl @Inject constructor(
     private val inningsDao: InningsDao,
     private val ballEventDao: BallEventDao,
     private val firestoreMatchSyncDataSource: FirebaseFirestoreMatchSyncDataSource,
+    private val firestoreMatchClaimsDataSource: FirebaseFirestoreMatchClaimsDataSource,
     private val firestoreScoringDataSource: FirestoreScoringDataSource
 ) : MatchRepository {
     override suspend fun createMatch(request: CreateMatchRequest): Resource<Match> = runCatching {
@@ -253,9 +256,9 @@ class MatchRepositoryImpl @Inject constructor(
         Resource.Success(loadAndSyncMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to finish match") }
 
-    override fun observeMatch(matchId: String): Flow<Resource<Match>> = matchDao.observeMatch(matchId).map { match ->
+    override fun observeMatch(matchId: String): Flow<Resource<Match>> = combine(matchDao.observeMatch(matchId), firestoreMatchClaimsDataSource.observe(matchId)) { match, claims ->
         if (match == null) Resource.Error("Match not found")
-        else runCatching { Resource.Success(loadMatch(matchId)) }
+        else runCatching { Resource.Success(loadMatch(matchId).copy(teamAClaim = claims.teamA, teamBClaim = claims.teamB)) }
             .getOrElse { Resource.Error(it.message ?: "Unable to observe match") }
     }
 
