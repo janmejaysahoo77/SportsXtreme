@@ -59,33 +59,11 @@ import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
-import com.example.sportsxtreme.domain.model.User
-import com.example.sportsxtreme.domain.model.PendingUserProfile
 import com.example.sportsxtreme.domain.model.UserProfile
 import com.example.sportsxtreme.domain.model.UserProfileSettings
 import com.example.sportsxtreme.domain.model.UserProfileStats
 import com.example.sportsxtreme.domain.usecase.AuthUseCases
 import kotlinx.coroutines.launch
-
-internal val XtremeBg = Color(0xFF010407)
-internal val Card = Color(0xFF0C1419)
-internal val Line = Color(0xFF26333A)
-internal val Lime = Color(0xFFC7FF1A)
-internal val Gold = Color(0xFFFFD66B)
-internal val Aqua = Color(0xFF45E9FF)
-internal val Platinum = Color(0xFFEAF2F4)
-internal val SoftText = Color(0xFFA8B5B9)
-internal val DeepPanel = Color(0xFF071116)
-
-private data class ProfileUiState(
-    val profile: UserProfile = fallbackProfile(),
-    val stats: UserProfileStats = UserProfileStats(userId = ""),
-    val settings: UserProfileSettings = UserProfileSettings(userId = ""),
-    val isLoading: Boolean = true,
-    val isSaving: Boolean = false,
-    val infoMessage: String? = null,
-    val errorMessage: String? = null
-)
 
 private data class ProfileChoiceInput(
     val label: String,
@@ -286,111 +264,6 @@ private fun ProfileStatusLine(uiState: ProfileUiState) {
             .fillMaxWidth()
             .padding(top = 8.dp)
     )
-}
-
-private suspend fun loadProfileUiState(useCases: AuthUseCases): ProfileUiState {
-    val currentUser = useCases.getCurrentUser()
-    val userId = currentUser?.id.orEmpty()
-    val fallbackProfile = currentUser.toFallbackProfile()
-
-    if (userId.isBlank()) {
-        return ProfileUiState(
-            profile = fallbackProfile,
-            stats = fallbackProfile.toFallbackStats(),
-            settings = UserProfileSettings(userId = ""),
-            isLoading = false,
-            errorMessage = "Could not find logged-in user."
-        )
-    }
-
-    val signedInUser = currentUser ?: return ProfileUiState(
-        profile = fallbackProfile,
-        stats = fallbackProfile.toFallbackStats(),
-        settings = UserProfileSettings(userId = ""),
-        isLoading = false,
-        errorMessage = "Could not find logged-in user."
-    )
-    useCases.createOrUpdateUserProfile(signedInUser.toPendingProfile())
-
-    val profileResult = useCases.getUserProfile(userId)
-    val statsResult = useCases.getUserProfileStats(userId)
-    val settingsResult = useCases.getUserProfileSettings(userId)
-
-    val profile = profileResult.successData() ?: fallbackProfile
-    val stats = statsResult.successData() ?: profile.toFallbackStats()
-    val settings = settingsResult.successData() ?: UserProfileSettings(userId = userId)
-    val errorMessage = listOf(
-        profileResult.errorText(),
-        statsResult.errorText(),
-        settingsResult.errorText()
-    ).firstOrNull()
-
-    return ProfileUiState(
-        profile = profile,
-        stats = stats,
-        settings = settings,
-        isLoading = false,
-        errorMessage = if (errorMessage == null) null else "Some profile data could not refresh."
-    )
-}
-
-private fun User?.toFallbackProfile(): UserProfile {
-    return if (this == null) {
-        fallbackProfile()
-    } else {
-        UserProfile(
-            id = id,
-            name = name.ifBlank { "SportsXtreme Player" },
-            email = email,
-            phoneNumber = mobileNumber,
-            profilePhotoUrl = profilePhotoUrl,
-            authProvider = authProvider,
-            isEmailVerified = isEmailVerified,
-            isPhoneVerified = isPhoneVerified
-        )
-    }
-}
-
-private fun User.toPendingProfile(): PendingUserProfile {
-    return PendingUserProfile(
-        id = id,
-        name = name,
-        email = email,
-        phoneNumber = mobileNumber,
-        profilePhotoUrl = profilePhotoUrl,
-        authProvider = authProvider,
-        isEmailVerified = isEmailVerified,
-        isPhoneVerified = isPhoneVerified
-    )
-}
-
-private fun fallbackProfile(): UserProfile {
-    return UserProfile(
-        id = "",
-        name = "SportsXtreme Player",
-        email = "",
-        phoneNumber = ""
-    )
-}
-
-private fun UserProfile.toFallbackStats(): UserProfileStats {
-    return UserProfileStats(
-        userId = id,
-        matchesPlayed = matchesPlayed,
-        wins = wins,
-        losses = (matchesPlayed - wins).coerceAtLeast(0),
-        bestScore = bestScore,
-        trophies = trophies,
-        topPerformerStreak = topPerformerStreak
-    )
-}
-
-private fun <T> Resource<T>.successData(): T? {
-    return if (this is Resource.Success) data else null
-}
-
-private fun <T> Resource<T>.errorText(): String? {
-    return if (this is Resource.Error) message else null
 }
 
 @Composable
