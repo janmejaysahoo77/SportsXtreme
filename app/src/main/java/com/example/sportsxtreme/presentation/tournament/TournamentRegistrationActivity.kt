@@ -3,25 +3,12 @@ package com.example.sportsxtreme.presentation.tournament
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,9 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,12 +37,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,14 +78,14 @@ class TournamentRegistrationActivity : ComponentActivity() {
     }
 }
 
-private val FormAccent = Color(0xFFC1FF00)
-private val FormBg = Color(0xFF010509)
-private val FormPanel = Color(0xFF0B111C)
-private val FormField = Color(0xFF111828)
-private val FormStroke = Color(0xFF2E3950)
-private val FormMuted = Color(0xFF8E9C9A)
-private val FormCyan = Color(0xFF4DE9FF)
-private val FormWarm = Color(0xFFFFB84D)
+internal val FormAccent = Color(0xFFC1FF00)
+internal val FormBg = Color(0xFF010509)
+internal val FormPanel = Color(0xFF0B111C)
+internal val FormField = Color(0xFF111828)
+internal val FormStroke = Color(0xFF2E3950)
+internal val FormMuted = Color(0xFF8E9C9A)
+internal val FormCyan = Color(0xFF4DE9FF)
+internal val FormWarm = Color(0xFFFFB84D)
 
 @Composable
 private fun TournamentRegistrationScreen(
@@ -202,7 +183,12 @@ private fun FormTopBar(onBack: () -> Unit) {
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ArrowIcon(modifier = Modifier.size(30.dp).clickable(onClick = onBack), right = false)
+        androidx.compose.material3.Icon(
+            painter = painterResource(id = R.drawable.outline_arrow_back_ios_24),
+            contentDescription = "Back",
+            tint = Color(0xFFC7D2CF),
+            modifier = Modifier.size(30.dp).clickable(onClick = onBack)
+        )
         Text(
             text = "Add Tournament / Series",
             color = Color.White,
@@ -278,7 +264,12 @@ private fun BannerUploader() {
             contentAlignment = Alignment.Center
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                CameraIcon(Modifier.size(17.dp), FormCyan)
+                androidx.compose.material3.Icon(
+                    painter = painterResource(id = R.drawable.baseline_camera_alt_24),
+                    contentDescription = null,
+                    tint = FormCyan,
+                    modifier = Modifier.size(17.dp)
+                )
                 Text("ADD BANNER", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
@@ -508,344 +499,5 @@ private fun SettingsSection(lookingForTeams: Boolean, onLookingForTeamsChange: (
             active = lookingForTeams,
             modifier = Modifier.clickable { onLookingForTeamsChange(!lookingForTeams) }
         )
-    }
-}
-
-@Composable
-private fun FormSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
-        RequiredTitle(title)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .shadow(8.dp, RoundedCornerShape(17.dp), clip = false)
-                .clip(RoundedCornerShape(17.dp))
-                .background(
-                    Brush.verticalGradient(listOf(Color(0xFF101827), Color(0xFF0B111C)))
-                )
-                .border(1.dp, Color(0xFF31405C), RoundedCornerShape(17.dp))
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(13.dp),
-            content = content
-        )
-    }
-}
-
-@Composable
-private fun LabeledInput(
-    label: String,
-    placeholder: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    trailingIcon: @Composable (() -> Unit)? = null
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        RequiredTitle(label, compact = true)
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            textStyle = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
-            singleLine = true,
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
-            decorationBox = { innerTextField ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .background(
-                            Brush.verticalGradient(listOf(Color(0xFF172033), FormField))
-                        )
-                        .border(1.dp, Color(0xFF42526F), RoundedCornerShape(13.dp))
-                        .padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            if (value.isEmpty()) {
-                                Text(placeholder, color = Color(0xFF768784), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            innerTextField()
-                        }
-                        if (trailingIcon != null) {
-                            trailingIcon()
-                        }
-                    }
-                }
-            }
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DateBox(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var showDatePicker by remember { mutableStateOf(false) }
-    val datePickerState = rememberDatePickerState()
-
-    if (showDatePicker) {
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { millis ->
-                        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                        onValueChange(sdf.format(Date(millis)))
-                    }
-                    showDatePicker = false
-                }) {
-                    Text("OK")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) {
-                    Text("Cancel")
-                }
-            }
-        ) {
-            DatePicker(state = datePickerState)
-        }
-    }
-
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Text(label, color = Color(0xFF99A9A5), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            textStyle = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold),
-            singleLine = true,
-            readOnly = true,
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
-            decorationBox = { innerTextField ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .background(FormField)
-                        .border(1.dp, Color(0xFF42526F), RoundedCornerShape(13.dp))
-                        .clickable { showDatePicker = true }
-                        .padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CalendarIcon(Modifier.size(19.dp))
-                        Box(modifier = Modifier.padding(start = 10.dp)) {
-                            if (value.isEmpty()) {
-                                Text("DD/MM/YYYY", color = Color(0xFFE5ECE9), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            } else {
-                                innerTextField()
-                            }
-                        }
-                    }
-                }
-            }
-        )
-    }
-}
-
-@Composable
-private fun ChipRow(labels: List<String>, selectedLabel: String, onLabelSelected: (String) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(7.dp)
-    ) {
-        labels.forEach { label ->
-            val isSelected = label == selectedLabel
-            Box(
-                modifier = Modifier
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(if (isSelected) FormAccent else Color(0xFF1A2231))
-                    .border(1.dp, if (isSelected) Color(0xFFDFFF6C) else Color(0xFF34405A), RoundedCornerShape(18.dp))
-                    .clickable { onLabelSelected(label) }
-                    .padding(horizontal = 15.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(label, color = if (isSelected) Color(0xFF111604) else Color(0xFFBBC7C4), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun BallChoice(label: String, imageRes: Int, selected: Boolean, modifier: Modifier = Modifier) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
-        Box(
-            modifier = Modifier
-                .size(58.dp)
-                .clip(CircleShape)
-                .background(Brush.radialGradient(listOf(Color(0xFF223018), Color(0xFF080D12))))
-                .border(if (selected) 2.dp else 1.dp, if (selected) FormAccent else Color(0xFF463629), CircleShape)
-                .padding(7.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                painter = painterResource(id = imageRes),
-                contentDescription = "$label ball",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
-            )
-        }
-        Text(label, color = if (selected) FormAccent else Color(0xFFB9C3C0), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 7.dp))
-    }
-}
-
-@Composable
-private fun TogglePanel(title: String, subtitle: String, active: Boolean, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .shadow(7.dp, RoundedCornerShape(16.dp), clip = false)
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (active) Color(0xFF101A14) else FormPanel)
-            .border(1.dp, if (active) Color(0x994F6B1F) else FormStroke, RoundedCornerShape(16.dp))
-            .padding(15.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(if (active) FormAccent else Color.Transparent)
-                .border(1.dp, if (active) FormAccent else Color(0xFF3B455B), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            if (active) CheckMark(Modifier.size(15.dp), Color(0xFF111604))
-        }
-        Column(modifier = Modifier.padding(start = 12.dp)) {
-            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
-            Text(subtitle, color = FormMuted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-    }
-}
-
-@Composable
-private fun NextButton(isLoading: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(58.dp)
-            .shadow(12.dp, RoundedCornerShape(18.dp), clip = false)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Brush.horizontalGradient(listOf(FormAccent, Color(0xFFDFFF6C), FormWarm)))
-            .clickable(enabled = !isLoading, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(24.dp),
-                color = Color(0xFF111604),
-                strokeWidth = 2.dp
-            )
-        } else {
-            Text("Next", color = Color(0xFF111604), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-        }
-    }
-}
-
-@Composable
-private fun RequiredTitle(label: String, compact: Boolean = false) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Color.White, fontSize = if (compact) 12.sp else 16.sp, fontWeight = FontWeight.ExtraBold)
-        Text("*", color = FormAccent, fontSize = if (compact) 12.sp else 16.sp, fontWeight = FontWeight.ExtraBold)
-    }
-}
-
-@Composable
-private fun SectionSmallLabel(text: String) {
-    Text(text, color = Color(0xFF99A9A5), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
-}
-
-@Composable
-private fun AddBadge(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .size(58.dp)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    listOf(FormAccent.copy(alpha = 0.22f), Color(0xFF071109))
-                )
-            )
-            .border(2.dp, FormAccent.copy(alpha = 0.85f), CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("+", color = FormAccent, fontSize = 23.sp, lineHeight = 23.sp, fontWeight = FontWeight.ExtraBold)
-            Text("LOGO", color = FormAccent, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold)
-        }
-    }
-}
-
-@Composable
-private fun CheckPill(modifier: Modifier = Modifier, accent: Color) {
-    Box(
-        modifier = modifier
-            .size(27.dp)
-            .clip(CircleShape)
-            .background(accent),
-        contentAlignment = Alignment.Center
-    ) {
-        CheckMark(Modifier.size(15.dp), Color(0xFF111604))
-    }
-}
-
-@Composable
-private fun CheckMark(modifier: Modifier, tint: Color) {
-    Canvas(modifier) {
-        val stroke = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.18f, size.height * 0.54f), Offset(size.width * 0.42f, size.height * 0.76f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.42f, size.height * 0.76f), Offset(size.width * 0.84f, size.height * 0.24f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-    }
-}
-
-@Composable
-private fun CameraIcon(modifier: Modifier, tint: Color) {
-    Canvas(modifier) {
-        val stroke = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
-        drawRoundRect(tint, topLeft = Offset(size.width * 0.18f, size.height * 0.34f), size = androidx.compose.ui.geometry.Size(size.width * 0.64f, size.height * 0.42f), style = stroke)
-        drawCircle(tint, radius = size.minDimension * 0.13f, center = center, style = stroke)
-        drawLine(tint, Offset(size.width * 0.37f, size.height * 0.34f), Offset(size.width * 0.43f, size.height * 0.23f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.43f, size.height * 0.23f), Offset(size.width * 0.58f, size.height * 0.23f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-    }
-}
-
-@Composable
-private fun CalendarIcon(modifier: Modifier) {
-    Canvas(modifier) {
-        val tint = FormAccent
-        val stroke = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round)
-        drawRoundRect(tint, topLeft = Offset(size.width * 0.16f, size.height * 0.22f), size = androidx.compose.ui.geometry.Size(size.width * 0.68f, size.height * 0.62f), style = stroke)
-        drawLine(tint, Offset(size.width * 0.16f, size.height * 0.42f), Offset(size.width * 0.84f, size.height * 0.42f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-    }
-}
-
-@Composable
-private fun ArrowIcon(modifier: Modifier, right: Boolean) {
-    Canvas(modifier) {
-        val tint = Color(0xFFC7D2CF)
-        val stroke = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
-        val path = Path().apply {
-            if (right) {
-                moveTo(size.width * 0.35f, size.height * 0.25f)
-                lineTo(size.width * 0.62f, size.height * 0.5f)
-                lineTo(size.width * 0.35f, size.height * 0.75f)
-            } else {
-                moveTo(size.width * 0.65f, size.height * 0.25f)
-                lineTo(size.width * 0.38f, size.height * 0.5f)
-                lineTo(size.width * 0.65f, size.height * 0.75f)
-            }
-        }
-        drawPath(path, tint, style = stroke)
     }
 }
