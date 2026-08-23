@@ -37,6 +37,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.example.sportsxtreme.presentation.home.HomeScreenView
 import com.example.sportsxtreme.presentation.home.LiveMatchViewModel
@@ -128,7 +135,15 @@ class MainActivity : ComponentActivity() {
             }
         })
         setContent {
-            SportsXtremeApp()
+            Scaffold(
+                containerColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.8f)
+            ) {innerPadding->
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(innerPadding).background(color = androidx.compose.ui.graphics.Color.Black   )
+                ) {
+                    SportsXtremeApp()
+                }
+            }
         }
     }
 

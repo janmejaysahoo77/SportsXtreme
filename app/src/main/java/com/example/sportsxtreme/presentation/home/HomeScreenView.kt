@@ -12,6 +12,7 @@ import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import com.example.sportsxtreme.presentation.clubs.ClubLandingActivity
+import com.example.sportsxtreme.common.WindowInsetsUtils
 import android.content.Intent
 import android.content.Context
 import android.graphics.Bitmap
@@ -119,7 +120,9 @@ class HomeScreenView @JvmOverloads constructor(
             }
             addView(contentFrame, DrawerLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             
-            val drawerView = createDrawerContent(context)
+            val drawerView = createDrawerContent(context).apply {
+                WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
+            }
             val drawerParams = DrawerLayout.LayoutParams(dp(300), LayoutParams.MATCH_PARENT, GravityCompat.START)
             addView(drawerView, drawerParams)
         }
@@ -1072,7 +1075,8 @@ class HomeScreenView @JvmOverloads constructor(
     private fun hostTopStrip(context: Context): View {
         return LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), 0, dp(14), 0)
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
             background = GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
                 intArrayOf(Color.rgb(2, 15, 27), Color.rgb(4, 18, 38), Color.rgb(2, 9, 22))
@@ -1600,7 +1604,8 @@ class HomeScreenView @JvmOverloads constructor(
                 setColor(Color.rgb(6, 12, 17)) // Solid dark color to separate from body
             }
             // Removed standard elevation to use custom gradient shadow/glow below
-            setPadding(dp(16), dp(24), dp(16), dp(18)) // Taller top bar for the mode buttons
+            setPadding(dp(16), dp(10), dp(16), dp(18)) // Taller top bar for the mode buttons
+            WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
 
             addView(xtremeTopBarButtons(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)))
 

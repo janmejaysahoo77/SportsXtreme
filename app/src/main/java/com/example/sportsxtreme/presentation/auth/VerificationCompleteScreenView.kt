@@ -7,6 +7,7 @@ import android.util.AttributeSet
 import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.TextView
+import com.example.sportsxtreme.common.WindowInsetsUtils
 
 class VerificationCompleteScreenView @JvmOverloads constructor(
     context: Context,
@@ -15,6 +16,7 @@ class VerificationCompleteScreenView @JvmOverloads constructor(
 
     init {
         setBackgroundColor(Color.BLACK)
+        WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
         addView(TextView(context).apply {
             text = "Verification complete"
             gravity = Gravity.CENTER

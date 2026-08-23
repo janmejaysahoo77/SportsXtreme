@@ -35,6 +35,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.example.sportsxtreme.common.WindowInsetsUtils
 import kotlin.math.max
 
 class SportSelectionView @JvmOverloads constructor(
@@ -78,7 +79,8 @@ class SportSelectionView @JvmOverloads constructor(
 
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(20), 0, dp(22))
+            setPadding(0, dp(10), 0, dp(22))
+            WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT

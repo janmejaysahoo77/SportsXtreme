@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.example.sportsxtreme.common.Resource
+import com.example.sportsxtreme.common.WindowInsetsUtils
 import com.example.sportsxtreme.data.di.AuthDependencies
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -62,7 +63,8 @@ class EmailVerificationScreenView @JvmOverloads constructor(
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(24), dp(42), dp(24), dp(32))
+            setPadding(dp(24), dp(20), dp(24), dp(32))
+            WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
         }
 
         content.addView(title("Verify your email"), fullWidthParams(bottom = dp(18)))

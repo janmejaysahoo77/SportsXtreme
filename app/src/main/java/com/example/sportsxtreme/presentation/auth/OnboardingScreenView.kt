@@ -11,6 +11,9 @@ import com.example.sportsxtreme.presentation.home.*
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
+import com.example.sportsxtreme.common.WindowInsetsUtils
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -119,10 +122,16 @@ class OnboardingScreenView @JvmOverloads constructor(
     private var startTimeMs = android.os.SystemClock.uptimeMillis()
     private var globalStartTimeMs = startTimeMs
     private var lastFrameMs = startTimeMs
+    private var topInset = 0
 
     init {
         isClickable = true
         contentDescription = "SportsXtreme onboarding screen one"
+        ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+            topInset = insets.getInsets(WindowInsetsCompat.Type.systemBars()).top
+            invalidate()
+            insets
+        }
         listOf("Cricket", "Football", "Kabaddi", "Badminton").forEach { sport ->
             val start = bodyText.indexOf(sport)
             val end = start + sport.length
@@ -334,7 +343,7 @@ class OnboardingScreenView @JvmOverloads constructor(
 
     private fun drawHeader(canvas: Canvas, w: Float, margin: Float, density: Float) {
         val phase = phase(40L, 520L)
-        val y = 36f * density - (1f - phase) * 10f * density
+        val y = 36f * density + topInset - (1f - phase) * 10f * density
         drawTopAppIcon(canvas, margin, y, density, phase)
 
         textPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
@@ -575,7 +584,7 @@ class OnboardingScreenView @JvmOverloads constructor(
 
     private fun drawOnboardingTwo(canvas: Canvas, w: Float, h: Float, margin: Float, density: Float) {
         val phase = phase(80L, 520L)
-        val top = 68f * density
+        val top = 68f * density + topInset
         val cardRadius = 8f * density
 
         val heroTop = top + (1f - phase) * 22f * density
@@ -680,10 +689,10 @@ class OnboardingScreenView @JvmOverloads constructor(
         val textHeight = ob3ParagraphLayout!!.height.toFloat()
 
         val targetSpace = 100f * density + bracketHeight + 48f * density + 56f * density + textHeight
-        val availableSpace = h - 128f * density
+        val availableSpace = h - 128f * density - topInset
         val dynamicGap = max(0f, (availableSpace - targetSpace) / 3f)
 
-        val bracketTop = 100f * density + dynamicGap + (1f - phase) * 22f * density
+        val bracketTop = 100f * density + topInset + dynamicGap + (1f - phase) * 22f * density
         val bracketBounds = RectF(margin, bracketTop, w - margin, bracketTop + bracketHeight)
 
         drawTournamentHalo(canvas, w, bracketBounds.centerY(), density, phase)
@@ -967,10 +976,10 @@ class OnboardingScreenView @JvmOverloads constructor(
         val titleHeight = 72f * density
         val chipHeight = 25f * density
         val totalHeight = chipHeight + 32f * density + titleHeight + 70f * density + copyHeight + 20f * density + gridHeight
-        val availableSpace = contentBottom - 76f * density
+        val availableSpace = contentBottom - 76f * density - topInset
         val dynamicGap = max(0f, (availableSpace - totalHeight) / 4f)
 
-        val chipTop = 76f * density + dynamicGap
+        val chipTop = 76f * density + topInset + dynamicGap
         drawOnlineChip(canvas, margin, chipTop, density, phase)
         drawOnboardingFourTags(canvas, margin + 152f * density, chipTop, density, phase)
 

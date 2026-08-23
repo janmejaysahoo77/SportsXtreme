@@ -29,6 +29,7 @@ import android.widget.ScrollView
 import android.widget.Space
 import android.widget.TextView
 import com.example.sportsxtreme.common.Resource
+import com.example.sportsxtreme.common.WindowInsetsUtils
 import com.example.sportsxtreme.data.di.AuthDependencies
 import com.example.sportsxtreme.R
 import kotlinx.coroutines.CoroutineScope
@@ -83,7 +84,8 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(28), dp(22), dp(28))
+            setPadding(dp(22), dp(16), dp(22), dp(28))
+            WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT

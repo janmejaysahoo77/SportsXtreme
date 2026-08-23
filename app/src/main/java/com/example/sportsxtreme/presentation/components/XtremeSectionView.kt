@@ -11,6 +11,7 @@ import com.example.sportsxtreme.presentation.home.*
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
+import com.example.sportsxtreme.common.WindowInsetsUtils
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -73,7 +74,8 @@ class XtremeSectionView(
     private fun topBar(context: Context): View {
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(24), dp(16), dp(18))
+            setPadding(dp(16), dp(10), dp(16), dp(18))
+            WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
             background = GradientDrawable().apply {
                 setColor(Color.rgb(6, 12, 17))
             }
