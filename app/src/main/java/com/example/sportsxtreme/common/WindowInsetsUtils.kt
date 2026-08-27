@@ -3,23 +3,26 @@ package com.example.sportsxtreme.common
 import android.view.View
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 
+/** Applies system-bar insets while preserving a view's existing padding. */
 object WindowInsetsUtils {
-    fun applySystemBarsPadding(view: View, applyTop: Boolean = true, applyBottom: Boolean = true) {
-        val initialPaddingLeft = view.paddingLeft
-        val initialPaddingTop = view.paddingTop
-        val initialPaddingRight = view.paddingRight
-        val initialPaddingBottom = view.paddingBottom
+    fun applySystemBarsPadding(view: View, applyBottom: Boolean = true) {
+        val initialLeft = view.paddingLeft
+        val initialTop = view.paddingTop
+        val initialRight = view.paddingRight
+        val initialBottom = view.paddingBottom
 
-        ViewCompat.setOnApplyWindowInsetsListener(view) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(
-                initialPaddingLeft + systemBars.left,
-                initialPaddingTop + if (applyTop) systemBars.top else 0,
-                initialPaddingRight + systemBars.right,
-                initialPaddingBottom + if (applyBottom) systemBars.bottom else 0
+        ViewCompat.setOnApplyWindowInsetsListener(view) { target, windowInsets ->
+            val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+            target.updatePadding(
+                left = initialLeft + insets.left,
+                top = initialTop + insets.top,
+                right = initialRight + insets.right,
+                bottom = initialBottom + if (applyBottom) insets.bottom else 0
             )
-            insets
+            windowInsets
         }
+        ViewCompat.requestApplyInsets(view)
     }
 }

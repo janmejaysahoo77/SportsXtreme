@@ -2,65 +2,56 @@ package com.example.sportsxtreme.presentation.auth
 
 import android.Manifest
 import android.annotation.SuppressLint
-import com.example.sportsxtreme.R
-import com.example.sportsxtreme.presentation.tournament.*
-import com.example.sportsxtreme.presentation.components.*
-import com.example.sportsxtreme.presentation.auth.*
-import com.example.sportsxtreme.presentation.scoring.*
-import com.example.sportsxtreme.presentation.match.*
-import com.example.sportsxtreme.presentation.media.*
-import com.example.sportsxtreme.presentation.home.*
-import com.example.sportsxtreme.presentation.team.*
-import com.example.sportsxtreme.presentation.profile.*
-import com.example.sportsxtreme.presentation.store.*
-import android.graphics.Color
 import android.content.Intent
-import android.util.Log
-import android.widget.Toast
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.location.Geocoder
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.os.Looper
+import android.util.Log
 import android.view.ViewTreeObserver
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.compose.setContent
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.example.sportsxtreme.presentation.home.HomeScreenView
-import com.example.sportsxtreme.presentation.home.LiveMatchViewModel
-import dagger.hilt.android.AndroidEntryPoint
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
-import java.util.Locale
-import kotlin.coroutines.resume
+import com.example.sportsxtreme.presentation.home.HomeScreenView
+import com.example.sportsxtreme.presentation.home.LiveMatchViewModel
+import com.example.sportsxtreme.presentation.media.XtremeMediaActivity
+import com.example.sportsxtreme.presentation.store.ShoppingActivity
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Locale
+import kotlin.coroutines.resume
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -91,7 +82,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (granted) {
             updateCurrentUserLocation()
         }
@@ -129,6 +120,7 @@ class MainActivity : ComponentActivity() {
                     Screen.VerificationComplete,
                     Screen.OtpVerification,
                     Screen.SportSelection -> showMainScreen()
+
                     Screen.Onboarding,
                     Screen.Splash -> finish()
                 }
@@ -137,9 +129,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             Scaffold(
                 containerColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.8f)
-            ) {innerPadding->
+            ) { innerPadding ->
                 Box(
-                    modifier = Modifier.fillMaxSize().padding(innerPadding).background(color = androidx.compose.ui.graphics.Color.Black   )
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .background(color = androidx.compose.ui.graphics.Color.Black)
                 ) {
                     SportsXtremeApp()
                 }
@@ -155,10 +150,17 @@ class MainActivity : ComponentActivity() {
                 inviteClaimViewModel.claim(token) { result ->
                     if (result is Resource.Error) {
                         Log.e("MatchInvite", "Invite claim failed: ${result.message}")
-                        Toast.makeText(this@MainActivity, result.message ?: "Invite claim failed", Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            this@MainActivity,
+                            result.message ?: "Invite claim failed",
+                            Toast.LENGTH_LONG
+                        ).show()
                     } else if (result is Resource.Success) {
                         result.data?.let { claim ->
-                            Log.d("MatchInvite", "Invite claimed: ${claim.matchId} ${claim.teamSlot}")
+                            Log.d(
+                                "MatchInvite",
+                                "Invite claimed: ${claim.matchId} ${claim.teamSlot}"
+                            )
                         }
                     }
                     inviteLinkViewModel.consumeInviteToken(token)
@@ -374,7 +376,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateCurrentUserLocation() {
-        val user = authViewModel.state.value.authenticatedUser ?: AuthDependencies.authUseCases().getCurrentUser() ?: return
+        val user = authViewModel.state.value.authenticatedUser ?: AuthDependencies.authUseCases()
+            .getCurrentUser() ?: return
         locationScope.launch {
             val location = findCurrentLocation() ?: return@launch
             val locationLabel = formatLocation(location)

@@ -333,7 +333,7 @@ class HomeScreenView @JvmOverloads constructor(
                         DrawerItem("GO TO CLUB", DrawerIconView.Icon.BUILDING, isFeatured = true, hasChevron = true, action = DrawerAction.GO_TO_CLUB),
                         DrawerItem("Add a Tournament/Series", DrawerIconView.Icon.PLUS_CIRCLE, badge = "FREE", action = DrawerAction.ADD_TOURNAMENT),
                         DrawerItem("Start A Match", DrawerIconView.Icon.BAT, badge = "FREE", action = DrawerAction.START_MATCH),
-                        DrawerItem("Go Live", DrawerIconView.Icon.VIDEO),
+                        DrawerItem("Create Your Team", drawableRes = R.drawable.outline_groups_24),
                         DrawerItem("My Cricket", DrawerIconView.Icon.STADIUM),
                         DrawerItem("My Stats", DrawerIconView.Icon.STATS),
                         DrawerItem("SportsXtreme Store", DrawerIconView.Icon.STORE, hasDot = true),
@@ -391,7 +391,8 @@ class HomeScreenView @JvmOverloads constructor(
 
     private data class DrawerItem(
         val label: String,
-        val icon: DrawerIconView.Icon,
+        val icon: DrawerIconView.Icon? = null,
+        val drawableRes: Int? = null,
         val badge: String? = null,
         val hasDot: Boolean = false,
         val isExpandable: Boolean = false,
@@ -436,9 +437,18 @@ class HomeScreenView @JvmOverloads constructor(
                 }
             }
             
-            addView(DrawerIconView(context, item.icon).apply {
-                setTint(if (item.isFeatured) Color.rgb(111, 222, 255) else Color.rgb(200, 210, 215))
-            }, LinearLayout.LayoutParams(dp(22), dp(22)))
+            val iconTint = if (item.isFeatured) Color.rgb(111, 222, 255) else Color.rgb(200, 210, 215)
+            val iconView = when {
+                item.drawableRes != null -> ImageView(context).apply {
+                    setImageResource(item.drawableRes)
+                    setColorFilter(iconTint)
+                }
+                item.icon != null -> DrawerIconView(context, item.icon).apply {
+                    setTint(iconTint)
+                }
+                else -> View(context)
+            }
+            addView(iconView, LinearLayout.LayoutParams(dp(22), dp(22)))
 
             addView(TextView(context).apply {
                 text = item.label
@@ -1962,10 +1972,10 @@ class HomeScreenView @JvmOverloads constructor(
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     setPadding(0, 0, dp(14), dp(2))
-                    addView(heroScoreCard(context), LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    addView(createHeroScoreCard(context), LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                         rightMargin = dp(12)
                     })
-                    addView(heroScoreCard(
+                    addView(createHeroScoreCard(
                         context,
                         league = "CRICKET PREMIER CUP",
                         round = "Qualifier - Match 12",
@@ -1985,7 +1995,7 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 
-    private fun heroScoreCard(
+    fun createHeroScoreCard(
         context: Context,
         league: String = "VALORANT PRO LEAGUE",
         round: String = "Semi-final - Match 07",

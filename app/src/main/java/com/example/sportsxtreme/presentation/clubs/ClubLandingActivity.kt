@@ -129,7 +129,11 @@ private fun ClubCard(symbol: String, title: String, body: String, button: String
                 Text(body, color = Muted, fontSize = 8.sp, lineHeight = 10.sp, modifier = Modifier.fillMaxWidth(.7f))
                 Spacer(Modifier.weight(1f))
                 Box(Modifier.fillMaxWidth().height(29.dp).clip(RoundedCornerShape(7.dp)).background(Lime).clickable {
-                    if (title == "My Clubs") context.startActivity(Intent(context, MyClubsLandingPageActivity::class.java))
+                    when (title) {
+                        "My Clubs" -> context.startActivity(Intent(context, MyClubsLandingPageActivity::class.java))
+                        "Discover Clubs" -> context.startActivity(Intent(context, DiscoverClubsActivity::class.java))
+                        "Create Club" -> context.startActivity(Intent(context, Step_OneCreateClubActivity::class.java))
+                    }
                 }, contentAlignment = Alignment.Center) { Text(button, color = ComposeColor.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
             }
         }
