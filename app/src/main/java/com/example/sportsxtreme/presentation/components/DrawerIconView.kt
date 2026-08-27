@@ -24,7 +24,7 @@ import kotlin.math.sin
 class DrawerIconView(context: Context, private val icon: Icon) : View(context) {
 
     enum class Icon {
-        PLUS_CIRCLE, BAT, VIDEO, STADIUM, STATS, STORE, TROPHY, USERS, BUILDING, HELP,
+        PLUS_CIRCLE, BAT, STADIUM, STATS, STORE, TROPHY, USERS, BUILDING, HELP,
         SHARE, STAR, QR, MORE, INFO, GLOBE, SOCIAL_IG, SOCIAL_FB, SOCIAL_X, SOCIAL_YT, RIGHT_ARROW, CHECK, PRO_STAR
     }
 
@@ -65,16 +65,6 @@ class DrawerIconView(context: Context, private val icon: Icon) : View(context) {
                 path.close()
                 canvas.drawPath(path, paint)
                 canvas.drawLine(w * 0.4f, h * 0.6f, w * 0.25f, h * 0.75f, paint)
-            }
-            Icon.VIDEO -> {
-                rect.set(w * 0.25f, h * 0.35f, w * 0.65f, h * 0.65f)
-                canvas.drawRoundRect(rect, 2f * d, 2f * d, paint)
-                path.reset()
-                path.moveTo(w * 0.65f, h * 0.45f)
-                path.lineTo(w * 0.8f, h * 0.35f)
-                path.lineTo(w * 0.8f, h * 0.65f)
-                path.lineTo(w * 0.65f, h * 0.55f)
-                canvas.drawPath(path, paint)
             }
             Icon.STADIUM -> {
                 path.reset()
