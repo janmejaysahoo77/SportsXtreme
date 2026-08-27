@@ -33,6 +33,24 @@
             android:name=".presentation.clubs.ClubLandingActivity"
             android:exported="false" />
         <activity
+            android:name=".presentation.clubs.DiscoverClubsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.ViewClubPageActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.Step_OneCreateClubActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.Step_TwoCreateClubActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.Step_ThreeCreateClubActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.clubs.Step_FourCreateClubActivity"
+            android:exported="false" />
+        <activity
             android:name=".presentation.clubs.MyClubsLandingPageActivity"
             android:exported="false" />
         <activity
