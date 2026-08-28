@@ -13,6 +13,10 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.location.Geocoder
+import android.location.LocationManager
 import android.media.MediaPlayer
 import androidx.activity.ComponentActivity
 import androidx.activity.viewModels
@@ -73,13 +77,23 @@ import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.rememberLottieComposition
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.domain.model.TournamentRequirements
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Locale
 
 @AndroidEntryPoint
 class TournamentRequirementsActivity : ComponentActivity() {
     private val viewModel: TournamentRequirementsViewModel by viewModels()
+    private var locationCallback: ((String) -> Unit)? = null
+    private val locationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true) fetchLocation()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
@@ -104,7 +118,8 @@ class TournamentRequirementsActivity : ComponentActivity() {
                     }
                     startActivity(destination)
                 },
-                onBack = { finish() }
+                onBack = { finish() },
+                onLocationClick = { callback -> requestLocation(callback) }
             )
         }
     }
@@ -114,6 +129,26 @@ class TournamentRequirementsActivity : ComponentActivity() {
         const val EXTRA_TOURNAMENT_ID = "tournament_id"
         const val EXTRA_MATCH_FORM = "tournament_match_form"
         const val EXTRA_BALL_TYPE = "tournament_ball_type"
+    }
+
+    private fun requestLocation(callback: (String) -> Unit) {
+        locationCallback = callback
+        val granted = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (granted) fetchLocation() else locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+    }
+
+    @Suppress("MissingPermission")
+    private fun fetchLocation() {
+        val manager = getSystemService(LOCATION_SERVICE) as LocationManager
+        val location = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER).mapNotNull { runCatching { manager.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time } ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val address = runCatching { @Suppress("DEPRECATION") Geocoder(this@TournamentRequirementsActivity, Locale.getDefault()).getFromLocation(location.latitude, location.longitude, 1)?.firstOrNull() }.getOrNull()
+            val properLocation = address?.getAddressLine(0)?.trim()?.takeIf { it.isNotBlank() }
+                ?: listOfNotNull(address?.featureName, address?.thoroughfare, address?.subLocality, address?.locality, address?.adminArea)
+                    .distinct().joinToString(", ")
+                    .ifBlank { "%.5f, %.5f".format(Locale.US, location.latitude, location.longitude) }
+            withContext(Dispatchers.Main) { locationCallback?.invoke(properLocation); locationCallback = null }
+        }
     }
 }
 
@@ -138,7 +173,8 @@ private fun TournamentRequirementsScreen(
     summary: TournamentRequirementSummary,
     viewModel: TournamentRequirementsViewModel,
     onSaved: (String, Boolean) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onLocationClick: ((String) -> Unit) -> Unit
 ) {
     var requirements by remember { mutableStateOf(TournamentRequirements()) }
     var showSuccessAnimation by remember { mutableStateOf(false) }
@@ -175,7 +211,7 @@ private fun TournamentRequirementsScreen(
         ) {
             RequirementHeroCard()
             RequirementStatsRow(summary)
-            TournamentDetailsSection(requirements) { requirements = it }
+            TournamentDetailsSection(requirements, onLocationClick) { requirements = it }
             WinningPrizeSection(requirements) { requirements = it }
             FormatSection(requirements) { requirements = it }
             NotesSection(requirements) { requirements = it }
@@ -392,9 +428,9 @@ private fun StatCard(value: String, label: String, accent: Color, modifier: Modi
 }
 
 @Composable
-private fun TournamentDetailsSection(requirements: TournamentRequirements, onChange: (TournamentRequirements) -> Unit) {
+private fun TournamentDetailsSection(requirements: TournamentRequirements, onLocationClick: ((String) -> Unit) -> Unit, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Tournament Details", "ENTRY") {
-        ReqInput("Tournament Location", "Bhubaneswar, Odisha", requirements.location) { onChange(requirements.copy(location = it)) }
+        ReqInput("Tournament Location", "Bhubaneswar, Odisha", requirements.location, trailingIcon = { androidx.compose.material3.Icon(painterResource(R.drawable.baseline_edit_location_24), "Use current location", tint = ReqCyan, modifier = Modifier.size(20.dp).clickable { onLocationClick { onChange(requirements.copy(location = it)) } }) }) { onChange(requirements.copy(location = it)) }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ReqInput("Entry Fee", "Rs 999", requirements.entryFee, Modifier.weight(1f)) { onChange(requirements.copy(entryFee = it)) }
             ReqInput("Number of Teams", "10", requirements.numberOfTeams, Modifier.weight(1f)) { onChange(requirements.copy(numberOfTeams = it)) }
@@ -538,7 +574,7 @@ private fun ReqSection(
 }
 
 @Composable
-private fun ReqInput(label: String, placeholder: String, value: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp, onValueChange: (String) -> Unit) {
+private fun ReqInput(label: String, placeholder: String, value: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp, trailingIcon: (@Composable (() -> Unit))? = null, onValueChange: (String) -> Unit) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Text(label, color = Color(0xFF99A9A5), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
         BasicTextField(
@@ -561,6 +597,7 @@ private fun ReqInput(label: String, placeholder: String, value: String, modifier
                         Text(placeholder, color = Color(0xFF768784), fontSize = 14.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     innerTextField()
+                    trailingIcon?.let { icon -> Box(Modifier.align(Alignment.CenterEnd)) { icon() } }
                 }
             }
         )

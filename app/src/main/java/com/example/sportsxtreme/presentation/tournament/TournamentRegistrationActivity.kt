@@ -1,6 +1,11 @@
 package com.example.sportsxtreme.presentation.tournament
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.Geocoder
+import android.location.LocationManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -25,6 +30,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -47,13 +54,27 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.activity.viewModels
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.domain.model.Tournament
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Locale
 
 @AndroidEntryPoint
 class TournamentRegistrationActivity : ComponentActivity() {
     private val viewModel: TournamentRegistrationViewModel by viewModels()
+    private var pendingLocation: ((String) -> Unit)? = null
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) fetchRegistrationLocation() else Toast.makeText(this, "Location permission is required", Toast.LENGTH_SHORT).show()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,8 +93,43 @@ class TournamentRegistrationActivity : ComponentActivity() {
                             .putExtra(TournamentRequirementsActivity.EXTRA_TOURNAMENT_ID, tournament.id)
                     )
                 },
+                onLocationClick = { callback -> requestRegistrationLocation(callback) },
                 viewModel = viewModel
             )
+        }
+    }
+
+    private fun requestRegistrationLocation(callback: (String) -> Unit) {
+        pendingLocation = callback
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (granted) fetchRegistrationLocation() else locationPermissionLauncher.launch(
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun fetchRegistrationLocation() {
+        val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        val location = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+            .mapNotNull { runCatching { locationManager.getLastKnownLocation(it) }.getOrNull() }
+            .maxByOrNull { it.time }
+        if (location == null) {
+            Toast.makeText(this, "Unable to determine your location", Toast.LENGTH_SHORT).show()
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            val address = runCatching {
+                @Suppress("DEPRECATION")
+                Geocoder(this@TournamentRegistrationActivity, Locale.getDefault())
+                    .getFromLocation(location.latitude, location.longitude, 1)?.firstOrNull()
+            }.getOrNull()
+            val city = address?.locality ?: address?.subAdminArea ?: address?.adminArea
+            withContext(Dispatchers.Main) {
+                if (city.isNullOrBlank()) Toast.makeText(this@TournamentRegistrationActivity, "Nearest city not available", Toast.LENGTH_SHORT).show()
+                else pendingLocation?.invoke(city)
+                pendingLocation = null
+            }
         }
     }
 }
@@ -91,6 +147,7 @@ internal val FormWarm = Color(0xFFFFB84D)
 private fun TournamentRegistrationScreen(
     onBack: () -> Unit,
     onNavigateNext: (Tournament) -> Unit,
+    onLocationClick: ((String) -> Unit) -> Unit,
     viewModel: TournamentRegistrationViewModel
 ) {
     val tournamentState by viewModel.tournamentState.collectAsState()
@@ -135,11 +192,19 @@ private fun TournamentRegistrationScreen(
             )
             TournamentBasicFields(
                 state = tournamentState,
-                onFieldChange = viewModel::updateField
+                onFieldChange = viewModel::updateField,
+                onLocationClick = { onLocationClick { city ->
+                    viewModel.updateField(TournamentRegistrationViewModel.Field.CITY, city)
+                } }
             )
             TimelineCategorySection(
                 date = tournamentState.startDate,
-                onDateChange = { viewModel.updateField(TournamentRegistrationViewModel.Field.START_DATE, it) }
+                dateToBeAnnounced = tournamentState.dateToBeAnnounced,
+                onDateChange = { viewModel.updateField(TournamentRegistrationViewModel.Field.START_DATE, it) },
+                onDateToBeAnnouncedChange = {
+                    viewModel.updateField(TournamentRegistrationViewModel.Field.DATE_TO_BE_ANNOUNCED, it.toString())
+                    if (it) viewModel.updateField(TournamentRegistrationViewModel.Field.START_DATE, "")
+                }
             )
             BallFormatSection(
                 selectedBall = tournamentState.ballType,
@@ -391,7 +456,7 @@ private fun ModeImageBubble(imageRes: Int, selected: Boolean, accent: Color) {
 }
 
 @Composable
-private fun TournamentBasicFields(state: Tournament, onFieldChange: (TournamentRegistrationViewModel.Field, String) -> Unit) {
+private fun TournamentBasicFields(state: Tournament, onFieldChange: (TournamentRegistrationViewModel.Field, String) -> Unit, onLocationClick: () -> Unit) {
     FormSection(title = "Tournament details") {
         LabeledInput(
             label = "Tournament/Series Name",
@@ -411,7 +476,7 @@ private fun TournamentBasicFields(state: Tournament, onFieldChange: (TournamentR
                         painter = painterResource(id = R.drawable.baseline_edit_location_24),
                         contentDescription = "Choose Location",
                         tint = FormCyan,
-                        modifier = Modifier.size(20.dp).clickable { /* TODO: Choose location */ }
+                        modifier = Modifier.size(20.dp).clickable(onClick = onLocationClick)
                     )
                 }
             )
@@ -420,15 +485,7 @@ private fun TournamentBasicFields(state: Tournament, onFieldChange: (TournamentR
                 placeholder = "Stadium",
                 value = state.ground,
                 onValueChange = { onFieldChange(TournamentRegistrationViewModel.Field.GROUND, it) },
-                modifier = Modifier.weight(1f),
-                trailingIcon = {
-                    androidx.compose.material3.Icon(
-                        painter = painterResource(id = R.drawable.baseline_edit_location_24),
-                        contentDescription = "Choose Ground",
-                        tint = FormCyan,
-                        modifier = Modifier.size(20.dp).clickable { /* TODO: Choose ground */ }
-                    )
-                }
+                modifier = Modifier.weight(1f)
             )
         }
         LabeledInput(
@@ -457,13 +514,35 @@ private fun TournamentBasicFields(state: Tournament, onFieldChange: (TournamentR
 }
 
 @Composable
-private fun TimelineCategorySection(date: String, onDateChange: (String) -> Unit) {
+private fun TimelineCategorySection(
+    date: String,
+    dateToBeAnnounced: Boolean,
+    onDateChange: (String) -> Unit,
+    onDateToBeAnnouncedChange: (Boolean) -> Unit
+) {
     FormSection(title = "Timeline & Category") {
         DateBox(
             label = "START DATE",
             value = date,
             onValueChange = onDateChange
         )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onDateToBeAnnouncedChange(!dateToBeAnnounced) },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = dateToBeAnnounced,
+                onCheckedChange = onDateToBeAnnouncedChange,
+                colors = CheckboxDefaults.colors(
+                    checkedColor = FormAccent,
+                    uncheckedColor = FormMuted,
+                    checkmarkColor = Color(0xFF111604)
+                )
+            )
+            Text("To be announced", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
