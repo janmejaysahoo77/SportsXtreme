@@ -91,7 +91,8 @@ class HomeScreenView @JvmOverloads constructor(
     private enum class DrawerAction {
         GO_TO_CLUB,
         ADD_TOURNAMENT,
-        START_MATCH
+        START_MATCH,
+        CREATE_TEAM
     }
 
     private val primary = Color.rgb(193, 255, 0)
@@ -342,7 +343,7 @@ class HomeScreenView @JvmOverloads constructor(
                         DrawerItem("GO TO CLUB", DrawerIconView.Icon.BUILDING, isFeatured = true, hasChevron = true, action = DrawerAction.GO_TO_CLUB),
                         DrawerItem("Add a Tournament/Series", DrawerIconView.Icon.PLUS_CIRCLE, badge = "FREE", action = DrawerAction.ADD_TOURNAMENT),
                         DrawerItem("Start A Match", DrawerIconView.Icon.BAT, badge = "FREE", action = DrawerAction.START_MATCH),
-                        DrawerItem("Create Your Team", drawableRes = R.drawable.outline_groups_24),
+                        DrawerItem("Create Your Team", drawableRes = R.drawable.outline_groups_24, action = DrawerAction.CREATE_TEAM),
                         DrawerItem("My Cricket", DrawerIconView.Icon.STADIUM),
                         DrawerItem("My Stats", DrawerIconView.Icon.STATS),
                         DrawerItem("SportsXtreme Store", DrawerIconView.Icon.STORE, hasDot = true),
@@ -442,6 +443,7 @@ class HomeScreenView @JvmOverloads constructor(
                         DrawerAction.GO_TO_CLUB -> context.startActivity(Intent(context, ClubLandingActivity::class.java))
                         DrawerAction.ADD_TOURNAMENT -> context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
                         DrawerAction.START_MATCH -> context.startActivity(Intent(context, StartMatchActivity::class.java))
+                        DrawerAction.CREATE_TEAM -> context.startActivity(Intent(context, CreateTeamActivity::class.java))
                     }
                 }
             }
