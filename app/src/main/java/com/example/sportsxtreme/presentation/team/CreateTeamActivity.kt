@@ -1,9 +1,16 @@
 package com.example.sportsxtreme.presentation.team
 
-import android.os.Bundle
 import android.content.Intent
+import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,213 +20,144 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.R
 
 class CreateTeamActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = android.graphics.Color.rgb(2, 10, 20)
-        window.navigationBarColor = android.graphics.Color.rgb(2, 10, 20)
-        setContent {
-            CreateTeamScreen(
-                onBack = ::finish,
-                onContinue = {
-                    startActivity(
-                        Intent(
-                            this,
-                            ManagePlayersInsideTeamActivity::class.java
-                        )
-                    )
-                }
-            )
-        }
+        window.statusBarColor = android.graphics.Color.rgb(2, 11, 18)
+        window.navigationBarColor = android.graphics.Color.rgb(2, 11, 18)
+        setContent { CreateTeamScreen(::finish) { startActivity(Intent(this, ManagePlayersInsideTeamActivity::class.java)) } }
     }
 
-    private val TeamBackground = Color(0xFF020A14)
-    private val TeamCard = Color(0xFF09131F)
-    private val TeamStroke = Color(0xFF263443)
-    private val TeamAccent = Color(0xFFC9FF16)
-    private val TeamMuted = Color(0xFF9BA8B6)
+    private val background = Color(0xFF020B12)
+    private val surface = Color(0xED07131D)
+    private val elevatedSurface = Color(0xF20B1822)
+    private val accent = Color(0xFFC8FF00)
+    private val accentGreen = Color(0xFF9FE000)
+    private val brandBlue = Color(0xFF18B9FF)
+    private val textPrimary = Color(0xFFF5F7F8)
+    private val textSecondary = Color(0xFF8B969D)
+    private val border = Color(0xFF26343C)
 
     @Composable
     private fun CreateTeamScreen(onBack: () -> Unit, onContinue: () -> Unit) {
-        var teamName by remember { mutableStateOf("") }
-        var city by remember { mutableStateOf("") }
-        var mobile by remember { mutableStateOf("") }
-        var captain by remember { mutableStateOf("") }
-        var addMyself by remember { mutableStateOf(true) }
+        var teamName by rememberSaveable { mutableStateOf("") }; var city by rememberSaveable { mutableStateOf("") }
+        var mobile by rememberSaveable { mutableStateOf("") }; var captain by rememberSaveable { mutableStateOf("") }
+        var addMyself by rememberSaveable { mutableStateOf(true) }
+        val focusManager = LocalFocusManager.current
+        Box(Modifier.fillMaxSize().background(background).clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null
+        ) { focusManager.clearFocus(force = true) }) {
+            // The stadium belongs to the hero area only; this fade keeps the form calm and readable.
+            Box(Modifier.fillMaxWidth().height(342.dp).align(Alignment.TopCenter)) {
+                Image(painterResource(R.drawable.create_team_bg), null, Modifier.fillMaxSize().alpha(.42f), contentScale = ContentScale.Crop, alignment = Alignment.TopCenter)
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(background.copy(.42f), background.copy(.30f), background.copy(.98f)))))
+                Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(brandBlue.copy(.10f), Color.Transparent), radius = 780f)))
+            }
+            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                Header(onBack)
+                Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    ScreenTitle(); LogoPicker()
+                    Text("Team Logo", color = textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
+                    Text("Upload your team logo", color = textSecondary, fontSize = 11.sp); Spacer(Modifier.height(14.dp))
+                    TeamTextField("TEAM NAME *", "Enter your team name", teamName, { if (it.length <= 30) teamName = it }, R.drawable.baseline_check_circle_24, counter = "${teamName.length}/30")
+                    TeamTextField("CITY / TOWN *", "Enter city / town", city, { city = it }, R.drawable.baseline_edit_location_24)
+                    TeamTextField("TEAM CAPTAIN / COORDINATOR (OPTIONAL)", "+91   Enter mobile number", mobile, { mobile = it }, R.drawable.baseline_local_phone_24, KeyboardType.Phone)
+                    TeamTextField("TEAM CAPTAIN NAME (OPTIONAL)", "Enter captain name", captain, { captain = it }, R.drawable.baseline_person_outline_24)
+                    AddMyselfCard(addMyself) { addMyself = it }
+                }
+                CreateButton(onContinue)
+            }
+        }
+    }
 
-        Column(Modifier.fillMaxSize().background(TeamBackground).padding(horizontal = 16.dp)) {
+    @Composable private fun Header(onBack: () -> Unit) = Box(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 5.dp)) {
+        Box(Modifier.size(36.dp).align(Alignment.CenterStart).clip(RoundedCornerShape(9.dp)).background(elevatedSurface).border(1.dp, accent.copy(.55f), RoundedCornerShape(9.dp)).clickable(onClick = onBack), contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.outline_arrow_back_ios_24), null, tint = accent, modifier = Modifier.size(17.dp)) }
+        Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
+            Image(painterResource(R.drawable.appicon2), "SportXtreme", Modifier.size(width = 33.dp, height = 24.dp), contentScale = ContentScale.Fit)
+            Spacer(Modifier.width(4.dp))
+            Text("Sports", color = textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text("Xtreme", color = brandBlue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+    @Composable private fun ScreenTitle() { Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) { Text("CREATE ", color = brandBlue, fontSize = 23.sp, fontWeight = FontWeight.Black); Text("YOUR TEAM", color = textPrimary, fontSize = 23.sp, fontWeight = FontWeight.Black) }; Text("Let's Build Your Xtreme Team", color = textPrimary.copy(.76f), fontSize = 12.sp, fontStyle = FontStyle.Italic, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)) }
+    @Composable private fun LogoPicker() = Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().border(1.dp, accent.copy(.58f), CircleShape)); Box(Modifier.size(118.dp).background(elevatedSurface, CircleShape).border(1.dp, accent.copy(.65f), CircleShape), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(painterResource(R.drawable.baseline_camera_alt_24), null, tint = textPrimary, modifier = Modifier.size(34.dp)); Text("ADD LOGO", color = textPrimary, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 5.dp)) } }; Box(Modifier.align(Alignment.TopEnd).size(30.dp).background(accent, CircleShape).border(2.dp, background, CircleShape), contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.baseline_add_24), null, tint = background, modifier = Modifier.size(19.dp)) }
+    }
+    @Composable
+    private fun TeamTextField(label: String, placeholder: String, value: String, onValueChange: (String) -> Unit, icon: Int, keyboardType: KeyboardType = KeyboardType.Text, counter: String? = null) {
+        val focusManager = LocalFocusManager.current
+        val focusRequester = remember { FocusRequester() }
+        val interactionSource = remember { MutableInteractionSource() }
+        val isFocused by interactionSource.collectIsFocusedAsState()
+        val shouldFloat = isFocused || value.isNotEmpty()
+        val fieldBorder by animateColorAsState(if (isFocused) accent.copy(.86f) else border, tween(110), label = "field-border")
+        val labelColor by animateColorAsState(if (isFocused) accent else textSecondary, tween(110), label = "field-label-color")
+        val labelOffset by animateDpAsState(if (shouldFloat) 0.dp else 24.dp, tween(120), label = "field-label-position")
+        Box(Modifier.fillMaxWidth().padding(top = 10.dp).height(70.dp)) {
             Row(
-                Modifier.fillMaxWidth().padding(top = 18.dp),
+                Modifier.fillMaxWidth().height(64.dp).align(Alignment.BottomCenter)
+                    .background(surface, RoundedCornerShape(10.dp)).border(1.dp, fieldBorder, RoundedCornerShape(10.dp))
+                    .clickable { focusRequester.requestFocus() }.padding(horizontal = 13.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "‹",
-                    color = TeamAccent,
-                    fontSize = 38.sp,
-                    modifier = Modifier.clickable { onBack() }.padding(end = 10.dp)
-                )
-                Text("SPORT", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text("XTREME", color = TeamAccent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            }
-            Column(
-                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    "CREATE YOUR ",
-                    color = Color.White,
-                    fontSize = 23.sp,
-                    fontWeight = FontWeight.Black,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-                Text(
-                    "TEAM",
-                    color = TeamAccent,
-                    fontSize = 23.sp,
-                    fontWeight = FontWeight.Black,
-                    modifier = Modifier.offset(y = (-28).dp).padding(start = 185.dp)
-                )
-                Text(
-                    "Let's build your dream team",
-                    color = TeamMuted,
-                    fontSize = 12.sp,
-                    modifier = Modifier.offset(y = (-20).dp)
-                )
-                LogoPicker()
-                Text(
-                    "Team Logo",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    modifier = Modifier.padding(top = 10.dp)
-                )
-                Text("Upload your team logo", color = TeamMuted, fontSize = 11.sp)
-                Spacer(Modifier.height(12.dp))
-                TeamTextField("TEAM NAME *", "Enter your team name", teamName, { teamName = it })
-                TeamTextField("CITY / TOWN *", "Enter city / town", city, { city = it })
-                TeamTextField(
-                    "TEAM CAPTAIN / COORDINATOR (OPTIONAL)",
-                    "+91  Enter mobile number",
-                    mobile,
-                    { mobile = it },
-                    KeyboardType.Phone
-                )
-                TeamTextField(
-                    "TEAM CAPTAIN NAME (OPTIONAL)",
-                    "Enter captain name",
-                    captain,
-                    { captain = it })
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 10.dp)
-                        .border(1.dp, Color(0xFF536B1C), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        Modifier.size(34.dp)
-                            .background(Color(0xFF1C3210), RoundedCornerShape(8.dp)),
-                        contentAlignment = Alignment.Center
-                    ) { Text("♟", color = TeamAccent, fontSize = 19.sp) }
-                    Column(Modifier.padding(start = 10.dp).weight(1f)) {
-                        Text(
-                            "Add yourself in the team",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
-                        Text("You will be added as a member", color = TeamMuted, fontSize = 10.sp)
+                Icon(painterResource(icon), null, tint = accent, modifier = Modifier.size(20.dp))
+                Box(Modifier.padding(start = 12.dp).weight(1f).height(46.dp)) {
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    modifier = Modifier.fillMaxWidth().align(Alignment.CenterStart).focusRequester(focusRequester),
+                    singleLine = true,
+                    textStyle = TextStyle(color = textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Normal),
+                    cursorBrush = SolidColor(accent),
+                    keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions { focusManager.clearFocus(force = true) },
+                    interactionSource = interactionSource,
+                    decorationBox = { innerTextField ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (value.isEmpty() && shouldFloat) Text(placeholder, color = textSecondary, fontSize = 14.sp, fontWeight = FontWeight.Normal)
+                            innerTextField()
+                        }
                     }
-                    Switch(
-                        checked = addMyself,
-                        onCheckedChange = { addMyself = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = TeamAccent
-                        )
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-            }
-            Box(
-                Modifier.fillMaxWidth().height(52.dp).padding(bottom = 8.dp)
-                    .background(TeamAccent, RoundedCornerShape(8.dp)).clickable { onContinue() },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "Continue     →",
-                    color = Color(0xFF101709),
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
                 )
+                }
+                if (counter != null) Text(counter, color = textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Normal, modifier = Modifier.padding(start = 8.dp))
             }
+            // Only floating labels receive a surface fill, creating the outline notch.
+            Text(label, color = labelColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = .1.sp,
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 44.dp).offset(y = labelOffset)
+                    .then(if (shouldFloat) Modifier.background(surface) else Modifier).padding(horizontal = 5.dp, vertical = 1.dp))
         }
     }
-
-    @Composable
-    private fun LogoPicker() {
-        Box(
-            Modifier.padding(top = 2.dp).size(122.dp).border(2.dp, Color(0xFF516D19), CircleShape)
-                .background(Color(0xFF07111C), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("▱", color = Color.White, fontSize = 38.sp)
-                Text("ADD LOGO", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-            }
-            Text(
-                "+",
-                color = Color(0xFF172000),
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.TopEnd).background(TeamAccent, CircleShape)
-                    .padding(horizontal = 7.dp, vertical = 1.dp)
-            )
-        }
-    }
-
-    @Composable
-    private fun TeamTextField(
-        label: String,
-        placeholder: String,
-        value: String,
-        onValueChange: (String) -> Unit,
-        keyboardType: KeyboardType = KeyboardType.Text
-    ) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            label = { Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold) },
-            placeholder = { Text(placeholder, fontSize = 13.sp) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = TeamCard,
-                unfocusedContainerColor = TeamCard,
-                focusedBorderColor = TeamAccent,
-                unfocusedBorderColor = TeamStroke,
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedLabelColor = TeamAccent,
-                unfocusedLabelColor = TeamMuted,
-                unfocusedPlaceholderColor = TeamMuted
-            )
-        )
-    }
+    @Composable private fun AddMyselfCard(checked: Boolean, onCheckedChange: (Boolean) -> Unit) = Row(Modifier.fillMaxWidth().padding(top = 11.dp).background(surface, RoundedCornerShape(10.dp)).border(1.dp, accent.copy(.55f), RoundedCornerShape(10.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(34.dp).background(accent.copy(.13f), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.outline_groups_24), null, tint = accent, modifier = Modifier.size(21.dp)) }; Column(Modifier.padding(start = 10.dp).weight(1f)) { Text("Add yourself in the team", color = textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp); Text("You will be added as a member", color = textSecondary, fontSize = 10.sp) }; Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = accent, uncheckedThumbColor = textSecondary, uncheckedTrackColor = border)) }
+    @Composable private fun CreateButton(onContinue: () -> Unit) = Box(Modifier.fillMaxWidth().padding(bottom = 10.dp, top = 4.dp).height(54.dp).background(Brush.horizontalGradient(listOf(accent, accentGreen)), RoundedCornerShape(10.dp)).clickable(onClick = onContinue), contentAlignment = Alignment.Center) { Text("Create Team", color = background, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold); Icon(painterResource(R.drawable.outline_arrow_back_ios_24), null, tint = background, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 17.dp).size(20.dp).graphicsLayer(rotationZ = 180f)) }
 }
