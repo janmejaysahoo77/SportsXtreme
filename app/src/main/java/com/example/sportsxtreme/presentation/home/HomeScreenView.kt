@@ -64,6 +64,9 @@ import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -1005,6 +1008,9 @@ class HomeScreenView @JvmOverloads constructor(
             setPadding(dp(2), dp(2), dp(2), dp(8))
         }
         val allContent = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        var selectedFilter = "ALL"
+        var latestState: HostTournamentsViewModel.UiState = HostTournamentsViewModel.UiState.Loading
+        lateinit var render: (HostTournamentsViewModel.UiState) -> Unit
 
         content.addView(LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -1014,7 +1020,11 @@ class HomeScreenView @JvmOverloads constructor(
                 text = "Do you want to register?"
                 setTextColor(Color.rgb(205, 215, 226)); textSize = 11f; typeface = Typeface.DEFAULT_BOLD
             }, LinearLayout.LayoutParams(0, dp(32), 1f))
-            addView(tournamentPill(context, "REGISTER", true), LinearLayout.LayoutParams(dp(82), dp(30)))
+            addView(tournamentPill(context, "REGISTER", true).apply {
+                setOnClickListener {
+                    context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
+                }
+            }, LinearLayout.LayoutParams(dp(82), dp(30)))
         }, blockParams())
 
         val filters = LinearLayout(context).apply {
@@ -1030,9 +1040,8 @@ class HomeScreenView @JvmOverloads constructor(
             filters.addView(button, LinearLayout.LayoutParams(if (index == 0) dp(43) else dp(83), dp(30)).apply { rightMargin = dp(7) })
             button.setOnClickListener {
                 filterButtons.forEachIndexed { buttonIndex, tab -> updateTournamentFilterStyle(tab, buttonIndex == index) }
-                // Status filtering will be added with the tournament-management data. Until
-                // then, retain the live host list instead of hiding cards behind placeholder tabs.
-                allContent.visibility = View.VISIBLE
+                selectedFilter = label
+                render.invoke(latestState)
             }
         }
         content.addView(HorizontalScrollView(context).apply {
@@ -1042,7 +1051,8 @@ class HomeScreenView @JvmOverloads constructor(
         allContent.addView(tournamentSearch(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)))
         content.addView(allContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-        fun render(state: HostTournamentsViewModel.UiState) {
+        render = { state ->
+            latestState = state
             val dynamicChildCount = max(0, allContent.childCount - 1)
             if (dynamicChildCount > 0) allContent.removeViews(1, dynamicChildCount)
             when (state) {
@@ -1055,13 +1065,24 @@ class HomeScreenView @JvmOverloads constructor(
                     blockParams(top = 12)
                 )
                 is HostTournamentsViewModel.UiState.Content -> {
-                    if (state.tournaments.isEmpty()) {
+                    val visibleTournaments = state.tournaments.filter { tournament ->
+                        when (selectedFilter) {
+                            "ONGOING" -> tournament.startDateAsLocalDate() == LocalDate.now()
+                            "UPCOMING" -> tournament.startDateAsLocalDate()?.isAfter(LocalDate.now()) == true
+                            else -> true
+                        }
+                    }
+                    if (visibleTournaments.isEmpty()) {
                         allContent.addView(
-                            tournamentMessageCard(context, "No tournaments yet", "Your tournaments will appear here after you register one."),
+                            tournamentMessageCard(
+                                context,
+                                if (selectedFilter == "ALL") "No tournaments yet" else "No ${selectedFilter.lowercase()} tournaments",
+                                if (selectedFilter == "ALL") "Your tournaments will appear here after you register one." else "Tournaments matching this filter will appear here."
+                            ),
                             blockParams(top = 12)
                         )
                     } else {
-                        state.tournaments.forEachIndexed { index, tournament ->
+                        visibleTournaments.forEachIndexed { index, tournament ->
                             allContent.addView(
                                 tournamentOverviewCard(context, tournament),
                                 blockParams(top = if (index == 0) 12 else 14)
@@ -1079,14 +1100,20 @@ class HomeScreenView @JvmOverloads constructor(
                     // provides the lifecycle used by the other home-section views as well.
                     (context as? LifecycleOwner)?.lifecycleScope?.launch {
                         viewModel.uiState.collect { state: HostTournamentsViewModel.UiState ->
-                            render(state)
+                            render.invoke(state)
                         }
                     }
                     isHostTournamentObserverAttached = true
                 }
             }
-        } ?: render(HostTournamentsViewModel.UiState.Content(emptyList()))
+        } ?: render.invoke(HostTournamentsViewModel.UiState.Content(emptyList()))
         return content
+    }
+
+    private fun Tournament.startDateAsLocalDate(): LocalDate? = try {
+        LocalDate.parse(startDate, DateTimeFormatter.ofPattern("dd/MM/uuuu"))
+    } catch (_: DateTimeParseException) {
+        null
     }
 
     private fun roundedBackground(color: Int, radius: Int, strokeColor: Int? = null): GradientDrawable = GradientDrawable().apply {
