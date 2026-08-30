@@ -15,6 +15,8 @@ data class Tournament(
     val matchForm: String = "Limited Overs",
     val lookingForTeams: Boolean = true,
     val hostUid: String = "",
+    /** Epoch time recorded when the tournament is registered, used for newest-first lists. */
+    val createdAtEpochMs: Long = 0L,
     val requirements: TournamentRequirements = TournamentRequirements()
 )
 
@@ -22,8 +24,10 @@ data class TournamentRequirements(
     val location: String = "",
     val entryFee: String = "",
     val numberOfTeams: String = "",
+    val expectedEndDate: String = "",
     val matchDuration: String = "",
     val prizeType: String = "Cash",
+    val trophyIncluded: Boolean = false,
     val prizePool: String = "",
     val runnerUpPrize: String = "",
     val tournamentFormat: String = "Knockout",
