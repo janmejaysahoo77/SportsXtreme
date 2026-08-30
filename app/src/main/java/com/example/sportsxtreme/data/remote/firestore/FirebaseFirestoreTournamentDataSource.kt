@@ -6,6 +6,9 @@ import com.example.sportsxtreme.domain.model.TournamentRequirements
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import javax.inject.Inject
 
 class FirebaseFirestoreTournamentDataSource @Inject constructor(
@@ -39,5 +42,26 @@ class FirebaseFirestoreTournamentDataSource @Inject constructor(
         Resource.Success(tournament)
     } catch (e: Exception) {
         Resource.Error(e.message ?: "Unable to load tournament")
+    }
+
+    fun observeHostTournaments(hostUid: String): Flow<Resource<List<Tournament>>> = callbackFlow {
+        if (hostUid.isBlank()) {
+            trySend(Resource.Success(emptyList()))
+            close()
+            return@callbackFlow
+        }
+        val registration = firestore.collection("tournaments")
+            .whereEqualTo("hostUid", hostUid)
+            .addSnapshotListener { snapshots, error ->
+                if (error != null) {
+                    trySend(Resource.Error(error.message ?: "Unable to load your tournaments"))
+                    return@addSnapshotListener
+                }
+                val tournaments = snapshots?.documents.orEmpty().mapNotNull { document ->
+                    document.toObject(Tournament::class.java)?.copy(id = document.id)
+                }.sortedBy { it.startDate }
+                trySend(Resource.Success(tournaments))
+            }
+        awaitClose { registration.remove() }
     }
 }

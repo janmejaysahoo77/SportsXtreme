@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.example.sportsxtreme.data.sync.DeliverySyncScheduler
+import com.example.sportsxtreme.data.di.AuthDependencies
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -14,6 +15,7 @@ class SportsXtremeApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        AuthDependencies.initialize(this)
         deliverySyncScheduler.enqueue()
     }
 

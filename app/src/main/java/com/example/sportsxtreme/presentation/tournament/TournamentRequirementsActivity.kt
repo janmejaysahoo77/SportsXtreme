@@ -13,6 +13,10 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.location.Geocoder
+import android.location.LocationManager
 import android.media.MediaPlayer
 import androidx.activity.ComponentActivity
 import androidx.activity.viewModels
@@ -22,7 +26,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +44,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,7 +59,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -73,13 +80,25 @@ import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.rememberLottieComposition
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.domain.model.TournamentRequirements
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.Date
 
 @AndroidEntryPoint
 class TournamentRequirementsActivity : ComponentActivity() {
     private val viewModel: TournamentRequirementsViewModel by viewModels()
+    private var locationCallback: ((String) -> Unit)? = null
+    private val locationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true) fetchLocation()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
@@ -94,17 +113,14 @@ class TournamentRequirementsActivity : ComponentActivity() {
                     ballType = intent.getStringExtra(EXTRA_BALL_TYPE).orEmpty()
                 ),
                 viewModel = viewModel,
-                onSaved = { tournamentId, needsOfficials ->
-                    val destination = if (needsOfficials) {
-                        Intent(this, LeagueTournamentFlowActivity::class.java)
-                            .putExtra(LeagueTournamentFlowActivity.EXTRA_TOURNAMENT_ID, tournamentId)
-                    } else {
+                onSaved = { tournamentId ->
+                    startActivity(
                         Intent(this, RegisterTournamentFinalPageActivity::class.java)
                             .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournamentId)
-                    }
-                    startActivity(destination)
+                    )
                 },
-                onBack = { finish() }
+                onBack = { finish() },
+                onLocationClick = { callback -> requestLocation(callback) }
             )
         }
     }
@@ -114,6 +130,26 @@ class TournamentRequirementsActivity : ComponentActivity() {
         const val EXTRA_TOURNAMENT_ID = "tournament_id"
         const val EXTRA_MATCH_FORM = "tournament_match_form"
         const val EXTRA_BALL_TYPE = "tournament_ball_type"
+    }
+
+    private fun requestLocation(callback: (String) -> Unit) {
+        locationCallback = callback
+        val granted = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (granted) fetchLocation() else locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+    }
+
+    @Suppress("MissingPermission")
+    private fun fetchLocation() {
+        val manager = getSystemService(LOCATION_SERVICE) as LocationManager
+        val location = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER).mapNotNull { runCatching { manager.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time } ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val address = runCatching { @Suppress("DEPRECATION") Geocoder(this@TournamentRequirementsActivity, Locale.getDefault()).getFromLocation(location.latitude, location.longitude, 1)?.firstOrNull() }.getOrNull()
+            val properLocation = address?.getAddressLine(0)?.trim()?.takeIf { it.isNotBlank() }
+                ?: listOfNotNull(address?.featureName, address?.thoroughfare, address?.subLocality, address?.locality, address?.adminArea)
+                    .distinct().joinToString(", ")
+                    .ifBlank { "%.5f, %.5f".format(Locale.US, location.latitude, location.longitude) }
+            withContext(Dispatchers.Main) { locationCallback?.invoke(properLocation); locationCallback = null }
+        }
     }
 }
 
@@ -137,22 +173,20 @@ private val ReqGold = Color(0xFFFFB84D)
 private fun TournamentRequirementsScreen(
     summary: TournamentRequirementSummary,
     viewModel: TournamentRequirementsViewModel,
-    onSaved: (String, Boolean) -> Unit,
-    onBack: () -> Unit
+    onSaved: (String) -> Unit,
+    onBack: () -> Unit,
+    onLocationClick: ((String) -> Unit) -> Unit
 ) {
     var requirements by remember { mutableStateOf(TournamentRequirements()) }
     var showSuccessAnimation by remember { mutableStateOf(false) }
+    var showValidationErrors by remember { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsState()
 
     LaunchedEffect(uiState) {
         if (uiState is TournamentRequirementsViewModel.UiState.Saved) {
             val savedTournament = (uiState as TournamentRequirementsViewModel.UiState.Saved).tournament
             viewModel.reset()
-            if (requirements.needsOfficials) {
-                onSaved(savedTournament.id, true)
-            } else {
-                showSuccessAnimation = true
-            }
+            showSuccessAnimation = true
         }
     }
     Box(Modifier.fillMaxSize()) {
@@ -160,10 +194,6 @@ private fun TournamentRequirementsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(ReqBg)
-            .drawBehind {
-                drawCircle(Color(0x332C4D11), radius = size.width * 0.78f, center = Offset(size.width, size.height * 0.16f))
-                drawCircle(Color(0x1A00D2FF), radius = size.width * 0.58f, center = Offset(0f, size.height * 0.78f))
-            }
     ) {
         RequirementsTopBar(onBack)
         Column(
@@ -175,38 +205,37 @@ private fun TournamentRequirementsScreen(
         ) {
             RequirementHeroCard()
             RequirementStatsRow(summary)
-            TournamentDetailsSection(requirements) { requirements = it }
-            WinningPrizeSection(requirements) { requirements = it }
+            TournamentDetailsSection(requirements, onLocationClick, showValidationErrors) { requirements = it }
+            WinningPrizeSection(requirements, showValidationErrors) { requirements = it }
             FormatSection(requirements) { requirements = it }
-            NotesSection(requirements) { requirements = it }
-            SmartFeaturesSection(
-                requirements = requirements,
-                onRequirementsChange = { requirements = it }
-            )
+            NotesSection(requirements, showValidationErrors) { requirements = it }
+            SmartFeaturesSection(requirements) { requirements = it }
             TermsPanel()
             if (uiState is TournamentRequirementsViewModel.UiState.Error) {
                 Text((uiState as TournamentRequirementsViewModel.UiState.Error).message, color = Color.Red, fontSize = 13.sp)
             }
             ContinueButton(
-                showContinue = requirements.needsOfficials,
                 isSaving = uiState is TournamentRequirementsViewModel.UiState.Loading,
                 onClick = {
-                    viewModel.save(
-                        Tournament(
-                            id = summary.tournamentId,
-                            startDate = summary.date,
-                            matchForm = summary.matchForm,
-                            ballType = summary.ballType
-                        ),
-                        requirements
-                    )
+                    showValidationErrors = true
+                    if (requirements.isComplete()) {
+                        viewModel.save(
+                            Tournament(
+                                id = summary.tournamentId,
+                                startDate = summary.date,
+                                matchForm = summary.matchForm,
+                                ballType = summary.ballType
+                            ),
+                            requirements
+                        )
+                    }
                 }
             )
         }
     }
     if (showSuccessAnimation) {
         SuccessAnimationOverlay(
-            onFinished = { onSaved(summary.tournamentId, false) }
+            onFinished = { onSaved(summary.tournamentId) }
         )
     }
     }
@@ -298,10 +327,6 @@ private fun RequirementHeroCard() {
             .fillMaxWidth()
             .height(178.dp)
             .shadow(16.dp, RoundedCornerShape(20.dp), clip = false)
-            .drawBehind {
-                drawCircle(ReqAccent.copy(alpha = 0.13f), radius = size.width * 0.36f, center = Offset(size.width * 0.12f, size.height * 1.02f))
-                drawCircle(ReqCyan.copy(alpha = 0.08f), radius = size.width * 0.27f, center = Offset(size.width * 0.94f, size.height * 0.08f))
-            }
             .clip(RoundedCornerShape(20.dp))
             .background(
                 Brush.linearGradient(
@@ -376,9 +401,6 @@ private fun StatCard(value: String, label: String, accent: Color, modifier: Modi
         modifier = modifier
             .height(82.dp)
             .shadow(8.dp, RoundedCornerShape(16.dp), clip = false)
-            .drawBehind {
-                drawCircle(accent.copy(alpha = 0.1f), radius = size.width * 0.5f, center = Offset(size.width * 0.5f, size.height * 0.05f))
-            }
             .clip(RoundedCornerShape(16.dp))
             .background(Brush.verticalGradient(listOf(Color(0xFF101827), Color(0xFF0B111C))))
             .border(1.dp, accent.copy(alpha = 0.58f), RoundedCornerShape(16.dp))
@@ -392,24 +414,23 @@ private fun StatCard(value: String, label: String, accent: Color, modifier: Modi
 }
 
 @Composable
-private fun TournamentDetailsSection(requirements: TournamentRequirements, onChange: (TournamentRequirements) -> Unit) {
+private fun TournamentDetailsSection(requirements: TournamentRequirements, onLocationClick: ((String) -> Unit) -> Unit, showErrors: Boolean, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Tournament Details", "ENTRY") {
-        ReqInput("Tournament Location", "Bhubaneswar, Odisha", requirements.location) { onChange(requirements.copy(location = it)) }
+        ReqInput("Tournament Location", "Bhubaneswar, Odisha", requirements.location, showError = showErrors && requirements.location.isBlank(), trailingIcon = { androidx.compose.material3.Icon(painterResource(R.drawable.baseline_edit_location_24), "Use current location", tint = ReqCyan, modifier = Modifier.size(20.dp).clickable { onLocationClick { onChange(requirements.copy(location = it)) } }) }) { onChange(requirements.copy(location = it)) }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ReqInput("Entry Fee", "Rs 999", requirements.entryFee, Modifier.weight(1f)) { onChange(requirements.copy(entryFee = it)) }
-            ReqInput("Number of Teams", "10", requirements.numberOfTeams, Modifier.weight(1f)) { onChange(requirements.copy(numberOfTeams = it)) }
+            ReqInput("Entry Fee", "Rs 999", requirements.entryFee, Modifier.weight(1f), showError = showErrors && requirements.entryFee.isBlank()) { onChange(requirements.copy(entryFee = it)) }
+            ReqInput("Number of Teams", "10", requirements.numberOfTeams, Modifier.weight(1f), showError = showErrors && requirements.numberOfTeams.isBlank()) { onChange(requirements.copy(numberOfTeams = it)) }
         }
-        ReqInput("Match Duration", "How many hours is one match?", requirements.matchDuration) { onChange(requirements.copy(matchDuration = it)) }
-        InfoPanel("Only the organizer can edit team information after the tournament is created.")
+        RequiredDateInput("Expected End Date", requirements.expectedEndDate, showErrors && requirements.expectedEndDate.isBlank()) { onChange(requirements.copy(expectedEndDate = it)) }
     }
 }
 
 @Composable
-private fun WinningPrizeSection(requirements: TournamentRequirements, onChange: (TournamentRequirements) -> Unit) {
+private fun WinningPrizeSection(requirements: TournamentRequirements, showErrors: Boolean, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Winning Prize", "REWARDS", iconRes = R.drawable.tournamentlogo) {
-        ChipRowReq(listOf("Cash", "Trophy", "Both"), requirements.prizeType) { onChange(requirements.copy(prizeType = it)) }
-        ReqInput("Prize Pool", "Rs 50,000", requirements.prizePool) { onChange(requirements.copy(prizePool = it)) }
-        ReqInput("Runner-up Prize", "Rs 10,000", requirements.runnerUpPrize) { onChange(requirements.copy(runnerUpPrize = it)) }
+        RequiredCheckLine("Trophy Included", requirements.trophyIncluded, showErrors && !requirements.trophyIncluded) { onChange(requirements.copy(trophyIncluded = !requirements.trophyIncluded)) }
+        ReqInput("Prize Pool", "Rs 50,000", requirements.prizePool, showError = showErrors && requirements.prizePool.isBlank()) { onChange(requirements.copy(prizePool = it)) }
+        ReqInput("Runner-up Prize", "Rs 10,000", requirements.runnerUpPrize, showError = showErrors && requirements.runnerUpPrize.isBlank()) { onChange(requirements.copy(runnerUpPrize = it)) }
     }
 }
 
@@ -425,27 +446,18 @@ private fun FormatSection(requirements: TournamentRequirements, onChange: (Tourn
 }
 
 @Composable
-private fun NotesSection(requirements: TournamentRequirements, onChange: (TournamentRequirements) -> Unit) {
+private fun NotesSection(requirements: TournamentRequirements, showErrors: Boolean, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Tournament Notes", "RULES") {
-        ReqInput("Notes", "Add rules, prize breakdown, reporting time, dress code, or important instructions", requirements.notes, minHeight = 96.dp) { onChange(requirements.copy(notes = it)) }
+        ReqInput("Notes", "Add rules, prize breakdown, reporting time, dress code, or important instructions", requirements.notes, minHeight = 96.dp, showError = showErrors && requirements.notes.isBlank()) { onChange(requirements.copy(notes = it)) }
     }
 }
 
 @Composable
-private fun SmartFeaturesSection(
-    requirements: TournamentRequirements,
-    onRequirementsChange: (TournamentRequirements) -> Unit
-) {
+private fun SmartFeaturesSection(requirements: TournamentRequirements, onRequirementsChange: (TournamentRequirements) -> Unit) {
     ReqSection("Smart Features", "PUBLIC FEED", iconRes = R.drawable.organiserss) {
         ToggleLine("Invite all the players of my previous tournaments", "Notify past players and teams instantly.", requirements.invitePreviousPlayers) {
             onRequirementsChange(requirements.copy(invitePreviousPlayers = !requirements.invitePreviousPlayers))
         }
-        ToggleLine(
-            text = "Do you need officials? Umpire, scorer, streamer",
-            helper = "Post to the officials feed and find match staff faster.",
-            active = requirements.needsOfficials,
-            onClick = { onRequirementsChange(requirements.copy(needsOfficials = !requirements.needsOfficials)) }
-        )
     }
 }
 
@@ -474,7 +486,7 @@ private fun TermsPanel() {
 }
 
 @Composable
-private fun ContinueButton(showContinue: Boolean, isSaving: Boolean, onClick: () -> Unit) {
+private fun ContinueButton(isSaving: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -485,7 +497,7 @@ private fun ContinueButton(showContinue: Boolean, isSaving: Boolean, onClick: ()
             .clickable(enabled = !isSaving, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(if (isSaving) "Saving..." else if (showContinue) "Continue" else "Done", color = Color(0xFF111604), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+        Text(if (isSaving) "Saving..." else "Continue", color = Color(0xFF111604), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
 
@@ -524,9 +536,6 @@ private fun ReqSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .shadow(8.dp, RoundedCornerShape(17.dp), clip = false)
-                .drawBehind {
-                    drawCircle(ReqCyan.copy(alpha = 0.04f), radius = size.width * 0.42f, center = Offset(size.width * 0.9f, 0f))
-                }
                 .clip(RoundedCornerShape(17.dp))
                 .background(Brush.verticalGradient(listOf(Color(0xFF101827), ReqPanel)))
                 .border(1.dp, Color(0xFF31405C), RoundedCornerShape(17.dp))
@@ -538,9 +547,9 @@ private fun ReqSection(
 }
 
 @Composable
-private fun ReqInput(label: String, placeholder: String, value: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp, onValueChange: (String) -> Unit) {
+private fun ReqInput(label: String, placeholder: String, value: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp, showError: Boolean = false, trailingIcon: (@Composable (() -> Unit))? = null, onValueChange: (String) -> Unit) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Text(label, color = Color(0xFF99A9A5), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+        RequiredLabel(label)
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
@@ -553,7 +562,7 @@ private fun ReqInput(label: String, placeholder: String, value: String, modifier
                         .height(minHeight)
                         .clip(RoundedCornerShape(13.dp))
                         .background(Brush.verticalGradient(listOf(Color(0xFF172033), ReqField)))
-                        .border(1.dp, Color(0xFF42526F), RoundedCornerShape(13.dp))
+                        .border(1.dp, if (showError) Color(0xFFFF6B6B) else Color(0xFF42526F), RoundedCornerShape(13.dp))
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     contentAlignment = if (minHeight > 56.dp) Alignment.TopStart else Alignment.CenterStart
                 ) {
@@ -561,31 +570,73 @@ private fun ReqInput(label: String, placeholder: String, value: String, modifier
                         Text(placeholder, color = Color(0xFF768784), fontSize = 14.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     innerTextField()
+                    trailingIcon?.let { icon -> Box(Modifier.align(Alignment.CenterEnd)) { icon() } }
                 }
             }
         )
+        if (showError) Text("This field is required", color = Color(0xFFFF8A80), fontSize = 11.sp)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RequiredDateInput(label: String, value: String, showError: Boolean, onValueChange: (String) -> Unit) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    val datePickerState = rememberDatePickerState()
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let {
+                        onValueChange(SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(it)))
+                    }
+                    showDatePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancel") } }
+        ) { DatePicker(state = datePickerState) }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        RequiredLabel(label)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(Brush.verticalGradient(listOf(Color(0xFF172033), ReqField)))
+                .border(1.dp, if (showError) Color(0xFFFF6B6B) else Color(0xFF42526F), RoundedCornerShape(13.dp))
+                .clickable { showDatePicker = true }
+                .padding(horizontal = 14.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(value.ifBlank { "DD/MM/YYYY" }, color = if (value.isBlank()) Color(0xFF768784) else Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (showError) Text("Expected end date is required", color = Color(0xFFFF8A80), fontSize = 11.sp)
     }
 }
 
 @Composable
-private fun ChipRowReq(labels: List<String>, selectedLabel: String, onLabelSelected: (String) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        labels.forEachIndexed { index, label ->
-            Box(
-                modifier = Modifier
-                    .height(38.dp)
-                    .clip(RoundedCornerShape(19.dp))
-                    .background(if (label == selectedLabel) ReqAccent else Color(0xFF1A2231))
-                    .border(1.dp, if (label == selectedLabel) Color(0xFFDFFF6C) else Color(0xFF34405A), RoundedCornerShape(19.dp))
-                    .clickable { onLabelSelected(label) }
-                    .padding(horizontal = 17.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(label, color = if (label == selectedLabel) Color(0xFF111604) else Color(0xFFBBC7C4), fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
-            }
-        }
+private fun RequiredCheckLine(text: String, checked: Boolean, showError: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SmallBadge(active = checked)
+        Text("$text *", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(start = 10.dp).weight(1f))
+        if (showError) Text("Required", color = Color(0xFFFF8A80), fontSize = 11.sp)
     }
 }
+
+@Composable
+private fun RequiredLabel(label: String) {
+    Text("$label *", color = Color(0xFF99A9A5), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+}
+
+private fun TournamentRequirements.isComplete(): Boolean =
+    location.isNotBlank() && entryFee.isNotBlank() && numberOfTeams.isNotBlank() &&
+        expectedEndDate.isNotBlank() && trophyIncluded && prizePool.isNotBlank() &&
+        runnerUpPrize.isNotBlank() && notes.isNotBlank()
 
 @Composable
 private fun SelectBox(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {

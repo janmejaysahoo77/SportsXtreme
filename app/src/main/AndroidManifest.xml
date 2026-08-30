@@ -81,6 +81,18 @@
             android:name=".presentation.clubs.PlayerInsideSquadOfAClub"
             android:exported="false" />
         <activity
+            android:name=".presentation.team.AddPlayerInATeamActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.team.TeamProfileActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.team.ManagePlayersInsideTeamActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.team.CreateTeamActivity"
+            android:exported="false" />
+        <activity
             android:name=".presentation.team.QRForPlayerAddingActivity"
             android:exported="false" />
         <activity

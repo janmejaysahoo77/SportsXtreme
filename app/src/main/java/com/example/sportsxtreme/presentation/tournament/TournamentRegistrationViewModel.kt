@@ -3,6 +3,7 @@ package com.example.sportsxtreme.presentation.tournament
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.sportsxtreme.common.Resource
+import com.example.sportsxtreme.data.di.AuthDependencies
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.domain.usecase.CreateTournamentUseCase
 import com.google.firebase.auth.FirebaseAuth
@@ -33,6 +34,11 @@ class TournamentRegistrationViewModel @Inject constructor(
                 email = user.email ?: "",
                 phone = user.phoneNumber ?: ""
             )
+            viewModelScope.launch {
+                val profile = AuthDependencies.authUseCases().getUserProfile(user.uid).data
+                val name = profile?.name?.trim().orEmpty().ifBlank { user.displayName.orEmpty() }
+                if (name.isNotBlank()) updateField(Field.ORGANIZER_NAME, name)
+            }
         }
     }
 
@@ -46,6 +52,7 @@ class TournamentRegistrationViewModel @Inject constructor(
             Field.PHONE -> current.copy(phone = value)
             Field.EMAIL -> current.copy(email = value)
             Field.START_DATE -> current.copy(startDate = value)
+            Field.DATE_TO_BE_ANNOUNCED -> current.copy(dateToBeAnnounced = value.toBoolean())
         }
     }
 
@@ -92,7 +99,7 @@ class TournamentRegistrationViewModel @Inject constructor(
     }
 
     enum class Field {
-        NAME, CITY, GROUND, ORGANIZER_NAME, PHONE, EMAIL, START_DATE
+        NAME, CITY, GROUND, ORGANIZER_NAME, PHONE, EMAIL, START_DATE, DATE_TO_BE_ANNOUNCED
     }
 
     sealed class UiState {

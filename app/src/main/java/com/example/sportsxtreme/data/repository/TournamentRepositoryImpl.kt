@@ -4,6 +4,7 @@ import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.domain.model.TournamentRequirements
 import com.example.sportsxtreme.domain.repository.TournamentRepository
+import kotlinx.coroutines.flow.Flow
 
 import javax.inject.Inject
 import com.example.sportsxtreme.data.remote.firestore.FirebaseFirestoreTournamentDataSource
@@ -19,4 +20,7 @@ class TournamentRepositoryImpl @Inject constructor(
         dataSource.updateTournamentRequirements(tournamentId, requirements)
 
     override suspend fun getTournament(tournamentId: String): Resource<Tournament> = dataSource.getTournament(tournamentId)
+
+    override fun observeHostTournaments(hostUid: String): Flow<Resource<List<Tournament>>> =
+        dataSource.observeHostTournaments(hostUid)
 }

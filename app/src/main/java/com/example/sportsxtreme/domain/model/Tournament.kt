@@ -10,6 +10,7 @@ data class Tournament(
     val phone: String = "",
     val email: String = "",
     val startDate: String = "",
+    val dateToBeAnnounced: Boolean = false,
     val ballType: String = "Tennis",
     val matchForm: String = "Limited Overs",
     val lookingForTeams: Boolean = true,
