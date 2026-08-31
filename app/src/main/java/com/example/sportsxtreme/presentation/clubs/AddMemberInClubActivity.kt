@@ -88,7 +88,7 @@ private fun AddMemberPage(onBack: () -> Unit) {
             Spacer(Modifier.height(31.dp))
             Box(Modifier.fillMaxWidth().height(63.dp).clip(RoundedCornerShape(10.dp)).background(AddLime), contentAlignment = Alignment.Center) { Text("♧   Add $selectedRole", color = UiColor.Black, fontSize = 22.sp, fontWeight = FontWeight.Bold) }
         }
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(100.dp))
     }
 }
 

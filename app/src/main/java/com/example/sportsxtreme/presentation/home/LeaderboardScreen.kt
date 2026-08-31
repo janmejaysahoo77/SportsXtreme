@@ -101,7 +101,7 @@ fun LeaderboardScreen(onMenuClick: () -> Unit = {}) {
         LeaderboardTopStrip(onMenuClick = onMenuClick)
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 10.dp, top = 14.dp, end = 10.dp, bottom = 92.dp)
+            contentPadding = PaddingValues(start = 10.dp, top = 14.dp, end = 10.dp, bottom = 100.dp)
         ) {
             item { LeaderboardTitleBlock() }
             item { PlayerTypeTabs() }

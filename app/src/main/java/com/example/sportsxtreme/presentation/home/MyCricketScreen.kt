@@ -180,7 +180,7 @@ fun MyCricketScreen(onMenuClick: () -> Unit = {}, onStartMatch: () -> Unit = {})
         CricketTabs(selectedTab = selectedTab, onSelect = { selectedTab = it })
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 10.dp, top = 10.dp, end = 10.dp, bottom = 96.dp),
+            contentPadding = PaddingValues(start = 10.dp, top = 10.dp, end = 10.dp, bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(13.dp)
         ) {
             when (selectedTab) {

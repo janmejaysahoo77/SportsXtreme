@@ -791,6 +791,7 @@ class HomeScreenView @JvmOverloads constructor(
                         content.addView(simpleTopModeScreen(context, context.getString(R.string.str_xtremecart)))
                     }
                 }
+                content.addView(View(context), LinearLayout.LayoutParams(1, dp(100)))
 
                 addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             }
@@ -953,6 +954,7 @@ class HomeScreenView @JvmOverloads constructor(
                             hostContent.visibility = View.GONE
                             yourTournamentContent.visibility = View.VISIBLE
                         }
+                        addView(View(context), LinearLayout.LayoutParams(1, dp(100)))
                     }, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
             }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))

@@ -124,7 +124,7 @@ private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> U
             ) {
                 TeamSummaryCard()
                 AvailablePlayersSection(onAddPlayer = onAddPlayer)
-                Spacer(Modifier.height(95.dp))
+                Spacer(Modifier.height(100.dp))
             }
         }
         BottomActions(Modifier.align(Alignment.BottomCenter), onAddPlayer = onAddPlayer, onNext = onNext)

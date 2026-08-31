@@ -70,7 +70,7 @@ private fun DiscoverClubsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(9.dp))
             FilterRow(selectedFilter) { selectedFilter = it }
             if (selectedFilter == "Corporate") CorporateClubsContent() else AllClubsContent()
-            Spacer(Modifier.height(86.dp))
+            Spacer(Modifier.height(100.dp))
         }
         ExploreNearbyButton(Modifier.align(Alignment.BottomEnd).padding(end = 13.dp, bottom = 18.dp)) { showLocationSheet = true }
     }

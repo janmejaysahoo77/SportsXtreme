@@ -94,6 +94,7 @@ class CreateTeamActivity : ComponentActivity() {
                     TeamTextField("TEAM CAPTAIN / COORDINATOR (OPTIONAL)", "+91   Enter mobile number", mobile, { mobile = it }, R.drawable.baseline_local_phone_24, KeyboardType.Phone)
                     TeamTextField("TEAM CAPTAIN NAME (OPTIONAL)", "Enter captain name", captain, { captain = it }, R.drawable.baseline_person_outline_24)
                     AddMyselfCard(addMyself) { addMyself = it }
+                    Spacer(Modifier.height(100.dp))
                 }
                 CreateButton(onContinue)
             }

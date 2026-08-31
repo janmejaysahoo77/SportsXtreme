@@ -151,10 +151,9 @@ fun CommunityScreen(onMenuClick: () -> Unit = {}) {
             }
     ) {
         CommunityTopStrip(onMenuClick = onMenuClick)
-        Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 10.dp, top = 14.dp, end = 10.dp, bottom = 92.dp),
+            contentPadding = PaddingValues(start = 10.dp, top = 14.dp, end = 10.dp, bottom = 150.dp),
             verticalArrangement = Arrangement.spacedBy(13.dp)
         ) {
             item { CategoryGrid() }
@@ -172,13 +171,6 @@ fun CommunityScreen(onMenuClick: () -> Unit = {}) {
                 OpportunityCard(opportunity)
             }
             item { PremiumSignalCard() }
-        }
-
-        FloatingAddButton(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 18.dp, bottom = 20.dp)
-        )
         }
     }
 }
@@ -589,31 +581,4 @@ private fun PremiumSignalCard() {
     }
 }
 
-@Composable
-private fun FloatingAddButton(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .size(54.dp)
-            .clip(CircleShape)
-            .background(CommunityAccent)
-            .border(2.dp, Color(0xFFE6FF6E), CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(Modifier.size(22.dp)) {
-            drawLine(
-                color = Color(0xFF101604),
-                start = Offset(size.width * 0.5f, size.height * 0.18f),
-                end = Offset(size.width * 0.5f, size.height * 0.82f),
-                strokeWidth = 2.6.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = Color(0xFF101604),
-                start = Offset(size.width * 0.18f, size.height * 0.5f),
-                end = Offset(size.width * 0.82f, size.height * 0.5f),
-                strokeWidth = 2.6.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-        }
-    }
-}
+
