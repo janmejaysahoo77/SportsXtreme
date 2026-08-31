@@ -1,5 +1,6 @@
 package com.example.sportsxtreme.presentation.tournament
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -57,6 +58,7 @@ import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.presentation.home.HomeScreenView
+import com.example.sportsxtreme.presentation.match.StartMatchActivity
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -198,6 +200,7 @@ private fun FinalTopBar(onBack: () -> Unit) {
 
 @Composable
 private fun FinalTournamentHeader(tournament: Tournament?) {
+    val context = LocalContext.current
     val tournamentName = tournament?.name?.ifBlank { "Tournament" } ?: "Loading tournament…"
     val tournamentDate = tournament?.startDate?.ifBlank { "Date to be announced" } ?: ""
     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -209,9 +212,21 @@ private fun FinalTournamentHeader(tournament: Tournament?) {
             Spacer(Modifier.height(3.dp))
             Text(tournamentDate, color = FinalMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Column(horizontalAlignment = Alignment.End) {
-            Text("DRAFT", color = FinalAccent, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-            Text("19 views", color = FinalMuted, fontSize = 11.sp)
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(18.dp))
+                .background(FinalAccent)
+                .clickable {
+                    val shareText = "Join $tournamentName${tournamentDate.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()}"
+                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, shareText)
+                    }, "Share tournament"))
+                }
+                .padding(horizontal = 15.dp, vertical = 9.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Share", color = FinalBg, fontSize = 12.sp, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -433,61 +448,78 @@ private fun MatchesTab(tournament: Tournament?) {
     val context = LocalContext.current
     val homeCardFactory = remember(context) { HomeScreenView(context) }
     val tournamentName = tournament?.name?.ifBlank { "Tournament" } ?: "Tournament"
+    var selectedMatchTab by remember { mutableIntStateOf(0) }
+    val matchTabs = listOf("Live", "Upcoming", "Completed")
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Matches", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
-                Text("Live tournament scorecards", color = FinalMuted, fontSize = 12.sp)
-            }
-            Box(Modifier.clip(RoundedCornerShape(16.dp)).background(FinalAccent.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
-                Text("2 LIVE", color = FinalAccent, fontSize = 10.sp, fontWeight = FontWeight.Black)
-            }
-        }
+    Box(Modifier.fillMaxSize()) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 92.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            AndroidView(
-                factory = {
-                    homeCardFactory.createHeroScoreCard(
-                        context = it,
-                        league = tournamentName.uppercase(),
-                        round = "Match 01"
-                    )
-                },
-                modifier = Modifier.fillMaxWidth().height(272.dp)
-            )
-            AndroidView(
-                factory = {
-                    homeCardFactory.createHeroScoreCard(
-                        context = it,
-                        league = tournamentName.uppercase(),
-                        round = "Match 02",
-                        leftName = "BBS",
-                        leftScore = "96/2",
-                        leftOvers = "11.3 OV",
-                        rightName = "KDP",
-                        rightScore = "94/7",
-                        rightOvers = "15.0 OV",
-                        target = "148",
-                        rrr = "7.86",
-                        win = "BBS 68%",
-                        note = "BBS need 52 from 51 balls"
-                    )
-                },
-                modifier = Modifier.fillMaxWidth().height(272.dp)
-            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Matches", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
+                    Text("Manage every tournament fixture", color = FinalMuted, fontSize = 12.sp)
+                }
+                Box(Modifier.clip(RoundedCornerShape(16.dp)).background(FinalAccent.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
+                    Text("2 LIVE", color = FinalAccent, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                }
+            }
+            MatchStatusTabs(matchTabs, selectedMatchTab) { selectedMatchTab = it }
+            MatchStatusContent(selectedMatchTab, tournamentName, homeCardFactory)
         }
-        Text(
-            "Tap a scorecard to open the full match details.",
-            color = FinalMuted,
-            fontSize = 12.sp,
-            modifier = Modifier.padding(horizontal = 18.dp)
+        MatchActions(
+            modifier = Modifier.align(Alignment.BottomCenter),
+            onSchedule = { context.startActivity(Intent(context, StartMatchActivity::class.java)) },
+            onStart = { context.startActivity(Intent(context, StartMatchActivity::class.java)) }
         )
+    }
+}
+
+@Composable
+private fun MatchStatusTabs(tabs: List<String>, selectedTab: Int, onTabSelected: (Int) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 18.dp).clip(RoundedCornerShape(14.dp)).background(FinalPanel).padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        tabs.forEachIndexed { index, label ->
+            val selected = selectedTab == index
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (selected) FinalAccent else Color.Transparent)
+                    .clickable { onTabSelected(index) }.padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) { Text(label, color = if (selected) FinalBg else FinalMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+        }
+    }
+}
+
+@Composable
+private fun MatchStatusContent(selectedTab: Int, tournamentName: String, homeCardFactory: HomeScreenView) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (selectedTab == 0) {
+            AndroidView(factory = { homeCardFactory.createHeroScoreCard(it, tournamentName.uppercase(), "Match 01") }, modifier = Modifier.fillMaxWidth().height(272.dp))
+            AndroidView(factory = { homeCardFactory.createHeroScoreCard(it, tournamentName.uppercase(), "Match 02", "BBS", "96/2", "11.3 OV", "KDP", "94/7", "15.0 OV", "148", "7.86", "BBS 68%", "BBS need 52 from 51 balls") }, modifier = Modifier.fillMaxWidth().height(272.dp))
+        } else {
+            val title = if (selectedTab == 1) "No upcoming matches" else "No completed matches"
+            val message = if (selectedTab == 1) "Schedule a match to add it here." else "Finished scorecards will appear here."
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(FinalPanel).border(1.dp, FinalDivider, RoundedCornerShape(16.dp)).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(7.dp))
+                Text(message, color = FinalMuted, fontSize = 12.sp, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MatchActions(modifier: Modifier, onSchedule: () -> Unit, onStart: () -> Unit) {
+    Row(modifier.fillMaxWidth().background(FinalBg).padding(horizontal = 18.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.weight(1f).height(50.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, FinalAccent, RoundedCornerShape(14.dp)).clickable(onClick = onSchedule), contentAlignment = Alignment.Center) {
+            Text("Schedule Match", color = FinalAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+        }
+        Box(Modifier.weight(1f).height(50.dp).clip(RoundedCornerShape(14.dp)).background(FinalAccent).clickable(onClick = onStart), contentAlignment = Alignment.Center) {
+            Text("Start A Match", color = FinalBg, fontSize = 12.sp, fontWeight = FontWeight.Black)
+        }
     }
 }
 

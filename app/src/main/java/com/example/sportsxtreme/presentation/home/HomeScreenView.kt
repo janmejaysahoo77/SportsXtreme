@@ -50,13 +50,23 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import android.widget.ViewFlipper
 import androidx.compose.ui.platform.ComposeView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.core.view.GravityCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import com.example.sportsxtreme.common.NestedHorizontalScrollHelper
 import com.google.firebase.auth.FirebaseAuth
+import com.example.sportsxtreme.domain.model.Tournament
+import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -64,7 +74,8 @@ class HomeScreenView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     private val topMode: TopMode = TopMode.SPORTS,
-    private val liveMatchViewModel: LiveMatchViewModel? = null
+    private val liveMatchViewModel: LiveMatchViewModel? = null,
+    private val hostTournamentsViewModel: HostTournamentsViewModel? = null
 ) : FrameLayout(context, attrs) {
 
     enum class TopMode { SPORTS, MEDIA, CART }
@@ -83,7 +94,8 @@ class HomeScreenView @JvmOverloads constructor(
     private enum class DrawerAction {
         GO_TO_CLUB,
         ADD_TOURNAMENT,
-        START_MATCH
+        START_MATCH,
+        CREATE_TEAM
     }
 
     private val primary = Color.rgb(193, 255, 0)
@@ -103,6 +115,7 @@ class HomeScreenView @JvmOverloads constructor(
     private lateinit var navRow: LinearLayout
     private val cachedTabs = mutableMapOf<Int, View>()
     private lateinit var drawerLayout: DrawerLayout
+    private var isHostTournamentObserverAttached = false
 
     init {
         clipChildren = false
@@ -333,40 +346,21 @@ class HomeScreenView @JvmOverloads constructor(
                         DrawerItem("GO TO CLUB", DrawerIconView.Icon.BUILDING, isFeatured = true, hasChevron = true, action = DrawerAction.GO_TO_CLUB),
                         DrawerItem("Add a Tournament/Series", DrawerIconView.Icon.PLUS_CIRCLE, badge = "FREE", action = DrawerAction.ADD_TOURNAMENT),
                         DrawerItem("Start A Match", DrawerIconView.Icon.BAT, badge = "FREE", action = DrawerAction.START_MATCH),
-                        DrawerItem("Create Your Team", drawableRes = R.drawable.outline_groups_24),
+                        DrawerItem("Create Your Team", drawableRes = R.drawable.outline_groups_24, action = DrawerAction.CREATE_TEAM),
                         DrawerItem("My Cricket", DrawerIconView.Icon.STADIUM),
-                        DrawerItem("My Stats", DrawerIconView.Icon.STATS),
-                        DrawerItem("SportsXtreme Store", DrawerIconView.Icon.STORE, hasDot = true),
                         DrawerItem("SportsXtreme Awards", DrawerIconView.Icon.TROPHY),
-                        DrawerItem("Associations", DrawerIconView.Icon.USERS),
-                        DrawerItem("Clubs", DrawerIconView.Icon.BUILDING),
                         DrawerItem("Contact", DrawerIconView.Icon.HELP),
                         DrawerItem("Share the app", DrawerIconView.Icon.SHARE),
                         DrawerItem("Rate us", DrawerIconView.Icon.STAR),
-                        DrawerItem("App code", DrawerIconView.Icon.QR),
                         DrawerItem("More", DrawerIconView.Icon.MORE, isExpandable = true)
                     )
 
-                    items.forEach { item ->
-                        addView(
-                            createDrawerItemView(context, item),
-                            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(if (item.isFeatured) 58 else 48)).apply {
-                                if (item.isFeatured) {
-                                    topMargin = dp(2)
-                                    bottomMargin = dp(6)
-                                }
-                            }
-                        )
-                    }
-
-                    // Expanded Sub-items (Hardcoded expanded for visual matching)
-                    addView(LinearLayout(context).apply {
+                    // Keep the optional content collapsed until the user explicitly opens More.
+                    val moreContent = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         setPadding(dp(44), 0, 0, 0)
-                        
-                        addView(createSubItemView(context, "What's New", DrawerIconView.Icon.INFO), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)))
-                        addView(createSubItemView(context, "Change Language", DrawerIconView.Icon.GLOBE), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)))
-                        
+                        visibility = View.GONE
+
                         // Social Row
                         addView(LinearLayout(context).apply {
                             orientation = LinearLayout.HORIZONTAL
@@ -377,12 +371,32 @@ class HomeScreenView @JvmOverloads constructor(
                             addView(DrawerIconView(context, DrawerIconView.Icon.SOCIAL_YT).apply { setTint(Color.LTGRAY) }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { leftMargin = dp(16) })
                         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)))
 
-                        // Footer Links
                         addView(createFooterLinkView(context, "About Us"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
                         addView(createFooterLinkView(context, "Help / FAQs"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
                         addView(createFooterLinkView(context, "Privacy Policy"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
+                    }
 
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                    items.forEach { item ->
+                        val itemView = createDrawerItemView(context, item)
+                        if (item.isExpandable) {
+                            itemView.setOnClickListener {
+                                val expanded = moreContent.visibility != View.VISIBLE
+                                moreContent.visibility = if (expanded) View.VISIBLE else View.GONE
+                                itemView.findViewWithTag<DrawerIconView>("more_arrow").rotation = if (expanded) -90f else 90f
+                            }
+                        }
+                        addView(
+                            itemView,
+                            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(if (item.isFeatured) 58 else 48)).apply {
+                                if (item.isFeatured) {
+                                    topMargin = dp(2)
+                                    bottomMargin = dp(6)
+                                }
+                            }
+                        )
+                    }
+
+                    addView(moreContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
                 })
             })
@@ -424,8 +438,8 @@ class HomeScreenView @JvmOverloads constructor(
                 }
                 setPadding(dp(15), 0, dp(15), 0)
             }
-            isClickable = item.action != null
-            isFocusable = item.action != null
+            isClickable = item.action != null || item.isExpandable
+            isFocusable = item.action != null || item.isExpandable
             item.action?.let { action ->
                 setOnClickListener {
                     drawerLayout.closeDrawer(GravityCompat.START)
@@ -433,6 +447,7 @@ class HomeScreenView @JvmOverloads constructor(
                         DrawerAction.GO_TO_CLUB -> context.startActivity(Intent(context, ClubLandingActivity::class.java))
                         DrawerAction.ADD_TOURNAMENT -> context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
                         DrawerAction.START_MATCH -> context.startActivity(Intent(context, StartMatchActivity::class.java))
+                        DrawerAction.CREATE_TEAM -> context.startActivity(Intent(context, CreateTeamActivity::class.java))
                     }
                 }
             }
@@ -485,8 +500,9 @@ class HomeScreenView @JvmOverloads constructor(
 
             if (item.isExpandable) {
                 addView(DrawerIconView(context, DrawerIconView.Icon.RIGHT_ARROW).apply {
-                    setTint(Color.WHITE) // Should be UP arrow, but we use RIGHT_ARROW and rotate it
-                    rotation = -90f
+                    tag = "more_arrow"
+                    setTint(Color.WHITE)
+                    rotation = 90f
                 }, LinearLayout.LayoutParams(dp(16), dp(16)))
             }
 
@@ -994,6 +1010,9 @@ class HomeScreenView @JvmOverloads constructor(
             setPadding(dp(2), dp(2), dp(2), dp(8))
         }
         val allContent = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        var selectedFilter = "ALL"
+        var latestState: HostTournamentsViewModel.UiState = HostTournamentsViewModel.UiState.Loading
+        lateinit var render: (HostTournamentsViewModel.UiState) -> Unit
 
         content.addView(LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -1003,7 +1022,11 @@ class HomeScreenView @JvmOverloads constructor(
                 text = "Do you want to register?"
                 setTextColor(Color.rgb(205, 215, 226)); textSize = 11f; typeface = Typeface.DEFAULT_BOLD
             }, LinearLayout.LayoutParams(0, dp(32), 1f))
-            addView(tournamentPill(context, "REGISTER", true), LinearLayout.LayoutParams(dp(82), dp(30)))
+            addView(tournamentPill(context, "REGISTER", true).apply {
+                setOnClickListener {
+                    context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
+                }
+            }, LinearLayout.LayoutParams(dp(82), dp(30)))
         }, blockParams())
 
         val filters = LinearLayout(context).apply {
@@ -1019,7 +1042,8 @@ class HomeScreenView @JvmOverloads constructor(
             filters.addView(button, LinearLayout.LayoutParams(if (index == 0) dp(43) else dp(83), dp(30)).apply { rightMargin = dp(7) })
             button.setOnClickListener {
                 filterButtons.forEachIndexed { buttonIndex, tab -> updateTournamentFilterStyle(tab, buttonIndex == index) }
-                allContent.visibility = if (index == 0) View.VISIBLE else View.GONE
+                selectedFilter = label
+                render.invoke(latestState)
             }
         }
         content.addView(HorizontalScrollView(context).apply {
@@ -1027,10 +1051,71 @@ class HomeScreenView @JvmOverloads constructor(
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)))
 
         allContent.addView(tournamentSearch(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)))
-        allContent.addView(tournamentOverviewCard(context, "PREMIER LEAGUE\n2024", "T20 CHAMPIONSHIP", "ONGOING", "12 / 16", "Today, 4 PM", "MANAGE TOURNAMENT"), blockParams(top = 12))
-        allContent.addView(tournamentOverviewCard(context, "WEEKEND BASH", "LOCAL KNOCKOUT", "UPCOMING", "2 Days", "₹5,000", "VIEW DETAILS"), blockParams(top = 14))
         content.addView(allContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        render = { state ->
+            latestState = state
+            val dynamicChildCount = max(0, allContent.childCount - 1)
+            if (dynamicChildCount > 0) allContent.removeViews(1, dynamicChildCount)
+            when (state) {
+                HostTournamentsViewModel.UiState.Loading -> allContent.addView(
+                    tournamentMessageCard(context, "Loading your tournaments…", "Please wait while we get your hosted events."),
+                    blockParams(top = 12)
+                )
+                is HostTournamentsViewModel.UiState.Error -> allContent.addView(
+                    tournamentMessageCard(context, "Couldn't load tournaments", state.message),
+                    blockParams(top = 12)
+                )
+                is HostTournamentsViewModel.UiState.Content -> {
+                    val visibleTournaments = state.tournaments.filter { tournament ->
+                        when (selectedFilter) {
+                            "ONGOING" -> tournament.startDateAsLocalDate() == LocalDate.now()
+                            "UPCOMING" -> tournament.startDateAsLocalDate()?.isAfter(LocalDate.now()) == true
+                            else -> true
+                        }
+                    }
+                    if (visibleTournaments.isEmpty()) {
+                        allContent.addView(
+                            tournamentMessageCard(
+                                context,
+                                if (selectedFilter == "ALL") "No tournaments yet" else "No ${selectedFilter.lowercase()} tournaments",
+                                if (selectedFilter == "ALL") "Your tournaments will appear here after you register one." else "Tournaments matching this filter will appear here."
+                            ),
+                            blockParams(top = 12)
+                        )
+                    } else {
+                        visibleTournaments.forEachIndexed { index, tournament ->
+                            allContent.addView(
+                                tournamentOverviewCard(context, tournament),
+                                blockParams(top = if (index == 0) 12 else 14)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        hostTournamentsViewModel?.let { viewModel ->
+            post {
+                if (!isHostTournamentObserverAttached) {
+                    // HomeScreenView is hosted by MainActivity, which owns the ViewModel and
+                    // provides the lifecycle used by the other home-section views as well.
+                    (context as? LifecycleOwner)?.lifecycleScope?.launch {
+                        viewModel.uiState.collect { state: HostTournamentsViewModel.UiState ->
+                            render.invoke(state)
+                        }
+                    }
+                    isHostTournamentObserverAttached = true
+                }
+            }
+        } ?: render.invoke(HostTournamentsViewModel.UiState.Content(emptyList()))
         return content
+    }
+
+    private fun Tournament.startDateAsLocalDate(): LocalDate? = try {
+        LocalDate.parse(startDate, DateTimeFormatter.ofPattern("dd/MM/uuuu"))
+    } catch (_: DateTimeParseException) {
+        null
     }
 
     private fun roundedBackground(color: Int, radius: Int, strokeColor: Int? = null): GradientDrawable = GradientDrawable().apply {
@@ -1053,7 +1138,30 @@ class HomeScreenView @JvmOverloads constructor(
         background = roundedBackground(Color.rgb(18, 29, 46), dp(12), Color.rgb(57, 86, 72))
     }
 
-    private fun tournamentOverviewCard(context: Context, title: String, subtitle: String, status: String, leftLabel: String, rightLabel: String, action: String): View {
+    private fun tournamentMessageCard(context: Context, title: String, message: String): View = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(16), dp(17), dp(16), dp(17))
+        background = roundedBackground(Color.rgb(12, 25, 43), dp(13), Color.rgb(36, 63, 85))
+        addView(TextView(context).apply {
+            text = title; setTextColor(Color.WHITE); textSize = 13f; typeface = Typeface.DEFAULT_BOLD
+        })
+        addView(TextView(context).apply {
+            text = message; setTextColor(Color.rgb(145, 161, 184)); textSize = 10f
+        }, blockParams(top = 5))
+    }
+
+    private fun tournamentOverviewCard(context: Context, tournament: Tournament): View {
+        val status = if (tournament.lookingForTeams) "OPEN" else "UPCOMING"
+        val location = listOf(tournament.ground, tournament.city, tournament.requirements.location)
+            .filter { it.isNotBlank() }.distinct().joinToString(" • ")
+        val subtitle = listOf(tournament.type, tournament.requirements.tournamentFormat, tournament.matchForm, tournament.ballType)
+            .filter { it.isNotBlank() }.joinToString(" • ")
+        val teams = tournament.requirements.numberOfTeams.ifBlank { "Not set" }
+        val startDate = when {
+            tournament.dateToBeAnnounced -> "To be announced"
+            tournament.startDate.isNotBlank() -> tournament.startDate
+            else -> "Not set"
+        }
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(13), dp(13), dp(13), dp(12))
             background = roundedBackground(Color.rgb(12, 25, 43), dp(13), Color.rgb(36, 63, 85))
@@ -1061,17 +1169,22 @@ class HomeScreenView @JvmOverloads constructor(
                 gravity = Gravity.CENTER_VERTICAL
                 addView(TextView(context).apply { text = "🏆"; textSize = 20f }, LinearLayout.LayoutParams(dp(29), dp(34)))
                 addView(LinearLayout(context).apply { orientation = LinearLayout.VERTICAL
-                    addView(TextView(context).apply { text = title; setTextColor(Color.WHITE); textSize = 13f; typeface = Typeface.DEFAULT_BOLD; maxLines = 2 })
+                    addView(TextView(context).apply { text = tournament.name.ifBlank { "Unnamed tournament" }; setTextColor(Color.WHITE); textSize = 13f; typeface = Typeface.DEFAULT_BOLD; maxLines = 2 })
                     addView(TextView(context).apply { text = subtitle; setTextColor(Color.rgb(161, 185, 142)); textSize = 8f; typeface = Typeface.DEFAULT_BOLD })
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 addView(tournamentPill(context, status, false), LinearLayout.LayoutParams(dp(58), dp(23)))
             })
+            if (location.isNotBlank()) addView(TextView(context).apply {
+                text = "⌖  $location"; setTextColor(Color.rgb(145, 161, 184)); textSize = 9f; maxLines = 1
+            }, blockParams(top = 7))
             addView(LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, dp(12))
-                addView(tournamentMetric(context, if (status == "ONGOING") "TEAMS" else "STARTS IN", leftLabel), LinearLayout.LayoutParams(0, dp(50), 1f).apply { rightMargin = dp(8) })
-                addView(tournamentMetric(context, if (status == "ONGOING") "NEXT MATCH" else "PRIZE POOL", rightLabel), LinearLayout.LayoutParams(0, dp(50), 1f))
+                addView(tournamentMetric(context, "TEAMS", teams), LinearLayout.LayoutParams(0, dp(50), 1f).apply { rightMargin = dp(8) })
+                addView(tournamentMetric(context, "START DATE", startDate), LinearLayout.LayoutParams(0, dp(50), 1f))
             })
-            addView(TextView(context).apply { text = action + "  ⊙"; gravity = Gravity.CENTER; textSize = 10f; typeface = Typeface.DEFAULT_BOLD; setTextColor(if (action == "MANAGE TOURNAMENT") Color.rgb(11, 24, 10) else primary)
-                background = roundedBackground(if (action == "MANAGE TOURNAMENT") primary else Color.TRANSPARENT, dp(18), if (action == "MANAGE TOURNAMENT") null else Color.rgb(74, 105, 57))
+            addView(TextView(context).apply { text = "MANAGE TOURNAMENT  ⊙"; gravity = Gravity.CENTER; textSize = 10f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.rgb(11, 24, 10))
+                background = roundedBackground(primary, dp(18))
+                isClickable = true
+                setOnClickListener { Toast.makeText(context, "Tournament management will be available soon", Toast.LENGTH_SHORT).show() }
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(38)))
         }
     }

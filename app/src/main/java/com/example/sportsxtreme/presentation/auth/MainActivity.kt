@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
     private val inviteLinkViewModel: InviteLinkViewModel by viewModels()
     private val inviteClaimViewModel: InviteClaimViewModel by viewModels()
     private val liveMatchViewModel: LiveMatchViewModel by viewModels()
+    private val hostTournamentsViewModel: HostTournamentsViewModel by viewModels()
     private val locationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var currentScreen by mutableStateOf(Screen.Splash)
     private val locationPermissionLauncher = registerForActivityResult(
@@ -242,7 +243,11 @@ class MainActivity : ComponentActivity() {
 
             Screen.Home -> AndroidView(
                 factory = { context ->
-                    HomeScreenView(context, liveMatchViewModel = liveMatchViewModel).also {
+                    HomeScreenView(
+                        context,
+                        liveMatchViewModel = liveMatchViewModel,
+                        hostTournamentsViewModel = hostTournamentsViewModel
+                    ).also {
                         homeScreenView = it
                     }
                 }
