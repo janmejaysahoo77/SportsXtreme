@@ -348,38 +348,19 @@ class HomeScreenView @JvmOverloads constructor(
                         DrawerItem("Start A Match", DrawerIconView.Icon.BAT, badge = "FREE", action = DrawerAction.START_MATCH),
                         DrawerItem("Create Your Team", drawableRes = R.drawable.outline_groups_24, action = DrawerAction.CREATE_TEAM),
                         DrawerItem("My Cricket", DrawerIconView.Icon.STADIUM),
-                        DrawerItem("My Stats", DrawerIconView.Icon.STATS),
-                        DrawerItem("SportsXtreme Store", DrawerIconView.Icon.STORE, hasDot = true),
                         DrawerItem("SportsXtreme Awards", DrawerIconView.Icon.TROPHY),
-                        DrawerItem("Associations", DrawerIconView.Icon.USERS),
-                        DrawerItem("Clubs", DrawerIconView.Icon.BUILDING),
                         DrawerItem("Contact", DrawerIconView.Icon.HELP),
                         DrawerItem("Share the app", DrawerIconView.Icon.SHARE),
                         DrawerItem("Rate us", DrawerIconView.Icon.STAR),
-                        DrawerItem("App code", DrawerIconView.Icon.QR),
                         DrawerItem("More", DrawerIconView.Icon.MORE, isExpandable = true)
                     )
 
-                    items.forEach { item ->
-                        addView(
-                            createDrawerItemView(context, item),
-                            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(if (item.isFeatured) 58 else 48)).apply {
-                                if (item.isFeatured) {
-                                    topMargin = dp(2)
-                                    bottomMargin = dp(6)
-                                }
-                            }
-                        )
-                    }
-
-                    // Expanded Sub-items (Hardcoded expanded for visual matching)
-                    addView(LinearLayout(context).apply {
+                    // Keep the optional content collapsed until the user explicitly opens More.
+                    val moreContent = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         setPadding(dp(44), 0, 0, 0)
-                        
-                        addView(createSubItemView(context, "What's New", DrawerIconView.Icon.INFO), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)))
-                        addView(createSubItemView(context, "Change Language", DrawerIconView.Icon.GLOBE), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)))
-                        
+                        visibility = View.GONE
+
                         // Social Row
                         addView(LinearLayout(context).apply {
                             orientation = LinearLayout.HORIZONTAL
@@ -390,12 +371,32 @@ class HomeScreenView @JvmOverloads constructor(
                             addView(DrawerIconView(context, DrawerIconView.Icon.SOCIAL_YT).apply { setTint(Color.LTGRAY) }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { leftMargin = dp(16) })
                         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)))
 
-                        // Footer Links
                         addView(createFooterLinkView(context, "About Us"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
                         addView(createFooterLinkView(context, "Help / FAQs"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
                         addView(createFooterLinkView(context, "Privacy Policy"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
+                    }
 
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                    items.forEach { item ->
+                        val itemView = createDrawerItemView(context, item)
+                        if (item.isExpandable) {
+                            itemView.setOnClickListener {
+                                val expanded = moreContent.visibility != View.VISIBLE
+                                moreContent.visibility = if (expanded) View.VISIBLE else View.GONE
+                                itemView.findViewWithTag<DrawerIconView>("more_arrow").rotation = if (expanded) -90f else 90f
+                            }
+                        }
+                        addView(
+                            itemView,
+                            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(if (item.isFeatured) 58 else 48)).apply {
+                                if (item.isFeatured) {
+                                    topMargin = dp(2)
+                                    bottomMargin = dp(6)
+                                }
+                            }
+                        )
+                    }
+
+                    addView(moreContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
                 })
             })
@@ -437,8 +438,8 @@ class HomeScreenView @JvmOverloads constructor(
                 }
                 setPadding(dp(15), 0, dp(15), 0)
             }
-            isClickable = item.action != null
-            isFocusable = item.action != null
+            isClickable = item.action != null || item.isExpandable
+            isFocusable = item.action != null || item.isExpandable
             item.action?.let { action ->
                 setOnClickListener {
                     drawerLayout.closeDrawer(GravityCompat.START)
@@ -499,8 +500,9 @@ class HomeScreenView @JvmOverloads constructor(
 
             if (item.isExpandable) {
                 addView(DrawerIconView(context, DrawerIconView.Icon.RIGHT_ARROW).apply {
-                    setTint(Color.WHITE) // Should be UP arrow, but we use RIGHT_ARROW and rotate it
-                    rotation = -90f
+                    tag = "more_arrow"
+                    setTint(Color.WHITE)
+                    rotation = 90f
                 }, LinearLayout.LayoutParams(dp(16), dp(16)))
             }
 
