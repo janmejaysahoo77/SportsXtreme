@@ -233,82 +233,87 @@ private fun FriendlyMatchDetailsScreen(
             }
         }
     ) {
-        Column(Modifier.fillMaxSize()) {
-            DetailsTopBar(onBack)
-            Column(
-                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                Column {
-                    Text("Set up your match", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-                    Text("Choose the venue, date and start time.", color = DetailsMuted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+        Column(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.weight(1f)) {
+                Column(Modifier.fillMaxSize()) {
+                    DetailsTopBar(onBack)
+                    Column(
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 18.dp),
+                        verticalArrangement = Arrangement.spacedBy(18.dp)
+                    ) {
+                        Column {
+                            Text("Set up your match", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                            Text("Choose the venue, date and start time.", color = DetailsMuted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                        }
+                        DetailsHeading("Ground Selection", DetailsIcon.LOCATION)
+                        DetailsOptionCard("Select Existing Ground", "KRT Stadium, Bhubaneswar", ground == 0) {
+                            showGroundPicker = true
+                        }
+                        DetailsOptionCard(
+                            "Use Current Location",
+                            if (ground == 1) venue else null,
+                            ground == 1
+                        ) {
+                            showLocationConfirmation = true
+                        }
+                        DetailsOptionCard("Add New Ground", null, ground == 2) {
+                            showVenueDialog = true
+                        }
+                        DetailsHeading("Match Date", DetailsIcon.CALENDAR)
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                            DetailsDateCard("Today", formatShortDate(startOfToday()), date == 0, Modifier.weight(1f)) {
+                                date = 0
+                                matchDateEpochMs = startOfToday()
+                            }
+                            DetailsDateCard("Tomorrow", formatShortDate(startOfTomorrow()), date == 1, Modifier.weight(1f)) {
+                                date = 1
+                                matchDateEpochMs = startOfTomorrow()
+                            }
+                            DetailsDateCard("Custom", formatShortDate(matchDateEpochMs), date == 2, Modifier.weight(1f)) {
+                                val calendar = Calendar.getInstance().apply { timeInMillis = matchDateEpochMs }
+                                DatePickerDialog(context, { _, year, month, dayOfMonth ->
+                                    date = 2
+                                    matchDateEpochMs = startOfDay(year, month, dayOfMonth)
+                                }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+                            }
+                        }
+                        DetailsHeading("Match Time", DetailsIcon.CLOCK)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            DetailsTimeChip("Now", timeMode == 0) {
+                                timeMode = 0
+                                matchTime = formatMatchTime(Calendar.getInstance())
+                            }
+                            DetailsTimeChip("Choose Time", timeMode == 1) {
+                                timeMode = 1
+                                matchTime = "06:30 PM"
+                            }
+                            DetailsTimeChip("Custom Time", timeMode == 2, openTimePicker)
+                        }
+                        DetailsTimeCard(matchTime, openTimePicker)
+                        DetailsSnapshot(venue, matchDateEpochMs, matchTime)
+                        Spacer(Modifier.height(82.dp))
+                    }
                 }
-                DetailsHeading("Ground Selection", DetailsIcon.LOCATION)
-                DetailsOptionCard("Select Existing Ground", "KRT Stadium, Bhubaneswar", ground == 0) {
-                    showGroundPicker = true
-                }
-                DetailsOptionCard(
-                    "Use Current Location",
-                    if (ground == 1) venue else null,
-                    ground == 1
+                Box(
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, DetailsBg, DetailsBg)))
+                        .padding(horizontal = 16.dp, vertical = 16.dp)
                 ) {
-                    showLocationConfirmation = true
-                }
-                DetailsOptionCard("Add New Ground", null, ground == 2) {
-                    showVenueDialog = true
-                }
-                DetailsHeading("Match Date", DetailsIcon.CALENDAR)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    DetailsDateCard("Today", formatShortDate(startOfToday()), date == 0, Modifier.weight(1f)) {
-                        date = 0
-                        matchDateEpochMs = startOfToday()
-                    }
-                    DetailsDateCard("Tomorrow", formatShortDate(startOfTomorrow()), date == 1, Modifier.weight(1f)) {
-                        date = 1
-                        matchDateEpochMs = startOfTomorrow()
-                    }
-                    DetailsDateCard("Custom", formatShortDate(matchDateEpochMs), date == 2, Modifier.weight(1f)) {
-                        val calendar = Calendar.getInstance().apply { timeInMillis = matchDateEpochMs }
-                        DatePickerDialog(context, { _, year, month, dayOfMonth ->
-                            date = 2
-                            matchDateEpochMs = startOfDay(year, month, dayOfMonth)
-                        }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFFD8FF37), DetailsAccent, Color(0xFF9AFF00))))
+                            .clickable(
+                                enabled = !isLoading && venue.isNotBlank() && matchDateEpochMs > 0L && matchTime.isNotBlank(),
+                                onClick = { onContinue(venue, matchDateEpochMs, matchTime) }
+                            ),
+                        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(if (isLoading) "SAVING DETAILS..." else "CONTINUE", color = Color(0xFF122004), fontSize = 15.sp, fontWeight = FontWeight.Black)
+                        DetailsArrow(Modifier.padding(start = 10.dp).size(20.dp), true, Color(0xFF122004))
                     }
                 }
-                DetailsHeading("Match Time", DetailsIcon.CLOCK)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    DetailsTimeChip("Now", timeMode == 0) {
-                        timeMode = 0
-                        matchTime = formatMatchTime(Calendar.getInstance())
-                    }
-                    DetailsTimeChip("Choose Time", timeMode == 1) {
-                        timeMode = 1
-                        matchTime = "06:30 PM"
-                    }
-                    DetailsTimeChip("Custom Time", timeMode == 2, openTimePicker)
-                }
-                DetailsTimeCard(matchTime, openTimePicker)
-                DetailsSnapshot(venue, matchDateEpochMs, matchTime)
-                Spacer(Modifier.height(82.dp))
             }
-        }
-        Box(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, DetailsBg, DetailsBg)))
-                .padding(horizontal = 16.dp, vertical = 16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp))
-                    .background(Brush.horizontalGradient(listOf(Color(0xFFD8FF37), DetailsAccent, Color(0xFF9AFF00))))
-                    .clickable(
-                        enabled = !isLoading && venue.isNotBlank() && matchDateEpochMs > 0L && matchTime.isNotBlank(),
-                        onClick = { onContinue(venue, matchDateEpochMs, matchTime) }
-                    ),
-                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(if (isLoading) "SAVING DETAILS..." else "CONTINUE", color = Color(0xFF122004), fontSize = 15.sp, fontWeight = FontWeight.Black)
-                DetailsArrow(Modifier.padding(start = 10.dp).size(20.dp), true, Color(0xFF122004))
-            }
+            Spacer(modifier = Modifier.height(100.dp))
         }
         if (showVenueDialog) {
             AlertDialog(

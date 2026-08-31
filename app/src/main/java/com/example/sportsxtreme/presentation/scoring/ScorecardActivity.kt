@@ -220,6 +220,7 @@ private fun ScorecardScreen(match: MatchDetail, onBack: () -> Unit) {
                             else -> CommentaryTab(match)
                         }
                     }
+                    Spacer(Modifier.height(100.dp))
                 }
             }
         }

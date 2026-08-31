@@ -230,7 +230,7 @@ private fun FriendlyMatchSetupScreen(
                     ball = listOf("Leather Ball", "Tennis Ball", "Tape Ball")[ballType],
                     overs = if (selectedOvers == 3) "$customOvers Overs" else "${overs[selectedOvers]} Overs"
                 )
-                Spacer(Modifier.height(74.dp))
+                Spacer(Modifier.height(100.dp))
             }
         }
         Box(

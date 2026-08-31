@@ -266,7 +266,7 @@ private fun SelectPlayingTeamsScreen(
                 }
             )
             MatchPreviewCard(teamA = displayedTeamA, teamB = displayedTeamB, modifier = Modifier.padding(top = 39.dp))
-            Spacer(Modifier.height(42.dp))
+            Spacer(Modifier.height(100.dp))
         }
     }
 }

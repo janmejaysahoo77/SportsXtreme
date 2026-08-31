@@ -56,6 +56,7 @@ private fun TeamProfileScreen(onBack: () -> Unit) {
                 "Members" -> MembersTabContent()
                 "Photos" -> PhotosTabContent()
             }
+            Spacer(Modifier.height(100.dp))
         }
     }
 }

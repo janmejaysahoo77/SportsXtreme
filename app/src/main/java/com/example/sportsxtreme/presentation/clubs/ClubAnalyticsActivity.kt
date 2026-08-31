@@ -79,7 +79,7 @@ private fun OverviewTab() = Column(Modifier.fillMaxSize().verticalScroll(remembe
     Spacer(Modifier.height(18.dp)); Text("Quick Insights", color = UiColor.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     Spacer(Modifier.height(9.dp)); Insight("◉", "Best Performing Team", "Senior Team   75% Win Rate"); Insight("♜", "Latest Tournament Champion", "Senior Team"); Insight("♧", "Top Run Scorer", "Rahul Das  (982 Runs)")
     Spacer(Modifier.height(17.dp)); Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Monthly Activity", color = UiColor.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Text("This Year⌄", color = UiColor.White, fontSize = 9.sp, modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(UiColor(59, 57, 69)).padding(horizontal = 11.dp, vertical = 5.dp)) }
-    Spacer(Modifier.height(10.dp)); ActivityChart(); Spacer(Modifier.height(25.dp))
+    Spacer(Modifier.height(10.dp)); ActivityChart(); Spacer(Modifier.height(100.dp))
 }
 
 @Composable
@@ -98,7 +98,7 @@ private fun TeamsTab() = Column(Modifier.fillMaxSize().verticalScroll(rememberSc
     TeamPerformance("Women's Team", "Priya Sharma", "16", "22", "15", "68%", "1", "0")
     TeamPerformance("Under-19 Team", "Aarav Nayak", "17", "32", "23", "72%", "1", "2")
     TeamPerformance("Under-16 Team", "Suman Rout", "15", "28", "18", "64%", "1", "0")
-    Spacer(Modifier.height(25.dp))
+    Spacer(Modifier.height(100.dp))
 }
 
 @Composable
@@ -115,7 +115,7 @@ private fun TournamentsTab() = Column(Modifier.fillMaxSize().verticalScroll(reme
     TournamentCard("Monsoon Cup\n2025", "Club Internal\nTournament", "COMPLETED", "5", "16", "Women's Team", "Senior Team")
     Box(Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(7.dp)).background(UiColor(18, 22, 30)), contentAlignment = Alignment.Center) { Text("View All Internal Tournaments   >", color = AnalyticsAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
     Spacer(Modifier.height(24.dp)); Text("External Tournaments", color = UiColor.White, fontSize = 14.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.height(10.dp)); Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = AnalyticsPanel)) { Row(Modifier.height(62.dp).padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(35.dp).background(UiColor(42, 48, 54))); Column(Modifier.weight(1f).padding(start = 10.dp)) { Text("Summer Cup 2025", color = UiColor.White, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text("Hosted by: District C.A.", color = AnalyticsMuted, fontSize = 7.sp) }; Text("COMPLETED   >", color = AnalyticsMuted, fontSize = 7.sp) } }
-    Spacer(Modifier.height(25.dp))
+    Spacer(Modifier.height(100.dp))
 }
 
 @Composable

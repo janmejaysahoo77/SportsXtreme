@@ -70,7 +70,7 @@ private fun ClubLandingScreen(onBack: () -> Unit) {
         CreateClubCard()
         Spacer(Modifier.height(12.dp))
         BenefitsCard()
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(100.dp))
     }
 }
 

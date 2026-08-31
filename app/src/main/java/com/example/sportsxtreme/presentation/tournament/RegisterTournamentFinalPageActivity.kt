@@ -114,11 +114,16 @@ private fun RegisterTournamentFinalPage(tournament: Tournament?, onBack: () -> U
                 )
             }
         ) {
-            when (selectedTab) {
-                0 -> AboutTab(tournament)
-                1 -> TeamsTab()
-                2 -> MatchesTab(tournament)
-                else -> PointsTab()
+            Column(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.weight(1f)) {
+                    when (selectedTab) {
+                        0 -> AboutTab(tournament)
+                        1 -> TeamsTab()
+                        2 -> MatchesTab(tournament)
+                        else -> PointsTab()
+                    }
+                }
+                Spacer(modifier = Modifier.height(100.dp))
             }
         }
     }

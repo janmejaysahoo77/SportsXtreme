@@ -69,7 +69,7 @@ private fun SquadTeamsPage(squad: String, onBack: () -> Unit) = Column(Modifier.
         Spacer(Modifier.height(20.dp))
     }
     Box(Modifier.fillMaxWidth().height(109.dp).clip(RoundedCornerShape(15.dp)).border(2.dp, TeamAccent, RoundedCornerShape(15.dp)), contentAlignment = Alignment.Center) { Text("+   Create New Team", color = TeamAccent, fontSize = 28.sp, fontWeight = FontWeight.Bold) }
-    Spacer(Modifier.height(50.dp))
+    Spacer(Modifier.height(100.dp))
 }
 
 @Composable

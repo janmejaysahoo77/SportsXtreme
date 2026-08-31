@@ -231,6 +231,7 @@ private fun TournamentRequirementsScreen(
                     }
                 }
             )
+            Spacer(androidx.compose.ui.Modifier.height(100.dp))
         }
     }
     if (showSuccessAnimation) {

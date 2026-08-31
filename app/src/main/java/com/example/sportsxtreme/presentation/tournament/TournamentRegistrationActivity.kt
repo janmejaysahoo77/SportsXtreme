@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -230,6 +231,7 @@ private fun TournamentRegistrationScreen(
                 isLoading = uiState is TournamentRegistrationViewModel.UiState.Loading,
                 onClick = viewModel::saveTournament
             )
+            Spacer(androidx.compose.ui.Modifier.height(100.dp))
         }
     }
 }
