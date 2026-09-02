@@ -2,6 +2,7 @@ package com.example.sportsxtreme.presentation.team
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.animateColorAsState
@@ -47,15 +48,74 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.sportsxtreme.R
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
+@AndroidEntryPoint
 class CreateTeamActivity : ComponentActivity() {
+    @Inject lateinit var firebaseAuth: FirebaseAuth
+    @Inject lateinit var firestore: FirebaseFirestore
+    private var isSavingTeam = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = android.graphics.Color.rgb(2, 11, 18)
         window.navigationBarColor = android.graphics.Color.rgb(2, 11, 18)
-        setContent { CreateTeamScreen(::finish) { startActivity(Intent(this, ManagePlayersInsideTeamActivity::class.java)) } }
+        setContent {
+            CreateTeamScreen(::finish) { teamName, city, addMyself ->
+                saveTeamAndContinue(teamName, city, addMyself)
+            }
+        }
+    }
+
+    private fun saveTeamAndContinue(teamName: String, city: String, addMyself: Boolean) {
+        if (isSavingTeam) return
+        val userId = firebaseAuth.currentUser?.uid ?: run {
+            Toast.makeText(this, "Sign in to create a team", Toast.LENGTH_SHORT).show()
+            return
+        }
+        isSavingTeam = true
+        lifecycleScope.launch {
+            try {
+                val teamRef = firestore.collection("teams").document()
+                val members: List<Map<String, Any>> = if (addMyself) {
+                    listOf(mapOf("userId" to userId, "role" to "OWNER", "joinedAtEpochMs" to System.currentTimeMillis()))
+                } else {
+                    emptyList()
+                }
+                teamRef.set(
+                    mapOf(
+                        "teamId" to teamRef.id,
+                        "teamName" to teamName,
+                        "shortName" to teamName.take(3).uppercase(),
+                        "city" to city,
+                        "cityTown" to city,
+                        "ownerUserId" to userId,
+                        "memberIds" to if (addMyself) listOf(userId) else emptyList<String>(),
+                        "members" to members,
+                        "type" to "USER_CREATED",
+                        "createdAtEpochMs" to System.currentTimeMillis(),
+                        "updatedAtEpochMs" to System.currentTimeMillis()
+                    )
+                ).await()
+                startActivity(
+                    Intent(this@CreateTeamActivity, ManagePlayersInsideTeamActivity::class.java)
+                        .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_NAME, teamName)
+                        .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_ID, teamRef.id)
+                )
+            } catch (error: Exception) {
+                Toast.makeText(this@CreateTeamActivity, error.message ?: "Unable to create team", Toast.LENGTH_SHORT).show()
+            } finally {
+                isSavingTeam = false
+            }
+        }
     }
 
     private val background = Color(0xFF020B12)
@@ -69,10 +129,11 @@ class CreateTeamActivity : ComponentActivity() {
     private val border = Color(0xFF26343C)
 
     @Composable
-    private fun CreateTeamScreen(onBack: () -> Unit, onContinue: () -> Unit) {
+    private fun CreateTeamScreen(onBack: () -> Unit, onContinue: (String, String, Boolean) -> Unit) {
         var teamName by rememberSaveable { mutableStateOf("") }; var city by rememberSaveable { mutableStateOf("") }
         var mobile by rememberSaveable { mutableStateOf("") }; var captain by rememberSaveable { mutableStateOf("") }
         var addMyself by rememberSaveable { mutableStateOf(true) }
+        var showRequiredErrors by rememberSaveable { mutableStateOf(false) }
         val focusManager = LocalFocusManager.current
         Box(Modifier.fillMaxSize().background(background).clickable(
             interactionSource = remember { MutableInteractionSource() }, indication = null
@@ -89,14 +150,16 @@ class CreateTeamActivity : ComponentActivity() {
                     ScreenTitle(); LogoPicker()
                     Text("Team Logo", color = textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
                     Text("Upload your team logo", color = textSecondary, fontSize = 11.sp); Spacer(Modifier.height(14.dp))
-                    TeamTextField("TEAM NAME *", "Enter your team name", teamName, { if (it.length <= 30) teamName = it }, R.drawable.baseline_check_circle_24, counter = "${teamName.length}/30")
-                    TeamTextField("CITY / TOWN *", "Enter city / town", city, { city = it }, R.drawable.baseline_edit_location_24)
+                    TeamTextField("TEAM NAME *", "Enter your team name", teamName, { if (it.length <= 30) teamName = it }, R.drawable.baseline_check_circle_24, counter = "${teamName.length}/30", error = if (showRequiredErrors && teamName.isBlank()) "Team name is required" else null)
+                    TeamTextField("CITY / TOWN *", "Enter city / town", city, { city = it }, R.drawable.baseline_edit_location_24, error = if (showRequiredErrors && city.isBlank()) "City / town is required" else null)
                     TeamTextField("TEAM CAPTAIN / COORDINATOR (OPTIONAL)", "+91   Enter mobile number", mobile, { mobile = it }, R.drawable.baseline_local_phone_24, KeyboardType.Phone)
                     TeamTextField("TEAM CAPTAIN NAME (OPTIONAL)", "Enter captain name", captain, { captain = it }, R.drawable.baseline_person_outline_24)
                     AddMyselfCard(addMyself) { addMyself = it }
                     Spacer(Modifier.height(100.dp))
                 }
-                CreateButton(onContinue)
+                CreateButton(enabled = teamName.isNotBlank() && city.isNotBlank()) {
+                    if (teamName.isBlank() || city.isBlank()) showRequiredErrors = true else onContinue(teamName.trim(), city.trim(), addMyself)
+                }
             }
         }
     }
@@ -115,14 +178,14 @@ class CreateTeamActivity : ComponentActivity() {
         Box(Modifier.fillMaxSize().border(1.dp, accent.copy(.58f), CircleShape)); Box(Modifier.size(118.dp).background(elevatedSurface, CircleShape).border(1.dp, accent.copy(.65f), CircleShape), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(painterResource(R.drawable.baseline_camera_alt_24), null, tint = textPrimary, modifier = Modifier.size(34.dp)); Text("ADD LOGO", color = textPrimary, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 5.dp)) } }; Box(Modifier.align(Alignment.TopEnd).size(30.dp).background(accent, CircleShape).border(2.dp, background, CircleShape), contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.baseline_add_24), null, tint = background, modifier = Modifier.size(19.dp)) }
     }
     @Composable
-    private fun TeamTextField(label: String, placeholder: String, value: String, onValueChange: (String) -> Unit, icon: Int, keyboardType: KeyboardType = KeyboardType.Text, counter: String? = null) {
+    private fun TeamTextField(label: String, placeholder: String, value: String, onValueChange: (String) -> Unit, icon: Int, keyboardType: KeyboardType = KeyboardType.Text, counter: String? = null, error: String? = null) {
         val focusManager = LocalFocusManager.current
         val focusRequester = remember { FocusRequester() }
         val interactionSource = remember { MutableInteractionSource() }
         val isFocused by interactionSource.collectIsFocusedAsState()
         val shouldFloat = isFocused || value.isNotEmpty()
-        val fieldBorder by animateColorAsState(if (isFocused) accent.copy(.86f) else border, tween(110), label = "field-border")
-        val labelColor by animateColorAsState(if (isFocused) accent else textSecondary, tween(110), label = "field-label-color")
+        val fieldBorder by animateColorAsState(if (error != null) Color(0xFFFF6B6B) else if (isFocused) accent.copy(.86f) else border, tween(110), label = "field-border")
+        val labelColor by animateColorAsState(if (error != null) Color(0xFFFF8A8A) else if (isFocused) accent else textSecondary, tween(110), label = "field-label-color")
         val labelOffset by animateDpAsState(if (shouldFloat) 0.dp else 24.dp, tween(120), label = "field-label-position")
         Box(Modifier.fillMaxWidth().padding(top = 10.dp).height(70.dp)) {
             Row(
@@ -157,8 +220,9 @@ class CreateTeamActivity : ComponentActivity() {
             Text(label, color = labelColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = .1.sp,
                 modifier = Modifier.align(Alignment.TopStart).padding(start = 44.dp).offset(y = labelOffset)
                     .then(if (shouldFloat) Modifier.background(surface) else Modifier).padding(horizontal = 5.dp, vertical = 1.dp))
+            error?.let { Text(it, color = Color(0xFFFF8A8A), fontSize = 10.sp, modifier = Modifier.align(Alignment.BottomStart).padding(start = 13.dp)) }
         }
     }
     @Composable private fun AddMyselfCard(checked: Boolean, onCheckedChange: (Boolean) -> Unit) = Row(Modifier.fillMaxWidth().padding(top = 11.dp).background(surface, RoundedCornerShape(10.dp)).border(1.dp, accent.copy(.55f), RoundedCornerShape(10.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(34.dp).background(accent.copy(.13f), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.outline_groups_24), null, tint = accent, modifier = Modifier.size(21.dp)) }; Column(Modifier.padding(start = 10.dp).weight(1f)) { Text("Add yourself in the team", color = textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp); Text("You will be added as a member", color = textSecondary, fontSize = 10.sp) }; Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = accent, uncheckedThumbColor = textSecondary, uncheckedTrackColor = border)) }
-    @Composable private fun CreateButton(onContinue: () -> Unit) = Box(Modifier.fillMaxWidth().padding(bottom = 10.dp, top = 4.dp).height(54.dp).background(Brush.horizontalGradient(listOf(accent, accentGreen)), RoundedCornerShape(10.dp)).clickable(onClick = onContinue), contentAlignment = Alignment.Center) { Text("Create Team", color = background, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold); Icon(painterResource(R.drawable.outline_arrow_back_ios_24), null, tint = background, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 17.dp).size(20.dp).graphicsLayer(rotationZ = 180f)) }
+    @Composable private fun CreateButton(enabled: Boolean, onContinue: () -> Unit) = Box(Modifier.fillMaxWidth().padding(bottom = 10.dp, top = 4.dp).height(54.dp).background(if (enabled) Brush.horizontalGradient(listOf(accent, accentGreen)) else Brush.horizontalGradient(listOf(border, border)), RoundedCornerShape(10.dp)).clickable(onClick = onContinue), contentAlignment = Alignment.Center) { Text("Create Team", color = if (enabled) background else textSecondary, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold); Icon(painterResource(R.drawable.outline_arrow_back_ios_24), null, tint = if (enabled) background else textSecondary, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 17.dp).size(20.dp).graphicsLayer(rotationZ = 180f)) }
 }

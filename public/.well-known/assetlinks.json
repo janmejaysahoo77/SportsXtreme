@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.example.sportsxtreme",
+      "sha256_cert_fingerprints": [
+        "53:2B:7C:27:97:AE:DD:5D:31:19:96:37:10:0F:16:49:58:37:FF:4F:B2:FE:B6:D3:F1:71:72:C6:F5:DE:3B:5A",
+        "99:4B:3B:AC:90:21:6E:D9:C6:DF:72:3B:FC:93:E0:1F:84:7A:54:DC:93:A4:DF:AE:B3:E5:F8:BD:A4:CF:B4:14"
+      ]
+    }
+  }
+]

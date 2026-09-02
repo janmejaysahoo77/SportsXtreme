@@ -75,7 +75,8 @@ class HomeScreenView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
     private val topMode: TopMode = TopMode.SPORTS,
     private val liveMatchViewModel: LiveMatchViewModel? = null,
-    private val hostTournamentsViewModel: HostTournamentsViewModel? = null
+    private val hostTournamentsViewModel: HostTournamentsViewModel? = null,
+    private val startInMyCricketTeams: Boolean = false
 ) : FrameLayout(context, attrs) {
 
     enum class TopMode { SPORTS, MEDIA, CART }
@@ -110,7 +111,7 @@ class HomeScreenView @JvmOverloads constructor(
         NavItem("Community", NavIconView.Icon.USERS),
         NavItem("Leaderboard", NavIconView.Icon.TROPHY)
     )
-    private var selectedIndex = 0
+    private var selectedIndex = if (startInMyCricketTeams) 1 else 0
     private lateinit var contentHolder: FrameLayout
     private lateinit var navRow: LinearLayout
     private val cachedTabs = mutableMapOf<Int, View>()
@@ -668,7 +669,8 @@ class HomeScreenView @JvmOverloads constructor(
             setContent {
                 MyCricketScreen(
                     onMenuClick = { openDrawer() },
-                    onStartMatch = { context.startActivity(Intent(context, StartMatchActivity::class.java)) }
+                    onStartMatch = { context.startActivity(Intent(context, StartMatchActivity::class.java)) },
+                    initialTab = if (startInMyCricketTeams) 2 else 0
                 )
             }
         }

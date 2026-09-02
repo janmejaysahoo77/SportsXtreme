@@ -25,16 +25,30 @@ import androidx.core.view.WindowCompat
 class ManagePlayersInsideTeamActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val teamName = intent.getStringExtra(EXTRA_TEAM_NAME).orEmpty().ifBlank { "Your Team" }
+        val teamId = intent.getStringExtra(EXTRA_TEAM_ID).orEmpty()
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = android.graphics.Color.rgb(2, 10, 20)
         window.navigationBarColor = android.graphics.Color.rgb(2, 10, 20)
         setContent {
             ManagePlayersScreen(
+                teamName = teamName,
                 onBack = ::finish,
                 onProfile = { startActivity(Intent(this, TeamProfileActivity::class.java)) },
-                onAddPlayer = { startActivity(Intent(this, AddPlayerInATeamActivity::class.java)) }
+                onAddPlayer = {
+                    startActivity(
+                        Intent(this, AddPlayerActivity::class.java)
+                            .putExtra(EXTRA_TEAM_NAME, teamName)
+                            .putExtra(EXTRA_TEAM_ID, teamId)
+                    )
+                }
             )
         }
+    }
+
+    companion object {
+        const val EXTRA_TEAM_NAME = "com.example.sportsxtreme.extra.TEAM_NAME"
+        const val EXTRA_TEAM_ID = "com.example.sportsxtreme.extra.TEAM_ID"
     }
 
     private val ManageBackground = Color(0xFF020A14)
@@ -43,23 +57,8 @@ class ManagePlayersInsideTeamActivity : ComponentActivity() {
     private val ManageAccent = Color(0xFFC9FF16)
     private val ManageMuted = Color(0xFFAAB5C0)
 
-    private data class TeamPlayer(
-        val name: String,
-        val role: String,
-        val tag: String? = null,
-        val alert: Boolean = false
-    )
-
     @Composable
-private fun ManagePlayersScreen(onBack: () -> Unit, onProfile: () -> Unit, onAddPlayer: () -> Unit) {
-        val players = listOf(
-            TeamPlayer("Rohan Kumar", "All Rounder", "ADMIN"),
-            TeamPlayer("Aarav Singh", "Batsman", "ADMIN • PRO"),
-            TeamPlayer("Vikram Yadav", "Batsman", "CAPTAIN"),
-            TeamPlayer("Rahul Das", "Wicket Keeper", "PRO"),
-            TeamPlayer("Suryansh Patel", "Bowler", alert = true),
-            TeamPlayer("Aditya Mehta", "All Rounder", alert = true)
-        )
+private fun ManagePlayersScreen(teamName: String, onBack: () -> Unit, onProfile: () -> Unit, onAddPlayer: () -> Unit) {
         Column(Modifier.fillMaxSize().background(ManageBackground).padding(horizontal = 12.dp)) {
             Row(
                 Modifier.fillMaxWidth().padding(top = 18.dp),
@@ -79,14 +78,14 @@ private fun ManagePlayersScreen(onBack: () -> Unit, onProfile: () -> Unit, onAdd
                         fontWeight = FontWeight.Black
                     )
                     Text(
-                        "Thunder Warriors  ✎",
+                        "$teamName  ✎",
                         color = ManageAccent,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
-            TeamSummary()
+            TeamSummary(teamName)
             Row(
                 Modifier.fillMaxWidth().padding(top = 15.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -113,7 +112,9 @@ private fun ManagePlayersScreen(onBack: () -> Unit, onProfile: () -> Unit, onAdd
             LazyColumn(
                 Modifier.weight(1f).padding(top = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(7.dp)
-            ) { items(players) { PlayerRow(it) } }
+            ) {
+                item { EmptyPlayersMessage() }
+            }
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -130,7 +131,7 @@ private fun ManagePlayersScreen(onBack: () -> Unit, onProfile: () -> Unit, onAdd
     }
 
     @Composable
-    private fun TeamSummary() {
+    private fun TeamSummary(teamName: String) {
         Row(
             Modifier.fillMaxWidth().padding(top = 18.dp).height(99.dp)
                 .border(1.dp, Color(0xFF7B9634), RoundedCornerShape(10.dp))
@@ -142,20 +143,21 @@ private fun ManagePlayersScreen(onBack: () -> Unit, onProfile: () -> Unit, onAdd
                 contentAlignment = Alignment.Center
             ) { Text("ϟ", color = ManageAccent, fontSize = 38.sp, fontWeight = FontWeight.Black) }
             Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                Text(
-                    "THUNDER",
-                    color = Color.White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Black
-                )
-                Text(
-                    "WARRIORS",
-                    color = ManageAccent,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Black
-                )
+                Text(teamName, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black)
+                Text("NEW TEAM", color = ManageAccent, fontSize = 14.sp, fontWeight = FontWeight.Black)
             }
-            Stat("12", "PLAYERS"); Stat("1", "ADMIN"); Stat("1", "CAPTAIN")
+            Stat("0", "PLAYERS"); Stat("0", "ADMIN"); Stat("0", "CAPTAIN")
+        }
+    }
+
+    @Composable
+    private fun EmptyPlayersMessage() {
+        Column(
+            Modifier.fillMaxWidth().padding(top = 26.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("No players added yet", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("Use Add Player to build your squad.", color = ManageMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
         }
     }
 
@@ -172,52 +174,7 @@ private fun ManagePlayersScreen(onBack: () -> Unit, onProfile: () -> Unit, onAdd
     }
 
     @Composable
-    private fun PlayerRow(player: TeamPlayer) {
-        Row(
-            Modifier.fillMaxWidth().height(65.dp).background(ManageCard, RoundedCornerShape(10.dp))
-                .border(1.dp, ManageStroke, RoundedCornerShape(10.dp)).padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier.size(46.dp).background(Color(0xFF22410D), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    player.name.first().toString(),
-                    color = Color.White,
-                    fontSize = 23.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            Column(Modifier.padding(start = 11.dp).weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        player.name,
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    ); player.tag?.let {
-                    Text(
-                        "  $it",
-                        color = ManageAccent,
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                }
-                Text(player.role, color = ManageMuted, fontSize = 11.sp)
-            }
-            if (player.alert) Text("•", color = Color(0xFFFF5766), fontSize = 28.sp)
-            Text(
-                "•••",
-                color = ManageMuted,
-                fontSize = 15.sp,
-                modifier = Modifier.padding(start = 7.dp)
-            )
-        }
-    }
 
-    @Composable
     private fun ActionButton(
         text: String,
         modifier: Modifier,

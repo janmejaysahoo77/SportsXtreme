@@ -1,0 +1,14 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default"
+    }
+  ],
+  "hosting": {
+    "public": "public"
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  }
+}

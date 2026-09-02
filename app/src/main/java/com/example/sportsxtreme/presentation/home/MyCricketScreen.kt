@@ -35,8 +35,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,6 +58,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 private val CricketAccent = Color(0xFFC1FF00)
 private val CricketBg = Color(0xFF010509)
@@ -92,6 +96,56 @@ private data class CricketTournament(
 )
 
 private enum class TournamentVisual { NEON, FIELD, TROPHY, SLAM }
+
+@Composable
+private fun rememberJoinedTeams(): List<CricketTeam> {
+    var teams by remember { mutableStateOf(emptyList<CricketTeam>()) }
+    DisposableEffect(Unit) {
+        val userId = FirebaseAuth.getInstance().currentUser?.uid
+        if (userId == null) {
+            teams = emptyList()
+            onDispose { }
+        } else {
+            val registration = FirebaseFirestore.getInstance().collection("teams")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        teams = emptyList()
+                    } else {
+                        teams = snapshot?.documents.orEmpty()
+                            .filter { document -> document.belongsTo(userId) }
+                            .map { document -> document.toCricketTeam() }
+                            .sortedBy { it.name.lowercase() }
+                    }
+                }
+            onDispose { registration.remove() }
+        }
+    }
+    return teams
+}
+
+private fun com.google.firebase.firestore.DocumentSnapshot.belongsTo(userId: String): Boolean {
+    if (getString("ownerUserId") == userId || getString("ownerId") == userId) return true
+
+    val ids = (get("memberIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
+    if (userId in ids) return true
+
+    val people = listOf("members", "players").flatMap { field ->
+        (get(field) as? List<*>)?.filterIsInstance<Map<*, *>>().orEmpty()
+    }
+    return people.any { person ->
+        person["userId"] == userId || person["linkedUserId"] == userId || person["playerId"] == userId
+    }
+}
+
+private fun com.google.firebase.firestore.DocumentSnapshot.toCricketTeam(): CricketTeam {
+    val name = getString("teamName").orEmpty().ifBlank { getString("name").orEmpty().ifBlank { id } }
+    val location = getString("city").orEmpty().ifBlank {
+        getString("cityTown").orEmpty().ifBlank { getString("location").orEmpty().ifBlank { "Team" } }
+    }
+    val initials = name.split(Regex("\\s+")).filter { it.isNotBlank() }.take(2).joinToString("") { it.first().uppercase() }.ifBlank { "TM" }
+    val accents = listOf(Color(0xFF1E6CF1), Color(0xFF7B32D9), Color(0xFF079F89), Color(0xFFD51D49), Color(0xFFFFB340))
+    return CricketTeam(name, initials, location, accents[(id.hashCode() and Int.MAX_VALUE) % accents.size])
+}
 
 private val sampleMatches = listOf(
     CricketMatch(
@@ -147,14 +201,6 @@ private val sampleMatches = listOf(
     )
 )
 
-private val teams = listOf(
-    CricketTeam("Neon Strikers", "NS", "Odisha", Color(0xFF1E6CF1)),
-    CricketTeam("Cyber Titans", "CT", "Odisha", Color(0xFF7B32D9)),
-    CricketTeam("Quantum XI", "QX", "Odisha", Color(0xFF079F89)),
-    CricketTeam("Velocity Vipers", "VV", "Odisha", Color(0xFFD51D49)),
-    CricketTeam("Royal Mavericks", "RM", "Odisha", Color(0xFFFFB340))
-)
-
 private val tournaments = listOf(
     CricketTournament("Neon Pro League", "20 Jun - 30 Jun 2026", "BHUBANESWAR", "UPCOMING", CricketBlue, TournamentVisual.NEON),
     CricketTournament("Corporate Cricket Cup", "15 Jun - 25 Jun 2026", "HYDERABAD", "LIVE", CricketAccent, TournamentVisual.FIELD),
@@ -163,8 +209,9 @@ private val tournaments = listOf(
 )
 
 @Composable
-fun MyCricketScreen(onMenuClick: () -> Unit = {}, onStartMatch: () -> Unit = {}) {
-    var selectedTab by remember { mutableIntStateOf(0) }
+fun MyCricketScreen(onMenuClick: () -> Unit = {}, onStartMatch: () -> Unit = {}, initialTab: Int = 0) {
+    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
+    val joinedTeams = rememberJoinedTeams()
 
     Column(
         modifier = Modifier
@@ -196,10 +243,12 @@ fun MyCricketScreen(onMenuClick: () -> Unit = {}, onStartMatch: () -> Unit = {})
                 }
                 2 -> {
                     item { CreateTeamPrompt() }
-                    item { TeamFilterPills() }
-                    item { QuickSearchBar() }
-                    item { ActiveTeamsHeader() }
-                    items(teams) { team -> TeamCard(team) }
+                    item { ActiveTeamsHeader(joinedTeams.size) }
+                    if (joinedTeams.isEmpty()) {
+                        item { NoJoinedTeamsCard() }
+                    } else {
+                        items(joinedTeams) { team -> TeamCard(team) }
+                    }
                 }
                 3 -> {
                     item { SectionTitle("Performance Hub", "Live numbers from your cricket universe") }
@@ -779,7 +828,7 @@ private fun QuickSearchBar() {
 }
 
 @Composable
-private fun ActiveTeamsHeader() {
+private fun ActiveTeamsHeader(teamCount: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -794,7 +843,34 @@ private fun ActiveTeamsHeader() {
                 .background(CricketAccent)
         )
         Spacer(Modifier.width(7.dp))
-        Text("ACTIVE TEAMS", color = CricketAccent, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+        Text(
+            if (teamCount == 1) "YOUR TEAM" else "YOUR TEAMS ($teamCount)",
+            color = CricketAccent,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+    }
+}
+
+@Composable
+private fun NoJoinedTeamsCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF09111E))
+            .border(1.dp, CricketStroke, RoundedCornerShape(12.dp))
+            .padding(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("No teams joined yet", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+        Text(
+            "Teams you join will appear here automatically.",
+            color = CricketMuted,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 6.dp),
+            textAlign = TextAlign.Center
+        )
     }
 }
 

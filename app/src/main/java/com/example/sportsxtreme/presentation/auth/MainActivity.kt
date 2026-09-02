@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
     private var homeScreenView: HomeScreenView? = null
     private var emailVerificationScreenView: EmailVerificationScreenView? = null
     private var pendingOtpContact = ""
+    private var openMyCricketTeamsAfterInvite by mutableStateOf(false)
     private val authViewModel by lazy { AuthDependencies.authViewModel() }
     private val inviteLinkViewModel: InviteLinkViewModel by viewModels()
     private val inviteClaimViewModel: InviteClaimViewModel by viewModels()
@@ -157,6 +158,8 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun SportsXtremeApp() {
         val pendingInviteToken by inviteLinkViewModel.pendingInviteToken.collectAsState()
+        val pendingTeamInviteToken by inviteLinkViewModel.pendingTeamInviteToken.collectAsState()
+        val authState by authViewModel.state.collectAsState()
         LaunchedEffect(pendingInviteToken) {
             pendingInviteToken?.let { token ->
                 inviteClaimViewModel.claim(token) { result ->
@@ -176,6 +179,33 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     inviteLinkViewModel.consumeInviteToken(token)
+                }
+            }
+        }
+        LaunchedEffect(pendingTeamInviteToken, authState.authenticatedUser?.id) {
+            val token = pendingTeamInviteToken
+            if (token != null && authState.authenticatedUser != null) {
+                Toast.makeText(this@MainActivity, "Joining team…", Toast.LENGTH_SHORT).show()
+                inviteClaimViewModel.claimTeamInvite(token) { result ->
+                    when (result) {
+                        is Resource.Success -> {
+                            openMyCricketTeamsAfterInvite = true
+                            showHomeScreen()
+                            Toast.makeText(
+                                this@MainActivity,
+                                if (result.data?.alreadyMember == true) "You are already in this team" else "You joined the team",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        is Resource.Error -> Toast.makeText(
+                            this@MainActivity,
+                            result.message ?: "Unable to join team",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        is Resource.Loading -> Unit
+                    }
+                    // Invalid, expired, revoked, and used links must not replay.
+                    inviteLinkViewModel.consumeTeamInviteToken(token)
                 }
             }
         }
@@ -257,7 +287,8 @@ class MainActivity : ComponentActivity() {
                     HomeScreenView(
                         context,
                         liveMatchViewModel = liveMatchViewModel,
-                        hostTournamentsViewModel = hostTournamentsViewModel
+                        hostTournamentsViewModel = hostTournamentsViewModel,
+                        startInMyCricketTeams = openMyCricketTeamsAfterInvite
                     ).also {
                         homeScreenView = it
                     }
@@ -348,7 +379,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun receiveIncomingInviteToken(intent: Intent?) {
-        extractInviteToken(intent)?.let(inviteLinkViewModel::receiveInviteToken)
+        extractTeamInviteToken(intent)?.let(inviteLinkViewModel::receiveTeamInviteToken)
+            ?: extractInviteToken(intent)?.let(inviteLinkViewModel::receiveInviteToken)
     }
 
     private fun extractInviteToken(intent: Intent?): String? {
@@ -363,6 +395,18 @@ class MainActivity : ComponentActivity() {
         return uri.getQueryParameter(INVITE_QUERY_PARAMETER)
             ?.trim()
             ?.takeIf(String::isNotBlank)
+    }
+
+    private fun extractTeamInviteToken(intent: Intent?): String? {
+        val uri = intent?.data ?: return null
+        if (intent.action != Intent.ACTION_VIEW ||
+            uri.scheme != INVITE_SCHEME ||
+            uri.host != INVITE_HOST ||
+            uri.path != TEAM_INVITE_PATH
+        ) return null
+        return uri.getQueryParameter(TEAM_INVITE_QUERY_PARAMETER)
+            ?.trim()
+            ?.takeIf { it.matches(TEAM_INVITE_TOKEN_PATTERN) }
     }
 
     private fun handleIncomingAuthLink(intent: Intent?): Boolean {
@@ -506,6 +550,9 @@ class MainActivity : ComponentActivity() {
         private const val INVITE_HOST = "sportsxtreme-95fbb.web.app"
         private const val INVITE_PATH = "/join"
         private const val INVITE_QUERY_PARAMETER = "invite"
+        private const val TEAM_INVITE_PATH = "/team-invite"
+        private const val TEAM_INVITE_QUERY_PARAMETER = "token"
+        private val TEAM_INVITE_TOKEN_PATTERN = Regex("^[A-Za-z0-9_-]{43}$")
         private const val LOCATION_FETCH_TIMEOUT_MS = 12000L
     }
 }
