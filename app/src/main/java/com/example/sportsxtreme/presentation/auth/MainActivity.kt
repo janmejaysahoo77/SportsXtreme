@@ -42,6 +42,7 @@ import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
+import com.example.sportsxtreme.presentation.otp.OtpScreen
 import com.example.sportsxtreme.presentation.home.HomeScreenView
 import com.example.sportsxtreme.presentation.home.LiveMatchViewModel
 import com.example.sportsxtreme.presentation.media.XtremeMediaActivity
@@ -238,12 +239,7 @@ class MainActivity : ComponentActivity() {
                 }
             )
 
-            Screen.OtpVerification -> AndroidView(
-                factory = { context ->
-                    homeScreenView = null
-                    OtpVerificationScreenView(context, pendingOtpContact)
-                }
-            )
+            Screen.OtpVerification -> OtpScreen()
 
             Screen.SportSelection -> AndroidView(
                 factory = { context ->

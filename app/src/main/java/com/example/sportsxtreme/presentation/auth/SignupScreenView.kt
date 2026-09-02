@@ -414,8 +414,13 @@ class SignupScreenView @JvmOverloads constructor(
                 rightMargin = dp(6)
             })
             addView(socialButton(context, "FACEBOOK", R.drawable.facebook_icon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                leftMargin = dp(6)
+                rightMargin = dp(6)
             })
+            addView(socialButton(context, "OTP", R.drawable.baseline_local_phone_24).apply {
+                setOnClickListener {
+                    (context as? MainActivity)?.showOtpVerificationScreen("")
+                }
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
         }
     }
 
@@ -454,7 +459,7 @@ class SignupScreenView @JvmOverloads constructor(
                 text = label
                 gravity = Gravity.CENTER
                 setTextColor(Color.WHITE)
-                textSize = 8f
+                textSize = 11f
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
                 includeFontPadding = false
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
