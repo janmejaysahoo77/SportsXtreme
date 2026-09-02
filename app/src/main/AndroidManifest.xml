@@ -81,9 +81,6 @@
             android:name=".presentation.clubs.PlayerInsideSquadOfAClub"
             android:exported="false" />
         <activity
-            android:name=".presentation.team.AddPlayerInATeamActivity"
-            android:exported="false" />
-        <activity
             android:name=".presentation.team.TeamProfileActivity"
             android:exported="false" />
         <activity
@@ -197,6 +194,17 @@
                     android:scheme="https"
                     android:host="sportsxtreme-95fbb.web.app"
                     android:pathPrefix="/join" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="sportsxtreme-95fbb.web.app"
+                    android:pathPrefix="/team-invite" />
             </intent-filter>
         </activity>
     </application>
