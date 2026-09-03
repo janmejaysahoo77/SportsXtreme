@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "896267230604",
+    "project_id": "sportsxtreme-95fbb",
+    "storage_bucket": "sportsxtreme-95fbb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:896267230604:android:cd478f030b84b9b1da4aa9",
+        "android_client_info": {
+          "package_name": "com.example.sportsxtreme"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "896267230604-66psibmls6fmrrqq2feb75npter65ud8.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.sportsxtreme",
+            "certificate_hash": "8c422437a993e91c75d93184a7d16e1fe9b1195c"
+          }
+        },
+        {
+          "client_id": "896267230604-ue4b9u6mtr4mdv0s5quakg1if7qvqa5k.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.sportsxtreme",
+            "certificate_hash": "88822a637b36d19427f07ec28bdd8638071b0872"
+          }
+        },
+        {
+          "client_id": "896267230604-egaaibb3i3ven1bs99a2to47mf29qucq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCaX-hTBiadVwPAXvXKbIHjF-jy2lmp-t8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "896267230604-egaaibb3i3ven1bs99a2to47mf29qucq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
