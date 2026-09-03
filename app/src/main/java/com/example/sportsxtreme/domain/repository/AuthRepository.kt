@@ -36,7 +36,7 @@ interface AuthRepository {
     suspend fun getUserAchievements(userId: String): Resource<List<UserAchievement>>
     suspend fun sendPhoneOtp(phoneNumber: String): Resource<PhoneAuthSession>
     suspend fun resendPhoneOtp(session: PhoneAuthSession): Resource<PhoneAuthSession>
-    suspend fun verifyPhoneOtp(verificationId: String, otpCode: String): Resource<Unit>
+    suspend fun verifyPhoneOtp(verificationId: String, otpCode: String): Resource<Boolean>
 
     suspend fun login(mobileNumber: String): Resource<User>
     suspend fun signup(name: String, email: String, password: String): Resource<User>

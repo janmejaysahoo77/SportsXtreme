@@ -175,6 +175,24 @@ class AuthViewModel(
         return completeAuthentication(authSession.user)
     }
 
+    suspend fun completePhoneSignup(
+        name: String,
+        email: String,
+        phoneNumber: String
+    ): Resource<User> {
+        val currentUser = state.value.authenticatedUser
+            ?: useCases.getCurrentUser()
+            ?: return Resource.Error("Phone authentication session has expired. Please try again.")
+        return completeAuthentication(
+            currentUser.copy(
+                name = name,
+                email = email,
+                mobileNumber = phoneNumber,
+                isPhoneVerified = true
+            )
+        )
+    }
+
     suspend fun sendPhoneOtp(phoneNumber: String): Resource<PhoneAuthSession> {
         _state.value = state.value.copy(
             isLoading = true,
@@ -197,11 +215,19 @@ class AuthViewModel(
         return result.also { updatePhoneSession(it) }
     }
 
-    suspend fun verifyPhoneOtp(otpCode: String): Resource<Unit> {
+    suspend fun verifyPhoneOtp(otpCode: String): Resource<Boolean> {
         val phoneSession = state.value.pendingPhoneSession
             ?: return Resource.Error("No phone verification session is active.")
         if (phoneSession.isAutoVerified) {
-            return markPhoneVerified(phoneSession.phoneNumber, PhoneVerificationStatus.AutoVerified)
+            return when (val completion = markPhoneVerified(
+                phoneSession.phoneNumber,
+                PhoneVerificationStatus.AutoVerified,
+                phoneSession.isNewUser
+            )) {
+                is Resource.Success -> Resource.Success(phoneSession.isNewUser)
+                is Resource.Error -> Resource.Error(completion.message ?: "Phone verification failed")
+                is Resource.Loading -> Resource.Loading()
+            }
         }
         _state.value = state.value.copy(
             isLoading = true,
@@ -211,7 +237,15 @@ class AuthViewModel(
         val result = useCases.verifyPhoneOtp(phoneSession.verificationId, otpCode)
         return when (result) {
             is Resource.Success -> {
-                markPhoneVerified(phoneSession.phoneNumber, PhoneVerificationStatus.VerificationSuccess)
+                when (val completion = markPhoneVerified(
+                    phoneSession.phoneNumber,
+                    PhoneVerificationStatus.VerificationSuccess,
+                    result.data == true
+                )) {
+                    is Resource.Success -> Resource.Success(result.data == true)
+                    is Resource.Error -> Resource.Error(completion.message ?: "Phone verification failed")
+                    is Resource.Loading -> Resource.Loading()
+                }
             }
             is Resource.Error -> {
                 val message = result.message ?: "OTP verification failed"
@@ -297,7 +331,11 @@ class AuthViewModel(
         scope.cancel()
     }
 
-    private suspend fun markPhoneVerified(phoneNumber: String, status: PhoneVerificationStatus): Resource<Unit> {
+    private suspend fun markPhoneVerified(
+        phoneNumber: String,
+        status: PhoneVerificationStatus,
+        isNewPhoneUser: Boolean = false
+    ): Resource<Unit> {
         val verifiedUser = state.value.pendingAuthSession?.user?.copy(
             mobileNumber = phoneNumber,
             isPhoneVerified = true
@@ -328,11 +366,21 @@ class AuthViewModel(
                 return Resource.Error(message)
             }
         }
+        if (!isNewPhoneUser && verifiedUser == null) {
+            val currentUser = useCases.getCurrentUser()
+                ?: return Resource.Error("Phone authentication session has expired. Please try again.")
+            return when (completeAuthentication(currentUser.copy(mobileNumber = phoneNumber, isPhoneVerified = true))) {
+                is Resource.Success -> Resource.Success(Unit)
+                is Resource.Error -> Resource.Error("Phone profile setup failed")
+                is Resource.Loading -> Resource.Loading()
+            }
+        }
         _state.value = state.value.copy(
             isLoading = false,
             pendingAuthSession = null,
             pendingPhoneSession = null,
             authenticatedUser = verifiedUser ?: state.value.authenticatedUser,
+            isNewPhoneUser = isNewPhoneUser,
             phoneVerificationStatus = status,
             errorMessage = null
         )

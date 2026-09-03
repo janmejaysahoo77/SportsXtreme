@@ -10,6 +10,7 @@ data class AuthState(
     val phoneVerificationStatus: PhoneVerificationStatus = PhoneVerificationStatus.Idle,
     val pendingAuthSession: AuthSession? = null,
     val pendingPhoneSession: PhoneAuthSession? = null,
+    val isNewPhoneUser: Boolean = false,
     val authenticatedUser: User? = null,
     val errorMessage: String? = null
 )

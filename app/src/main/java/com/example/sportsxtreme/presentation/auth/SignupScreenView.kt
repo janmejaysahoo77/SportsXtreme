@@ -69,7 +69,8 @@ import kotlin.math.sin
 
 class SignupScreenView @JvmOverloads constructor(
     context: Context,
-    attrs: AttributeSet? = null
+    attrs: AttributeSet? = null,
+    private val verifiedPhoneNumber: String? = null
 ) : FrameLayout(context, attrs) {
 
     private val primaryFixed = Color.rgb(193, 255, 0)
@@ -84,7 +85,6 @@ class SignupScreenView @JvmOverloads constructor(
     private lateinit var confirmPasswordInput: EditText
     private lateinit var errorMessageView: TextView
     private lateinit var createAccountButton: TextView
-    private lateinit var googleSignupButton: LinearLayout
     private val authViewModel = AuthDependencies.authViewModel()
     private val signupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val credentialManager = CredentialManager.create(context)
@@ -94,7 +94,7 @@ class SignupScreenView @JvmOverloads constructor(
         isFocusable = true
         isFocusableInTouchMode = true
         setBackgroundColor(Color.BLACK)
-        addView(BackgroundLayer(context), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(AuthBackgroundView(context), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(createContent(context), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
@@ -137,7 +137,13 @@ class SignupScreenView @JvmOverloads constructor(
 
         fullNameInput = addField(content, "FULL NAME", "ENTER FULL NAME", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PERSON_NAME)
         emailInput = addField(content, "EMAIL", "ATHLETE@DOMAIN.COM", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
-        phoneInput = addField(content, "PHONE NUMBER", "+1 (000) 000-0000", InputType.TYPE_CLASS_PHONE)
+        phoneInput = addField(content, "PHONE NUMBER", "+1 (000) 000-0000", InputType.TYPE_CLASS_PHONE).apply {
+            verifiedPhoneNumber?.let {
+                setText(it)
+                isEnabled = false
+                alpha = 0.72f
+            }
+        }
         passwordInput = addField(content, "PASSWORD", "********", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD).apply {
             transformationMethod = PasswordTransformationMethod.getInstance()
         }
@@ -148,8 +154,10 @@ class SignupScreenView @JvmOverloads constructor(
         errorMessageView = errorMessage(context)
         content.addView(errorMessageView, fullWidthParams(bottom = dp(8)))
         content.addView(primaryButton(context), fullWidthParams(top = dp(10), bottom = dp(16), height = dp(52)))
-        content.addView(divider(context), fullWidthParams(bottom = dp(16), height = dp(18)))
-        content.addView(socialRow(context), fullWidthParams(bottom = dp(22), height = dp(44)))
+        if (verifiedPhoneNumber == null) {
+            content.addView(divider(context), fullWidthParams(bottom = dp(16), height = dp(18)))
+            content.addView(socialRow(context), fullWidthParams(bottom = dp(22), height = dp(44)))
+        }
         content.addView(loginPrompt(context), fullWidthParams(bottom = dp(6), height = dp(28)))
         content.addView(Space(context), LinearLayout.LayoutParams(1, dp(8)))
 
@@ -239,10 +247,17 @@ class SignupScreenView @JvmOverloads constructor(
 
         setLoading(true)
         signupScope.launch {
-            when (val result = authViewModel.createEmailAccount(name, email, password, phoneNumber)) {
+            val result = if (verifiedPhoneNumber != null) {
+                authViewModel.completePhoneSignup(name, email, phoneNumber)
+            } else {
+                authViewModel.createEmailAccount(name, email, password, phoneNumber)
+            }
+            when (result) {
                 is Resource.Success -> {
                     showError(null)
-                    if (AuthFeatureFlags.EMAIL_VERIFICATION_ENABLED) {
+                    if (verifiedPhoneNumber != null) {
+                        (context as? MainActivity)?.showSportSelectionScreen()
+                    } else if (AuthFeatureFlags.EMAIL_VERIFICATION_ENABLED) {
                         (context as? MainActivity)?.showEmailVerificationScreen()
                     } else if (AuthFeatureFlags.PHONE_OTP_ENABLED) {
                         sendOtpAndContinue(context, phoneNumber)
@@ -365,8 +380,6 @@ class SignupScreenView @JvmOverloads constructor(
         createAccountButton.isEnabled = !loading
         createAccountButton.alpha = if (loading) 0.72f else 1f
         createAccountButton.text = if (loading) "CREATING..." else context.getString(R.string.str_create_account)
-        googleSignupButton.isEnabled = !loading
-        googleSignupButton.alpha = if (loading) 0.72f else 1f
         if (googleLoading) {
             createAccountButton.text = context.getString(R.string.str_create_account)
         }
@@ -405,7 +418,7 @@ class SignupScreenView @JvmOverloads constructor(
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            googleSignupButton = socialButton(context, "GOOGLE", R.drawable.googleicon).apply {
+            val googleSignupButton = socialButton(context, "GOOGLE", R.drawable.googleicon).apply {
                 setOnClickListener {
                     handleGoogleSignup(context)
                 }
@@ -418,7 +431,7 @@ class SignupScreenView @JvmOverloads constructor(
             })
             addView(socialButton(context, "OTP", R.drawable.baseline_local_phone_24).apply {
                 setOnClickListener {
-                    (context as? MainActivity)?.showOtpVerificationScreen("")
+                    (context as? MainActivity)?.showPhoneAuthScreen()
                 }
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
         }
@@ -516,77 +529,6 @@ class SignupScreenView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         signupScope.cancel()
         super.onDetachedFromWindow()
-    }
-
-    private class BackgroundLayer(context: Context) : View(context) {
-        private val bgTexture: Bitmap? = BitmapFactory.decodeResource(resources, R.drawable.black)
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        private val rect = RectF()
-        private var startTimeMs = android.os.SystemClock.uptimeMillis()
-        private var bgShader: Shader? = null
-
-        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-            super.onSizeChanged(w, h, oldw, oldh)
-            if (h > 0) {
-                bgShader = LinearGradient(
-                    0f, 0f, 0f, h.toFloat(),
-                    intArrayOf(Color.argb(232, 0, 0, 0), Color.argb(218, 0, 5, 4), Color.BLACK),
-                    floatArrayOf(0f, 0.56f, 1f), Shader.TileMode.CLAMP
-                )
-            }
-        }
-
-        override fun onAttachedToWindow() {
-            super.onAttachedToWindow()
-            startTimeMs = android.os.SystemClock.uptimeMillis()
-            postInvalidateOnAnimation()
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val w = width.toFloat()
-            val h = height.toFloat()
-            val density = resources.displayMetrics.density
-            val time = (android.os.SystemClock.uptimeMillis() - startTimeMs) / 1000f
-
-            canvas.drawColor(Color.BLACK)
-            bgTexture?.let { bitmap ->
-                val scale = max(w / bitmap.width, h / bitmap.height)
-                val bw = bitmap.width * scale
-                val bh = bitmap.height * scale
-                rect.set((w - bw) / 2f, (h - bh) / 2f, (w + bw) / 2f, (h + bh) / 2f)
-                bitmapPaint.alpha = 104
-                canvas.drawBitmap(bitmap, null, rect, bitmapPaint)
-                bitmapPaint.alpha = 255
-            }
-
-            paint.shader = bgShader
-            canvas.drawRect(0f, 0f, w, h, paint)
-            paint.shader = null
-
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 0.75f * density
-            paint.color = Color.argb(30, 193, 255, 0)
-            val grid = 34f * density
-            var x = (time * 7f * density) % grid - grid
-            while (x < w + grid) {
-                canvas.drawLine(x, 0f, x - w * 0.1f, h, paint)
-                x += grid
-            }
-            var y = (time * 5f * density) % grid - grid
-            while (y < h + grid) {
-                canvas.drawLine(0f, y, w, y + h * 0.06f, paint)
-                y += grid
-            }
-            paint.color = Color.argb(34, 0, 127, 255)
-            canvas.drawLine(-w * 0.1f, h * 0.53f, w * 0.98f, h * 0.18f, paint)
-            paint.color = Color.argb(42, 193, 255, 0)
-            canvas.drawLine(w * 0.12f, h * 0.96f, w * 1.08f, h * 0.66f, paint)
-            paint.style = Paint.Style.FILL
-
-            postInvalidateOnAnimation()
-        }
     }
 
     private class LogoMarkView(context: Context) : View(context) {

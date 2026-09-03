@@ -41,6 +41,8 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
+import com.example.sportsxtreme.presentation.components.AuthBackgroundView
+
 class OtpVerificationScreenView @JvmOverloads constructor(
     context: Context,
     private val contact: String = "",
@@ -51,6 +53,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
     private val electricBlue = Color.rgb(0, 127, 255)
     private val ink = Color.rgb(3, 6, 8)
     private val muted = Color.rgb(184, 197, 189)
+    private val panelColor = Color.argb(186, 4, 7, 7)
     private val otpInputs = mutableListOf<EditText>()
     private lateinit var verifyButton: TextView
     private lateinit var errorView: TextView
@@ -65,7 +68,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         isFocusable = true
         isFocusableInTouchMode = true
         setBackgroundColor(Color.BLACK)
-        addView(BackgroundLayer(context), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(AuthBackgroundView(context), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(createContent(context), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         post {
             otpInputs.firstOrNull()?.requestFocus()
@@ -223,19 +226,18 @@ class OtpVerificationScreenView @JvmOverloads constructor(
 
     private fun primaryButton(context: Context): TextView {
         return TextView(context).apply {
-            text = "VERIFY ACCOUNT  ->"
+            verifyButton = this
+            text = "CONTINUE"
             gravity = Gravity.CENTER
-            isEnabled = false
-            alpha = 0.62f
+            isEnabled = true
+            alpha = 1f
             setTextColor(Color.rgb(18, 26, 0))
             textSize = 14f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
-            background = GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(neonGreen, Color.rgb(112, 236, 255))
-            ).apply {
+            background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(8).toFloat()
+                cornerRadius = dp(7).toFloat()
+                setColor(neonGreen)
             }
             setOnClickListener {
                 verifyOtp(context)
@@ -270,7 +272,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
 
     private fun backButton(context: Context): TextView {
         return TextView(context).apply {
-            text = "BACK TO SIGN UP"
+            text = "BACK TO PHONE AUTH"
             gravity = Gravity.CENTER
             setTextColor(electricBlue)
             textSize = 10.5f
@@ -280,7 +282,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
             setOnClickListener {
                 val mainActivity = context as? MainActivity
                 if (mainActivity != null) {
-                    mainActivity.showSignupScreen()
+                    mainActivity.showPhoneAuthScreen()
                 } else {
                     (context as? Activity)?.finish()
                 }
@@ -300,7 +302,11 @@ class OtpVerificationScreenView @JvmOverloads constructor(
             when (val result = authViewModel.verifyPhoneOtp(code)) {
                 is Resource.Success -> {
                     showMessage("Verification complete.")
-                    navigateAfterVerification(context)
+                    if (result.data == true) {
+                        (context as? MainActivity)?.showSignupScreen(contact)
+                    } else {
+                        navigateAfterVerification(context)
+                    }
                 }
                 is Resource.Error -> {
                     showError(result.message ?: "OTP verification failed")
@@ -318,7 +324,13 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         showMessage("Phone verified automatically.")
         otpScope.launch {
             when (val result = authViewModel.verifyPhoneOtp("")) {
-                is Resource.Success -> navigateAfterVerification(context)
+                is Resource.Success -> {
+                    if (result.data == true) {
+                        (context as? MainActivity)?.showSignupScreen(contact)
+                    } else {
+                        navigateAfterVerification(context)
+                    }
+                }
                 is Resource.Error -> showError(result.message ?: "Automatic verification failed")
                 is Resource.Loading -> Unit
             }
@@ -435,13 +447,11 @@ class OtpVerificationScreenView @JvmOverloads constructor(
     }
 
     private fun otpBackground(focused: Boolean): GradientDrawable {
-        return GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(Color.argb(235, 13, 20, 24), Color.argb(216, 2, 5, 7))
-        ).apply {
+        return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(9).toFloat()
-            setStroke(dp(if (focused) 2 else 1), if (focused) neonGreen else Color.argb(72, 255, 255, 255))
+            cornerRadius = dp(6).toFloat()
+            setColor(if (focused) Color.argb(222, 7, 13, 13) else panelColor)
+            setStroke(dp(1), if (focused) neonGreen else Color.argb(58, 255, 255, 255))
         }
     }
 
@@ -540,89 +550,6 @@ class OtpVerificationScreenView @JvmOverloads constructor(
             canvas.drawLine(cx + 54f * density, cy, cx + 76f * density, cy, paint)
             canvas.drawLine(cx, cy - 76f * density, cx, cy - 54f * density, paint)
             canvas.drawLine(cx, cy + 54f * density, cx, cy + 76f * density, paint)
-
-            postInvalidateOnAnimation()
-        }
-    }
-
-    private class BackgroundLayer(context: Context) : View(context) {
-        private val bgTexture: Bitmap? = BitmapFactory.decodeResource(resources, R.drawable.black)
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        private val rect = RectF()
-        private var startTimeMs = android.os.SystemClock.uptimeMillis()
-        private var bgShader: Shader? = null
-
-        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-            super.onSizeChanged(w, h, oldw, oldh)
-            if (h > 0) {
-                bgShader = LinearGradient(
-                    0f, 0f, 0f, h.toFloat(),
-                    intArrayOf(Color.argb(232, 0, 2, 4), Color.argb(226, 0, 8, 10), Color.BLACK),
-                    floatArrayOf(0f, 0.58f, 1f),
-                    Shader.TileMode.CLAMP
-                )
-            }
-        }
-
-        override fun onAttachedToWindow() {
-            super.onAttachedToWindow()
-            startTimeMs = android.os.SystemClock.uptimeMillis()
-            postInvalidateOnAnimation()
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val w = width.toFloat()
-            val h = height.toFloat()
-            val density = resources.displayMetrics.density
-            val time = (android.os.SystemClock.uptimeMillis() - startTimeMs) / 1000f
-
-            canvas.drawColor(Color.BLACK)
-            bgTexture?.let { bitmap ->
-                val scale = max(w / bitmap.width, h / bitmap.height)
-                val bw = bitmap.width * scale
-                val bh = bitmap.height * scale
-                rect.set((w - bw) / 2f, (h - bh) / 2f, (w + bw) / 2f, (h + bh) / 2f)
-                bitmapPaint.alpha = 88
-                canvas.drawBitmap(bitmap, null, rect, bitmapPaint)
-                bitmapPaint.alpha = 255
-            }
-
-            paint.shader = bgShader
-            canvas.drawRect(0f, 0f, w, h, paint)
-            paint.shader = null
-
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 0.75f * density
-            val grid = 30f * density
-            paint.color = Color.argb(34, 0, 127, 255)
-            var x = (time * 10f * density) % grid - grid
-            while (x < w + grid) {
-                canvas.drawLine(x, 0f, x - w * 0.18f, h, paint)
-                x += grid
-            }
-            paint.color = Color.argb(32, 193, 255, 0)
-            var y = (time * 8f * density) % grid - grid
-            while (y < h + grid) {
-                canvas.drawLine(0f, y, w, y + h * 0.08f, paint)
-                y += grid
-            }
-
-            paint.style = Paint.Style.FILL
-            paint.color = Color.argb(36, 193, 255, 0)
-            rect.set(w * 0.08f, h * 0.14f, w * 0.92f, h * 0.16f)
-            canvas.drawRoundRect(rect, 2f * density, 2f * density, paint)
-            paint.color = Color.argb(34, 0, 127, 255)
-            rect.set(w * 0.18f, h * 0.84f, w * 0.82f, h * 0.86f)
-            canvas.drawRoundRect(rect, 2f * density, 2f * density, paint)
-
-            paint.style = Paint.Style.FILL
-            paint.color = Color.rgb(3, 6, 8)
-            rect.set(w * 0.06f, h * 0.28f, w * 0.94f, min(h * 0.92f, h - 24f * density))
-            paint.alpha = 48
-            canvas.drawRoundRect(rect, 18f * density, 18f * density, paint)
-            paint.alpha = 255
 
             postInvalidateOnAnimation()
         }
