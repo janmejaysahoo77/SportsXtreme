@@ -206,7 +206,7 @@ class AuthRepositoryImpl(
         return phoneAuthManager.resendOtp(session).toResource("Could not resend OTP")
     }
 
-    override suspend fun verifyPhoneOtp(verificationId: String, otpCode: String): Resource<Unit> {
+    override suspend fun verifyPhoneOtp(verificationId: String, otpCode: String): Resource<Boolean> {
         return phoneAuthManager.verifyOtp(verificationId, otpCode).toResource("OTP verification failed")
     }
 

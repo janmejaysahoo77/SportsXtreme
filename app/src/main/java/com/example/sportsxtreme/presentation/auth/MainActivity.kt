@@ -22,9 +22,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
@@ -34,7 +32,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -42,7 +39,7 @@ import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
-import com.example.sportsxtreme.presentation.otp.OtpScreen
+import com.example.sportsxtreme.presentation.phoneAuth.PhoneAuth
 import com.example.sportsxtreme.presentation.home.HomeScreenView
 import com.example.sportsxtreme.presentation.home.LiveMatchViewModel
 import com.example.sportsxtreme.presentation.media.XtremeMediaActivity
@@ -70,6 +67,7 @@ class MainActivity : ComponentActivity() {
         Login,
         EmailVerification,
         VerificationComplete,
+        PhoneAuth,
         OtpVerification,
         SportSelection,
         Home
@@ -79,6 +77,7 @@ class MainActivity : ComponentActivity() {
     private var homeScreenView: HomeScreenView? = null
     private var emailVerificationScreenView: EmailVerificationScreenView? = null
     private var pendingOtpContact = ""
+    private var pendingPhoneSignupNumber: String? = null
     private var openMyCricketTeamsAfterInvite by mutableStateOf(false)
     private val authViewModel by lazy { AuthDependencies.authViewModel() }
     private val inviteLinkViewModel: InviteLinkViewModel by viewModels()
@@ -127,6 +126,7 @@ class MainActivity : ComponentActivity() {
                     Screen.Login,
                     Screen.EmailVerification,
                     Screen.VerificationComplete,
+                    Screen.PhoneAuth,
                     Screen.OtpVerification,
                     Screen.SportSelection -> showMainScreen()
 
@@ -242,7 +242,7 @@ class MainActivity : ComponentActivity() {
             Screen.Signup -> AndroidView(
                 factory = { context ->
                     homeScreenView = null
-                    SignupScreenView(context)
+                    SignupScreenView(context, verifiedPhoneNumber = pendingPhoneSignupNumber)
                 }
             )
 
@@ -269,7 +269,14 @@ class MainActivity : ComponentActivity() {
                 }
             )
 
-            Screen.OtpVerification -> OtpScreen()
+            Screen.PhoneAuth -> PhoneAuth()
+
+            Screen.OtpVerification -> AndroidView(
+                factory = { context ->
+                    homeScreenView = null
+                    OtpVerificationScreenView(context, pendingOtpContact)
+                }
+            )
 
             Screen.SportSelection -> AndroidView(
                 factory = { context ->
@@ -307,8 +314,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun showSignupScreen() {
+    fun showSignupScreen(verifiedPhoneNumber: String? = null) {
         homeScreenView = null
+        pendingPhoneSignupNumber = verifiedPhoneNumber
         currentScreen = Screen.Signup
     }
 
@@ -321,6 +329,12 @@ class MainActivity : ComponentActivity() {
         homeScreenView = null
         emailVerificationScreenView = null
         currentScreen = Screen.EmailVerification
+    }
+
+    fun showPhoneAuthScreen() {
+        homeScreenView = null
+        pendingPhoneSignupNumber = null
+        currentScreen = Screen.PhoneAuth
     }
 
     fun showOtpVerificationScreen(contact: String) {

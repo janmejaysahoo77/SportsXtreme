@@ -35,7 +35,7 @@ class FirebasePhoneAuthManager(
         return startPhoneVerification(phoneNumber = session.phoneNumber, resendToken = token)
     }
 
-    override suspend fun verifyOtp(verificationId: String, otpCode: String): Result<Unit> {
+    override suspend fun verifyOtp(verificationId: String, otpCode: String): Result<Boolean> {
         if (verificationId.isBlank()) {
             return Result.failure(FirebaseAuthInvalidCredentialsException("missing-verification-id", "OTP session has expired. Request a new code."))
         }
@@ -84,7 +84,8 @@ class FirebasePhoneAuthManager(
                                             verificationId = "",
                                             phoneNumber = normalizedPhoneNumber,
                                             canResend = false,
-                                            isAutoVerified = true
+                                            isAutoVerified = true,
+                                            isNewUser = it
                                         )
                                     )
                                 },
@@ -133,7 +134,7 @@ class FirebasePhoneAuthManager(
         }
     }
 
-    private suspend fun signInOrLinkWithPhoneCredential(credential: PhoneAuthCredential): Result<Unit> {
+    private suspend fun signInOrLinkWithPhoneCredential(credential: PhoneAuthCredential): Result<Boolean> {
         return suspendCancellableCoroutine { continuation ->
             signInOrLinkWithPhoneCredential(credential) { result ->
                 if (continuation.isActive) {
@@ -145,12 +146,12 @@ class FirebasePhoneAuthManager(
 
     private fun signInOrLinkWithPhoneCredential(
         credential: PhoneAuthCredential,
-        onResult: (Result<Unit>) -> Unit
+        onResult: (Result<Boolean>) -> Unit
     ) {
         val currentUser = firebaseAuth.currentUser
         val task = currentUser?.linkWithCredential(credential) ?: firebaseAuth.signInWithCredential(credential)
         task.addOnSuccessListener {
-            onResult(Result.success(Unit))
+            onResult(Result.success(task.result?.additionalUserInfo?.isNewUser == true))
         }.addOnFailureListener { exception ->
             onResult(Result.failure(mapFirebasePhoneException(exception)))
         }
