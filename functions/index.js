@@ -122,7 +122,13 @@ exports.joinTeamInvite = onCall(async (request) => {
           usedAt: FieldValue.serverTimestamp()
         });
       }
-      return { teamId, alreadyMember };
+      // The name comes from the team document read in this transaction, rather
+      // than from the invite URL, so the app can safely welcome the new member.
+      const storedTeamName = team.get("teamName") ?? team.get("name");
+      const teamName = typeof storedTeamName === "string" && storedTeamName.trim()
+        ? storedTeamName.trim()
+        : "the team";
+      return { teamId, teamName, alreadyMember };
     });
   } catch (error) {
     if (error instanceof HttpsError) throw error;

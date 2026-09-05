@@ -20,18 +20,38 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -79,6 +99,7 @@ class MainActivity : ComponentActivity() {
     private var pendingOtpContact = ""
     private var pendingPhoneSignupNumber: String? = null
     private var openMyCricketTeamsAfterInvite by mutableStateOf(false)
+    private var teamWelcomeName by mutableStateOf<String?>(null)
     private val authViewModel by lazy { AuthDependencies.authViewModel() }
     private val inviteLinkViewModel: InviteLinkViewModel by viewModels()
     private val inviteClaimViewModel: InviteClaimViewModel by viewModels()
@@ -151,6 +172,15 @@ class MainActivity : ComponentActivity() {
                         }
 
                     }
+                    teamWelcomeName?.let { teamName ->
+                        TeamInviteWelcome(
+                            teamName = teamName,
+                            onFinished = {
+                                teamWelcomeName = null
+                                showHomeScreen()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -191,12 +221,16 @@ class MainActivity : ComponentActivity() {
                     when (result) {
                         is Resource.Success -> {
                             openMyCricketTeamsAfterInvite = true
-                            showHomeScreen()
-                            Toast.makeText(
-                                this@MainActivity,
-                                if (result.data?.alreadyMember == true) "You are already in this team" else "You joined the team",
-                                Toast.LENGTH_LONG
-                            ).show()
+                            if (result.data?.alreadyMember == true) {
+                                showHomeScreen()
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "You are already in this team",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            } else {
+                                teamWelcomeName = result.data?.teamName ?: "the team"
+                            }
                         }
                         is Resource.Error -> Toast.makeText(
                             this@MainActivity,
@@ -285,18 +319,20 @@ class MainActivity : ComponentActivity() {
                 }
             )
 
-            Screen.Home -> AndroidView(
-                factory = { context ->
-                    HomeScreenView(
-                        context,
-                        liveMatchViewModel = liveMatchViewModel,
-                        hostTournamentsViewModel = hostTournamentsViewModel,
-                        startInMyCricketTeams = openMyCricketTeamsAfterInvite
-                    ).also {
-                        homeScreenView = it
+            Screen.Home -> key(openMyCricketTeamsAfterInvite) {
+                AndroidView(
+                    factory = { context ->
+                        HomeScreenView(
+                            context,
+                            liveMatchViewModel = liveMatchViewModel,
+                            hostTournamentsViewModel = hostTournamentsViewModel,
+                            startInMyCricketTeams = openMyCricketTeamsAfterInvite
+                        ).also {
+                            homeScreenView = it
+                        }
                     }
-                }
-            )
+                )
+            }
 
         }
     }
@@ -564,5 +600,65 @@ class MainActivity : ComponentActivity() {
         private const val TEAM_INVITE_QUERY_PARAMETER = "token"
         private val TEAM_INVITE_TOKEN_PATTERN = Regex("^[A-Za-z0-9_-]{43}$")
         private const val LOCATION_FETCH_TIMEOUT_MS = 12000L
+    }
+}
+
+@Composable
+private fun TeamInviteWelcome(teamName: String, onFinished: () -> Unit) {
+    val iconScale = remember { Animatable(2.25f) }
+    val messageAlpha = remember { Animatable(0f) }
+
+    LaunchedEffect(teamName) {
+        iconScale.animateTo(
+            targetValue = 0.82f,
+            animationSpec = tween(durationMillis = 850, easing = FastOutSlowInEasing)
+        )
+        messageAlpha.animateTo(1f, animationSpec = tween(durationMillis = 350))
+        kotlinx.coroutines.delay(1500)
+        onFinished()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(androidx.compose.ui.graphics.Color(0xFF061C12)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .wrapContentSize()
+                .padding(horizontal = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Image(
+                painter = painterResource(R.drawable.appicon),
+                contentDescription = "SportsXtreme",
+                modifier = Modifier
+                    .size(112.dp)
+                    .graphicsLayer {
+                        scaleX = iconScale.value
+                        scaleY = iconScale.value
+                    }
+            )
+            Spacer(Modifier.height(42.dp))
+            Text(
+                text = "Welcome to\n$teamName",
+                color = androidx.compose.ui.graphics.Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center,
+                lineHeight = 34.sp,
+                modifier = Modifier.alpha(messageAlpha.value)
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "You’re now part of the squad.",
+                color = androidx.compose.ui.graphics.Color(0xFFB7D9BE),
+                fontSize = 15.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.alpha(messageAlpha.value)
+            )
+        }
     }
 }
