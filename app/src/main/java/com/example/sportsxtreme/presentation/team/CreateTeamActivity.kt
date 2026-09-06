@@ -69,13 +69,13 @@ class CreateTeamActivity : ComponentActivity() {
         window.statusBarColor = android.graphics.Color.rgb(2, 11, 18)
         window.navigationBarColor = android.graphics.Color.rgb(2, 11, 18)
         setContent {
-            CreateTeamScreen(::finish) { teamName, city, addMyself ->
-                saveTeamAndContinue(teamName, city, addMyself)
+            CreateTeamScreen(::finish) { teamName, city, captainName, captainMobile, addMyself ->
+                saveTeamAndContinue(teamName, city, captainName, captainMobile, addMyself)
             }
         }
     }
 
-    private fun saveTeamAndContinue(teamName: String, city: String, addMyself: Boolean) {
+    private fun saveTeamAndContinue(teamName: String, city: String, captainName: String, captainMobile: String, addMyself: Boolean) {
         if (isSavingTeam) return
         val userId = firebaseAuth.currentUser?.uid ?: run {
             Toast.makeText(this, "Sign in to create a team", Toast.LENGTH_SHORT).show()
@@ -97,6 +97,13 @@ class CreateTeamActivity : ComponentActivity() {
                         "shortName" to teamName.take(3).uppercase(),
                         "city" to city,
                         "cityTown" to city,
+                        "captainName" to captainName,
+                        "captainMobile" to captainMobile,
+                        "description" to "",
+                        "founded" to "",
+                        "homeGround" to "",
+                        "coachManager" to "",
+                        "teamMotto" to "",
                         "ownerUserId" to userId,
                         "memberIds" to if (addMyself) listOf(userId) else emptyList<String>(),
                         "members" to members,
@@ -129,7 +136,7 @@ class CreateTeamActivity : ComponentActivity() {
     private val border = Color(0xFF26343C)
 
     @Composable
-    private fun CreateTeamScreen(onBack: () -> Unit, onContinue: (String, String, Boolean) -> Unit) {
+    private fun CreateTeamScreen(onBack: () -> Unit, onContinue: (String, String, String, String, Boolean) -> Unit) {
         var teamName by rememberSaveable { mutableStateOf("") }; var city by rememberSaveable { mutableStateOf("") }
         var mobile by rememberSaveable { mutableStateOf("") }; var captain by rememberSaveable { mutableStateOf("") }
         var addMyself by rememberSaveable { mutableStateOf(true) }
@@ -158,7 +165,7 @@ class CreateTeamActivity : ComponentActivity() {
                     Spacer(Modifier.height(100.dp))
                 }
                 CreateButton(enabled = teamName.isNotBlank() && city.isNotBlank()) {
-                    if (teamName.isBlank() || city.isBlank()) showRequiredErrors = true else onContinue(teamName.trim(), city.trim(), addMyself)
+                    if (teamName.isBlank() || city.isBlank()) showRequiredErrors = true else onContinue(teamName.trim(), city.trim(), captain.trim(), mobile.trim(), addMyself)
                 }
             }
         }
