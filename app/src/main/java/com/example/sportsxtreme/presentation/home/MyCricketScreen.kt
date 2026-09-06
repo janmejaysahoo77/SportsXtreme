@@ -11,6 +11,7 @@ import com.example.sportsxtreme.presentation.home.*
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
+import android.content.Intent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,6 +35,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -84,7 +88,7 @@ private data class CricketMatch(
     val accent: Color = CricketAccent
 )
 
-private data class CricketTeam(val name: String, val initials: String, val location: String, val accent: Color)
+private data class CricketTeam(val id: String, val name: String, val initials: String, val location: String, val accent: Color)
 
 private data class CricketTournament(
     val name: String,
@@ -144,7 +148,7 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toCricketTeam(): Cric
     }
     val initials = name.split(Regex("\\s+")).filter { it.isNotBlank() }.take(2).joinToString("") { it.first().uppercase() }.ifBlank { "TM" }
     val accents = listOf(Color(0xFF1E6CF1), Color(0xFF7B32D9), Color(0xFF079F89), Color(0xFFD51D49), Color(0xFFFFB340))
-    return CricketTeam(name, initials, location, accents[(id.hashCode() and Int.MAX_VALUE) % accents.size])
+    return CricketTeam(id, name, initials, location, accents[(id.hashCode() and Int.MAX_VALUE) % accents.size])
 }
 
 private val sampleMatches = listOf(
@@ -876,6 +880,8 @@ private fun NoJoinedTeamsCard() {
 
 @Composable
 private fun TeamCard(team: CricketTeam) {
+    val context = LocalContext.current
+    var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -883,6 +889,7 @@ private fun TeamCard(team: CricketTeam) {
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFF09111E))
             .border(1.dp, Color(0x272E3A4A), RoundedCornerShape(12.dp))
+            .clickable { context.startActivity(Intent(context, TeamProfileActivity::class.java).putExtra(TeamProfileActivity.EXTRA_TEAM_ID, team.id)) }
             .padding(start = 14.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -918,7 +925,25 @@ private fun TeamCard(team: CricketTeam) {
                 Text(team.location, color = Color(0xFFD1D8DE), fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.Bold)
             }
         }
-        Text(":", color = CricketAccent, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+        Box(contentAlignment = Alignment.CenterEnd) {
+            Text(
+                "⋮",
+                color = CricketAccent,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.clickable { menuExpanded = true }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp)
+            )
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+                modifier = Modifier.background(Color(0xFF121A22), RoundedCornerShape(10.dp))
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Leave", color = Color(0xFFFF5A5F), fontWeight = FontWeight.Bold) },
+                    onClick = { menuExpanded = false }
+                )
+            }
+        }
     }
 }
 

@@ -12,17 +12,27 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.R
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 
 class TeamProfileActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,26 +40,80 @@ class TeamProfileActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = android.graphics.Color.rgb(2, 10, 20)
         window.navigationBarColor = android.graphics.Color.rgb(2, 10, 20)
-        setContent { TeamProfileScreen(::finish) }
+        val teamId = intent.getStringExtra(EXTRA_TEAM_ID).orEmpty()
+        setContent { TeamProfileScreen(teamId, ::finish) }
+    }
+
+    companion object {
+        const val EXTRA_TEAM_ID = "com.example.sportsxtreme.extra.TEAM_ID"
     }
 }
 
-private val ProfileBackground = Color(0xFF020A14)
-private val ProfileCard = Color(0xFF09131F)
-private val ProfileStroke = Color(0xFF294055)
+private val ProfileBackground = Color(0xFF03080E)
+private val ProfileCard = Color(0xFF0B151D)
+private val ProfileStroke = Color(0xFF263A48)
 private val ProfileAccent = Color(0xFFC9FF16)
-private val ProfileMuted = Color(0xFFC1CBD6)
+private val ProfileMuted = Color(0xFF9BAAB4)
+private val ProfileGlass = Color(0xCC101E28)
+
+private data class TeamProfileData(
+    val name: String = "Addd",
+    val location: String = "Bhubaneswar",
+    val description: String = "",
+    val founded: String = "",
+    val homeGround: String = "",
+    val captainName: String = "",
+    val captainNumber: String = "",
+    val coachManager: String = "",
+    val teamMotto: String = ""
+)
+
+private data class EditableProfileField(val key: String, val label: String, val icon: String, val value: String)
 
 @Composable
-private fun TeamProfileScreen(onBack: () -> Unit) {
+private fun TeamProfileScreen(teamId: String, onBack: () -> Unit) {
     var selectedTab by remember { mutableStateOf("Profile") }
+    var team by remember(teamId) { mutableStateOf(TeamProfileData()) }
+    DisposableEffect(teamId) {
+        var registration: ListenerRegistration? = null
+        if (teamId.isNotBlank()) {
+            registration = FirebaseFirestore.getInstance().collection("teams").document(teamId)
+                .addSnapshotListener { document, _ ->
+                    if (document != null && document.exists()) {
+                        fun firstValue(vararg keys: String): String = keys
+                            .asSequence()
+                            .mapNotNull { document.get(it)?.toString() }
+                            .firstOrNull { it.isNotBlank() }
+                            .orEmpty()
+                        team = TeamProfileData(
+                            name = firstValue("teamName", "name").ifBlank { "Addd" },
+                            location = firstValue("city", "cityTown", "location").ifBlank { "Bhubaneswar" },
+                            description = firstValue("description", "about"),
+                            founded = firstValue("founded"),
+                            homeGround = firstValue("homeGround"),
+                            captainName = firstValue("captainName", "captain", "teamCaptainName"),
+                            captainNumber = firstValue("captainMobile", "captainNumber", "mobile", "phoneNumber", "number"),
+                            coachManager = firstValue("coachManager"),
+                            teamMotto = firstValue("teamMotto")
+                        )
+                    }
+                }
+        }
+        onDispose { registration?.remove() }
+    }
     Column(Modifier.fillMaxSize().background(ProfileBackground)) {
         TopBar(onBack)
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            TeamHero()
+            TeamHero(team)
             ProfileTabs(selectedTab) { selectedTab = it }
             when (selectedTab) {
-                "Profile" -> ProfileTabContent()
+                "Profile" -> ProfileTabContent(team) { key, value ->
+                    if (teamId.isNotBlank()) {
+                        FirebaseFirestore.getInstance().collection("teams").document(teamId).update(
+                            mapOf(key to value.trim(), "updatedAtEpochMs" to System.currentTimeMillis())
+                        )
+                    }
+                }
                 "Matches" -> MatchesTabContent()
                 "Stats" -> StatsTabContent()
                 "Leaderboard" -> LeaderboardTabContent()
@@ -63,76 +127,95 @@ private fun TeamProfileScreen(onBack: () -> Unit) {
 
 @Composable
 private fun TopBar(onBack: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 15.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("‹", color = Color.White, fontSize = 36.sp, modifier = Modifier.clickable { onBack() }.padding(end = 18.dp))
+    Row(Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("‹", color = Color.White, fontSize = 34.sp, modifier = Modifier.clickable { onBack() }.padding(end = 15.dp))
         Column(Modifier.weight(1f)) {
-            Row { Text("Sports", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black); Text("Xtreme", color = ProfileAccent, fontSize = 18.sp, fontWeight = FontWeight.Black) }
+            Row { Text("sports", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black); Text("xtreme", color = ProfileAccent, fontSize = 19.sp, fontWeight = FontWeight.Black) }
             Text("PLAY  •  SCORE  •  BELONG", color = ProfileMuted, fontSize = 7.sp, letterSpacing = 1.sp)
         }
-        Text("⌯", color = Color.White, fontSize = 24.sp, modifier = Modifier.padding(end = 16.dp))
-        Text("⋮", color = Color.White, fontSize = 27.sp)
+        Text("⌕", color = Color.White, fontSize = 25.sp, modifier = Modifier.padding(end = 18.dp))
+        Text("⋮", color = Color.White, fontSize = 26.sp)
     }
 }
 
 @Composable
-private fun TeamHero() {
-    Box(Modifier.fillMaxWidth().height(184.dp).drawBehind {
-        drawRect(Color(0xFF071629))
-        repeat(5) { i -> drawCircle(Color(0x263A6490), radius = size.width * .15f, center = Offset(size.width * (i / 4f), size.height * .22f)) }
-        drawCircle(Color(0x552E5C3A), radius = size.width * .7f, center = Offset(size.width * .65f, size.height * 1.2f))
+private fun TeamHero(team: TeamProfileData) {
+    Box(Modifier.fillMaxWidth().height(238.dp).background(Brush.linearGradient(listOf(Color(0xFF071B28), Color(0xFF0B2830), Color(0xFF07130E)))).drawBehind {
+        repeat(6) { i -> drawCircle(Color(0x1A71B3C9), radius = size.width * .16f, center = Offset(size.width * (i / 5f), size.height * .16f)) }
+        drawCircle(Color(0x5C70E42E), radius = size.width * .55f, center = Offset(size.width * .76f, size.height * .86f))
+        drawCircle(Color(0x302ED3FF), radius = size.width * .34f, center = Offset(size.width * .14f, size.height * .05f))
     }) {
-        Column(Modifier.align(Alignment.BottomStart).padding(start = 22.dp, bottom = 16.dp)) {
+        Text("TEAM PROFILE", color = ProfileAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, modifier = Modifier.align(Alignment.TopStart).padding(start = 22.dp, top = 20.dp))
+        Column(Modifier.align(Alignment.BottomStart).padding(start = 22.dp, end = 18.dp, bottom = 18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(70.dp).background(Color(0xFF914E42), CircleShape).border(2.dp, Color(0xFFC6EEB4), CircleShape), contentAlignment = Alignment.Center) { Text("AD", color = Color.White, fontSize = 27.sp) }
+                Box(Modifier.size(76.dp).background(Brush.linearGradient(listOf(Color(0xFFEF7B55), Color(0xFF6B2B50))), CircleShape).border(2.dp, ProfileAccent, CircleShape), contentAlignment = Alignment.Center) { Text(team.name.initials(), color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black) }
                 Column(Modifier.padding(start = 14.dp)) {
-                    Text("Addd", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("⌾  Bhubaneswar  •  ✎", color = Color.White, fontSize = 11.sp)
-                    Text("28 Followers", color = ProfileMuted, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) { Text(team.name, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black); Text("  VERIFIED", color = Color(0xFF07140B), fontSize = 7.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 7.dp).background(ProfileAccent, RoundedCornerShape(5.dp)).padding(horizontal = 6.dp, vertical = 3.dp)) }
+                    Text("⌾  ${team.location}  •  Cricket", color = Color.White, fontSize = 11.sp)
+                    Text("28 followers  ·  Est. 2026", color = ProfileMuted, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
                 }
             }
-            Text("A passionate team with big dreams, building\na stronger cricketing community.", color = Color.White, fontSize = 11.sp, lineHeight = 14.sp, modifier = Modifier.padding(start = 84.dp, top = 8.dp))
+            Text("A passionate team with big dreams, building a stronger cricketing community.", color = Color(0xFFD5E0E5), fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 13.dp))
+            Row(Modifier.padding(top = 13.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) { HeroPill("24", "MATCHES"); HeroPill("66.7%", "WIN RATE"); HeroPill("#04", "CITY RANK") }
         }
     }
 }
+
+@Composable private fun HeroPill(value: String, label: String) = Column(Modifier.background(ProfileGlass, RoundedCornerShape(10.dp)).border(1.dp, Color(0x3343D6D0), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp)) { Text(value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold); Text(label, color = ProfileMuted, fontSize = 7.sp, letterSpacing = .5.sp) }
 
 @Composable
 private fun ProfileTabs(selectedTab: String, onSelect: (String) -> Unit) {
     val tabs = listOf("Profile", "Matches", "Stats", "Leaderboard", "Members", "Photos")
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).height(35.dp).background(Color(0xFF0A1B2B), RoundedCornerShape(17.dp)).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp).height(39.dp).background(Color(0xFF0A141C), RoundedCornerShape(20.dp)).border(1.dp, Color(0xFF1C303B), RoundedCornerShape(20.dp)).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
         tabs.forEach { tab ->
-            Text(tab, color = if (tab == selectedTab) ProfileAccent else Color.White, fontSize = 10.sp, fontWeight = if (tab == selectedTab) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.height(35.dp).clickable { onSelect(tab) }.padding(horizontal = 13.dp, vertical = 10.dp))
+            Text(tab, color = if (tab == selectedTab) Color(0xFF07120B) else ProfileMuted, fontSize = 10.sp, fontWeight = if (tab == selectedTab) FontWeight.Bold else FontWeight.Medium, modifier = Modifier.height(31.dp).clickable { onSelect(tab) }.background(if (tab == selectedTab) ProfileAccent else Color.Transparent, RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 8.dp))
         }
     }
 }
 
 @Composable
-private fun ProfileTabContent() {
+private fun ProfileTabContent(team: TeamProfileData, onSave: (String, String) -> Unit) {
     Column(Modifier.padding(horizontal = 13.dp, vertical = 4.dp)) {
-        AboutCard()
+        AboutCard(team, onSave)
         AchievementsCard()
-        Spacer(Modifier.height(30.dp))
+        Spacer(Modifier.height(18.dp))
     }
 }
 
 @Composable
-private fun AboutCard() {
-    Column(Modifier.fillMaxWidth().background(ProfileCard, RoundedCornerShape(14.dp)).border(1.dp, ProfileAccent, RoundedCornerShape(14.dp)).padding(15.dp)) {
-        Text("About", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        Text("Addd is a competitive cricket team based in Bhubaneswar. We play\nwith passion, discipline and unity, aiming to create a strong cricket\ncommunity and compete at higher levels.", color = ProfileMuted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 14.dp))
-        DetailsBox()
+private fun AboutCard(team: TeamProfileData, onSave: (String, String) -> Unit) {
+    Column(Modifier.fillMaxWidth().background(ProfileCard, RoundedCornerShape(18.dp)).border(1.dp, ProfileStroke, RoundedCornerShape(18.dp)).padding(16.dp)) {
+        var editingField by remember { mutableStateOf<EditableProfileField?>(null) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(28.dp).background(Color(0xFF1C3823), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Text("i", color = ProfileAccent, fontWeight = FontWeight.Bold) }
+            Text("About the team", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 9.dp).weight(1f))
+            EditButton { editingField = EditableProfileField("description", "About the team", "", team.description) }
+        }
+        Text(team.description, color = ProfileMuted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 14.dp))
+        DetailsBox(team) { editingField = it }
+        editingField?.let { field ->
+            ProfileFieldEditor(field, onDismiss = { editingField = null }) { value -> onSave(field.key, value); editingField = null }
+        }
     }
 }
 
 @Composable
-private fun DetailsBox() {
-    val rows = listOf("▣" to "Founded|17 Aug 2026", "▤" to "Home Ground|Kalinga Stadium", "♟" to "Captain|Rahul Sharma", "⬟" to "Coach / Manager|Amit Patnaik", "⚑" to "Team Motto|Discipline. Unity. Victory.")
+private fun DetailsBox(team: TeamProfileData, onEdit: (EditableProfileField) -> Unit) {
+    val rows = listOf(
+        EditableProfileField("founded", "Founded", "▣", team.founded),
+        EditableProfileField("homeGround", "Home Ground", "▤", team.homeGround),
+        EditableProfileField("captainName", "Captain", "♟", team.captainName),
+        EditableProfileField("captainMobile", "Captain Number", "☎", team.captainNumber),
+        EditableProfileField("coachManager", "Coach / Manager", "⬟", team.coachManager),
+        EditableProfileField("teamMotto", "Team Motto", "⚑", team.teamMotto)
+    )
     Column(Modifier.fillMaxWidth().padding(top = 15.dp).background(Color(0xFF0A192B), RoundedCornerShape(12.dp)).border(1.dp, ProfileStroke, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp)) {
-        rows.forEachIndexed { index, pair ->
-            val values = pair.second.split("|")
+        rows.forEachIndexed { index, field ->
             Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(pair.first, color = Color(0xFFD8E6FF), fontSize = 18.sp, modifier = Modifier.width(34.dp))
-                Text(values[0], color = ProfileMuted, fontSize = 10.sp, modifier = Modifier.weight(1f))
-                Text(values[1], color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1.25f))
+                Text(field.icon, color = Color(0xFFD8E6FF), fontSize = 18.sp, modifier = Modifier.width(34.dp))
+                Text(field.label, color = ProfileMuted, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                Text(field.value, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1.25f))
+                EditButton { onEdit(field) }
             }
             if (index < rows.lastIndex) Spacer(Modifier.fillMaxWidth().height(1.dp).background(ProfileStroke))
         }
@@ -140,8 +223,31 @@ private fun DetailsBox() {
 }
 
 @Composable
+private fun EditButton(onClick: () -> Unit) = Icon(
+    painter = painterResource(R.drawable.baseline_edit_24),
+    contentDescription = "Edit",
+    tint = ProfileAccent,
+    modifier = Modifier.size(18.dp).clickable(onClick = onClick)
+)
+
+@Composable
+private fun ProfileFieldEditor(field: EditableProfileField, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var value by remember(field.key, field.value) { mutableStateOf(field.value) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit ${field.label}") },
+        text = { OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text(field.label) }, singleLine = field.key != "description" && field.key != "teamMotto") },
+        confirmButton = { TextButton(onClick = { onSave(value) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+private fun String.initials(): String = split(Regex("\\s+")).filter { it.isNotBlank() }.take(2)
+    .joinToString("") { it.first().uppercase() }.ifBlank { "TM" }
+
+@Composable
 private fun AchievementsCard() {
-    Column(Modifier.fillMaxWidth().padding(top = 16.dp).background(ProfileCard, RoundedCornerShape(14.dp)).border(1.dp, ProfileAccent, RoundedCornerShape(14.dp)).padding(15.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = 14.dp).background(ProfileCard, RoundedCornerShape(18.dp)).border(1.dp, ProfileStroke, RoundedCornerShape(18.dp)).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { Text("♕", color = ProfileAccent, fontSize = 23.sp); Text("Achievements", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp)) }
         Achievement("2 Tournament Wins")
         Achievement("3 Runners-up")

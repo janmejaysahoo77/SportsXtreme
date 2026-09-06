@@ -34,7 +34,7 @@ class ManagePlayersInsideTeamActivity : ComponentActivity() {
             ManagePlayersScreen(
                 teamName = teamName,
                 onBack = ::finish,
-                onProfile = { startActivity(Intent(this, TeamProfileActivity::class.java)) },
+                onProfile = { startActivity(Intent(this, TeamProfileActivity::class.java).putExtra(TeamProfileActivity.EXTRA_TEAM_ID, teamId)) },
                 onAddPlayer = {
                     startActivity(
                         Intent(this, AddPlayerActivity::class.java)
