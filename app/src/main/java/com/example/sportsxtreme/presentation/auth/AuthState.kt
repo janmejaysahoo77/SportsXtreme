@@ -12,5 +12,6 @@ data class AuthState(
     val pendingPhoneSession: PhoneAuthSession? = null,
     val isNewPhoneUser: Boolean = false,
     val authenticatedUser: User? = null,
+    val smsMessage: String? = null,
     val errorMessage: String? = null
 )

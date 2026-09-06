@@ -1,47 +1,40 @@
 package com.example.sportsxtreme.presentation.auth
 
-import android.content.Context
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.LinearGradient
-import android.graphics.Paint
-import android.graphics.RectF
-import android.graphics.Shader
-import android.graphics.Typeface
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.graphics.*
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
 import android.text.TextWatcher
 import android.util.AttributeSet
+import android.util.Base64
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
-import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.Space
-import android.widget.TextView
+import android.widget.*
+import androidx.core.content.ContextCompat
+import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.common.WindowInsetsUtils
 import com.example.sportsxtreme.data.di.AuthDependencies
-import com.example.sportsxtreme.R
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
-import kotlin.math.max
+import com.example.sportsxtreme.presentation.components.AuthBackgroundView
+import com.google.android.gms.auth.api.phone.SmsRetriever
+import com.google.android.gms.common.api.CommonStatusCodes
+import com.google.android.gms.common.api.Status
+import kotlinx.coroutines.*
+import java.security.MessageDigest
+import java.util.regex.Pattern
 import kotlin.math.min
 import kotlin.math.sin
-
-import com.example.sportsxtreme.presentation.components.AuthBackgroundView
 
 class OtpVerificationScreenView @JvmOverloads constructor(
     context: Context,
@@ -51,7 +44,6 @@ class OtpVerificationScreenView @JvmOverloads constructor(
 
     private val neonGreen = Color.rgb(193, 255, 0)
     private val electricBlue = Color.rgb(0, 127, 255)
-    private val ink = Color.rgb(3, 6, 8)
     private val muted = Color.rgb(184, 197, 189)
     private val panelColor = Color.argb(186, 4, 7, 7)
     private val otpInputs = mutableListOf<EditText>()
@@ -62,6 +54,33 @@ class OtpVerificationScreenView @JvmOverloads constructor(
     private val otpScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var resendCount = 0
     private var isVerifying = false
+
+    private val smsReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (SmsRetriever.SMS_RETRIEVED_ACTION == intent?.action) {
+                val extras = intent.extras
+                val status = if (Build.VERSION.SDK_INT >= 33) {
+                    extras?.getParcelable(SmsRetriever.EXTRA_STATUS, Status::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    extras?.getParcelable(SmsRetriever.EXTRA_STATUS)
+                }
+
+                if (status?.statusCode == CommonStatusCodes.SUCCESS) {
+                    val message = extras?.getString(SmsRetriever.EXTRA_SMS_MESSAGE)
+                    if (message != null) {
+                        Log.d("OTP_AUTOFILL", "SMS received: $message")
+                        extractOtpAndFill(message)
+                    } else {
+                        Log.w("OTP_AUTOFILL", "SMS retrieved but message is null. Extras: ${extras?.keySet()}")
+                    }
+                } else if (status?.statusCode == CommonStatusCodes.TIMEOUT) {
+                    Log.d("OTP_AUTOFILL", "SMS Retrieval timed out")
+                }
+            }
+        }
+    }
+
 
     init {
         (context as? Activity)?.let { AuthDependencies.bindPhoneAuthActivity(it) }
@@ -74,7 +93,109 @@ class OtpVerificationScreenView @JvmOverloads constructor(
             otpInputs.firstOrNull()?.requestFocus()
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
             imm?.showSoftInput(otpInputs.firstOrNull(), InputMethodManager.SHOW_IMPLICIT)
-            verifyAutomaticallyIfReady(context)
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        Log.d("OTP_AUTOFILL", "Screen attached. Starting SMS Retriever...")
+        printAppHash(context)
+        startSmsRetriever(context)
+
+        ContextCompat.registerReceiver(
+            context,
+            smsReceiver,
+            IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION),
+            SmsRetriever.SEND_PERMISSION,
+            null,
+            ContextCompat.RECEIVER_EXPORTED
+        )
+
+        otpScope.launch {
+            authViewModel.state.collect { state ->
+                state.smsMessage?.let { message ->
+                    Log.d("OTP_AUTOFILL", "SMS message from shared state: $message")
+                    extractOtpAndFill(message)
+                    authViewModel.clearSmsMessage()
+                }
+
+                state.pendingPhoneSession?.let { session ->
+                    if (session.isAutoVerified) {
+                        session.autoFilledCode?.let { code ->
+                            Log.d("OTP_AUTOFILL", "Firebase auto-retrieved code: $code")
+                            fillOtp(code)
+                        } ?: run {
+                            verifyAutomaticallyIfReady(context)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        otpScope.cancel()
+        try {
+            context.unregisterReceiver(smsReceiver)
+        } catch (_: Exception) { }
+        super.onDetachedFromWindow()
+    }
+
+
+    private fun startSmsRetriever(context: Context) {
+        val client = SmsRetriever.getClient(context)
+        client.startSmsRetriever().addOnSuccessListener {
+            Log.d("OTP_AUTOFILL", "SMS Retriever started successfully")
+        }.addOnFailureListener {
+            Log.e("OTP_AUTOFILL", "Failed to start SMS Retriever", it)
+        }
+    }
+
+    private fun extractOtpAndFill(message: String) {
+        // More professional regex to catch 6 digits anywhere in the message
+        val pattern = Pattern.compile("(\\d{6})")
+        val matcher = pattern.matcher(message)
+        if (matcher.find()) {
+            val otp = matcher.group(1)
+            Log.d("OTP_AUTOFILL", "Extracted OTP: $otp")
+            if (otp != null && otp.length == 6) {
+                fillOtp(otp)
+            }
+        } else {
+            Log.d("OTP_AUTOFILL", "No 6-digit OTP found in message: $message")
+        }
+    }
+
+    private fun fillOtp(otp: String) {
+        otp.forEachIndexed { index, char ->
+            if (index < otpInputs.size) {
+                otpInputs[index].setText(char.toString())
+            }
+        }
+        if (otp.length == 6) {
+            verifyOtp(context)
+        }
+    }
+
+    private fun printAppHash(context: Context) {
+        try {
+            val packageName = context.packageName
+            @Suppress("DEPRECATION")
+            val signatures = context.packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES).signatures
+            signatures?.forEach { signature ->
+                val appInfo = "$packageName ${signature.toCharsString()}"
+                val messageDigest = MessageDigest.getInstance("SHA-256")
+                messageDigest.update(appInfo.toByteArray(Charsets.UTF_8))
+                val hashSignature = messageDigest.digest().copyOfRange(0, 9)
+                val hash = Base64.encodeToString(hashSignature, Base64.NO_PADDING or Base64.NO_WRAP).substring(0, 11)
+                
+                Log.i("OTP_AUTOFILL", "---------------------------------------------------")
+                Log.i("OTP_AUTOFILL", "YOUR APP HASH: $hash")
+                Log.i("OTP_AUTOFILL", "FORMAT: <#> Your SportsXtreme OTP is 123456. $hash")
+                Log.i("OTP_AUTOFILL", "---------------------------------------------------")
+            }
+        } catch (e: Exception) {
+            Log.e("OTP_AUTOFILL", "Error generating App Hash", e)
         }
     }
 
@@ -413,11 +534,6 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         errorView.visibility = View.VISIBLE
     }
 
-    override fun onDetachedFromWindow() {
-        otpScope.cancel()
-        super.onDetachedFromWindow()
-    }
-
     private fun title(text: String, size: Float, color: Int): TextView {
         return TextView(context).apply {
             this.text = text
@@ -464,6 +580,9 @@ class OtpVerificationScreenView @JvmOverloads constructor(
 
     private fun dp(value: Int): Int {
         return (value * resources.displayMetrics.density + 0.5f).toInt()
+    }
+
+    private companion object {
     }
 
     private class AppLogoCoreView(context: Context) : View(context) {

@@ -78,14 +78,15 @@ class FirebasePhoneAuthManager(
                     signInOrLinkWithPhoneCredential(credential) { result ->
                         resumeOnce(
                             result.fold(
-                                onSuccess = {
+                                onSuccess = { isNew ->
                                     Result.success(
                                         PhoneAuthSession(
                                             verificationId = "",
                                             phoneNumber = normalizedPhoneNumber,
                                             canResend = false,
                                             isAutoVerified = true,
-                                            isNewUser = it
+                                            isNewUser = isNew,
+                                            autoFilledCode = credential.smsCode
                                         )
                                     )
                                 },
