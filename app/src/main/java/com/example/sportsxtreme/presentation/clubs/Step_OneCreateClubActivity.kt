@@ -1,5 +1,6 @@
 package com.example.sportsxtreme.presentation.clubs
 
+import com.example.sportsxtreme.common.dashedBorder
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -64,10 +65,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -75,6 +80,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -344,7 +350,7 @@ fun ImageUploadSection() {
                 modifier = Modifier
                     .size(100.dp)
                     .clip(CircleShape)
-                    .border(1.dp, ColorCardBorder, CircleShape)
+                    .dashedBorder(1.dp, ColorCardBorder, 50.dp)
                     .background(ColorSurface),
                 contentAlignment = Alignment.Center
             ) {
@@ -379,9 +385,8 @@ fun ImageUploadSection() {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(120.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .border(1.dp, ColorCardBorder, RoundedCornerShape(18.dp))
-                .background(ColorSurface),
+                .dashedBorder(1.dp, ColorCardBorder, 18.dp)
+                .background(ColorSurface, RoundedCornerShape(18.dp)),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -768,3 +773,4 @@ fun StepOneBottomBar(onContinue: () -> Unit) {
         }
     }
 }
+

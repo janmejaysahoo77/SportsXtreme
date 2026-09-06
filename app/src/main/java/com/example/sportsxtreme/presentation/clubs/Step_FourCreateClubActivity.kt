@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.clubs
 
 import android.content.Intent
+import com.example.sportsxtreme.common.dashedBorder
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -699,19 +700,3 @@ fun StepFourBottomBar(onClick: () -> Unit) {
     }
 }
 
-// Custom Dashed Border Modifier
-fun Modifier.dashedBorder(width: Dp, color: Color, cornerRadius: Dp) = drawBehind {
-    val stroke = Stroke(
-        width = width.toPx(),
-        pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
-    )
-    val path = Path().apply {
-        addRoundRect(
-            androidx.compose.ui.geometry.RoundRect(
-                rect = androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadius.toPx())
-            )
-        )
-    }
-    drawPath(path, color, style = stroke)
-}
