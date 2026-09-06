@@ -169,6 +169,14 @@ class AuthViewModel(
         return useCases.getPendingEmailLink.pendingEmail()
     }
 
+    fun receiveSmsMessage(message: String) {
+        _state.value = state.value.copy(smsMessage = message)
+    }
+
+    fun clearSmsMessage() {
+        _state.value = state.value.copy(smsMessage = null)
+    }
+
     suspend fun completePendingAuthentication(): Resource<User> {
         val authSession = state.value.pendingAuthSession
             ?: return Resource.Error("No authenticated account is waiting to be completed.")

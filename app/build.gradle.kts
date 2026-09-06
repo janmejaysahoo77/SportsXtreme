@@ -17,7 +17,7 @@ android {
     defaultConfig {
         applicationId = "com.example.sportsxtreme"
         minSdk = 28
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
         resourceConfigurations += setOf("en")
@@ -51,6 +51,7 @@ dependencies {
     implementation("androidx.compose.animation:animation")
     implementation("com.airbnb.android:lottie-compose:6.6.7")
     implementation(libs.androidx.compose.material3)
+    implementation("androidx.compose.material:material-icons-extended")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.activity.compose)
@@ -63,6 +64,7 @@ dependencies {
     implementation(libs.firebase.firestore)
     implementation("com.google.firebase:firebase-functions")
     implementation(libs.firebase.storage)
+    implementation(libs.google.play.services.auth.api.phone)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.room.runtime)

@@ -5,5 +5,6 @@ data class PhoneAuthSession(
     val phoneNumber: String,
     val canResend: Boolean = true,
     val isAutoVerified: Boolean = false,
-    val isNewUser: Boolean = false
+    val isNewUser: Boolean = false,
+    val autoFilledCode: String? = null
 )

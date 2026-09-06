@@ -43,6 +43,7 @@ private val AnalyticsBg = UiColor(4, 10, 20)
 private val AnalyticsPanel = UiColor(11, 22, 37)
 private val AnalyticsAccent = UiColor(190, 255, 24)
 private val AnalyticsMuted = UiColor(166, 178, 194)
+private val CardBorder = UiColor(45, 51, 46)
 
 @Composable
 private fun AnalyticsPage(onBack: () -> Unit) {
@@ -53,6 +54,9 @@ private fun AnalyticsPage(onBack: () -> Unit) {
             Text("<", color = UiColor.White, fontSize = 23.sp, modifier = Modifier.clickable { onBack() })
             Text("Club Analytics", color = UiColor.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 14.dp))
             Text("≡", color = UiColor.White, fontSize = 20.sp); Spacer(Modifier.width(14.dp)); Text("⋮", color = UiColor.White, fontSize = 22.sp)
+        }
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Tag("Nearby"); Tag("Verified"); Tag("Trending")
         }
         Row(Modifier.fillMaxWidth().height(39.dp).padding(horizontal = 10.dp).clip(RoundedCornerShape(20.dp)).background(UiColor(14, 18, 28)).padding(3.dp)) {
             AnalyticsTab("Overview", pager.currentPage == 0, Modifier.weight(1f)) { scope.launch { pager.animateScrollToPage(0) } }
@@ -72,6 +76,8 @@ private fun AnalyticsTab(label: String, selected: Boolean, modifier: Modifier, c
 @Composable
 private fun OverviewTab() = Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 10.dp)) {
     Text("Club Overview  ⓘ", color = UiColor.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(10.dp))
+    MyClubsCard()
     Spacer(Modifier.height(10.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) { OverviewStat("TOTAL TEAMS", "5", Modifier.weight(1f)); OverviewStat("TOTAL MEMBERS", "82", Modifier.weight(1f)) }
     Spacer(Modifier.height(9.dp)); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) { OverviewStat("INTERNAL TOURN.", "6", Modifier.weight(1f)); OverviewStat("EXTERNAL TOURN.", "3", Modifier.weight(1f)) }
@@ -120,3 +126,47 @@ private fun TournamentsTab() = Column(Modifier.fillMaxSize().verticalScroll(reme
 
 @Composable
 private fun TournamentCard(title: String, subtitle: String, status: String, teams: String, matches: String, champion: String, runnerUp: String) = Card(Modifier.fillMaxWidth().padding(bottom = 12.dp).border(1.dp, UiColor(39, 65, 54), RoundedCornerShape(13.dp)), shape = RoundedCornerShape(13.dp), colors = CardDefaults.cardColors(containerColor = AnalyticsPanel)) { Column(Modifier.padding(14.dp)) { Row { Box(Modifier.size(35.dp).background(UiColor(38, 48, 59))); Column(Modifier.weight(1f).padding(start = 10.dp)) { Text(title, color = UiColor.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp); Text(subtitle, color = AnalyticsMuted, fontSize = 8.sp) }; Text("● $status", color = if (status == "LIVE") AnalyticsAccent else AnalyticsMuted, fontSize = 7.sp, modifier = Modifier.clip(RoundedCornerShape(8.dp)).border(1.dp, AnalyticsMuted, RoundedCornerShape(8.dp)).padding(horizontal = 7.dp, vertical = 4.dp)) }; Spacer(Modifier.height(12.dp)); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { SmallMetric("TEAMS", teams, Modifier.weight(1f), true); SmallMetric("MATCHES", matches, Modifier.weight(1f), true) }; Spacer(Modifier.height(8.dp)); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { SmallMetric("CHAMPION", champion, Modifier.weight(1f)); SmallMetric("RUNNER UP", runnerUp, Modifier.weight(1f)) } } }
+
+@Composable
+private fun Tag(
+    text: String,
+    bgColor: UiColor = UiColor.White.copy(alpha = 0.3f),
+    borderColor: UiColor? = null
+) = Text(
+    text,
+    color = UiColor.White,
+    fontSize = 10.sp,
+    fontWeight = FontWeight.ExtraBold,
+    modifier = Modifier
+        .clip(RoundedCornerShape(16.dp))
+        .then(
+            if (borderColor != null) Modifier.border(
+                1.dp,
+                borderColor,
+                RoundedCornerShape(16.dp)
+            ) else Modifier
+        )
+        .background(bgColor)
+        .padding(horizontal = 10.dp, vertical = 6.dp)
+)
+
+@Composable
+private fun MyClubsCard() = Card(
+    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).border(1.dp, CardBorder, RoundedCornerShape(18.dp)),
+    shape = RoundedCornerShape(18.dp),
+    colors = CardDefaults.cardColors(containerColor = UiColor.DarkGray.copy(alpha = 0.1f))
+) {
+    Column(Modifier.padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("My Clubs", color = UiColor.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            Tag(
+                text = "1Active Club",
+                bgColor = AnalyticsAccent.copy(alpha = 0.65f),
+                borderColor = AnalyticsAccent
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Access and manage the clubs you create or participate in.", color = AnalyticsMuted, fontSize = 11.sp)
+    }
+}
