@@ -142,6 +142,21 @@ class CreateTeamActivity : ComponentActivity() {
         var addMyself by rememberSaveable { mutableStateOf(true) }
         var showRequiredErrors by rememberSaveable { mutableStateOf(false) }
         val focusManager = LocalFocusManager.current
+
+        // Prefer the saved profile; Firebase Auth covers profiles that are still being created.
+        LaunchedEffect(Unit) {
+            val signedInUser = firebaseAuth.currentUser ?: return@LaunchedEffect
+            val profile = runCatching {
+                firestore.collection("users").document(signedInUser.uid).get().await()
+            }.getOrNull()
+            if (captain.isBlank()) {
+                captain = profile?.getString("name").orEmpty().ifBlank { signedInUser.displayName.orEmpty() }
+            }
+            if (mobile.isBlank()) {
+                mobile = profile?.getString("phoneNumber").orEmpty().ifBlank { signedInUser.phoneNumber.orEmpty() }
+            }
+        }
+
         Box(Modifier.fillMaxSize().background(background).clickable(
             interactionSource = remember { MutableInteractionSource() }, indication = null
         ) { focusManager.clearFocus(force = true) }) {
@@ -159,13 +174,17 @@ class CreateTeamActivity : ComponentActivity() {
                     Text("Upload your team logo", color = textSecondary, fontSize = 11.sp); Spacer(Modifier.height(14.dp))
                     TeamTextField("TEAM NAME *", "Enter your team name", teamName, { if (it.length <= 30) teamName = it }, R.drawable.baseline_check_circle_24, counter = "${teamName.length}/30", error = if (showRequiredErrors && teamName.isBlank()) "Team name is required" else null)
                     TeamTextField("CITY / TOWN *", "Enter city / town", city, { city = it }, R.drawable.baseline_edit_location_24, error = if (showRequiredErrors && city.isBlank()) "City / town is required" else null)
-                    TeamTextField("TEAM CAPTAIN / COORDINATOR (OPTIONAL)", "+91   Enter mobile number", mobile, { mobile = it }, R.drawable.baseline_local_phone_24, KeyboardType.Phone)
-                    TeamTextField("TEAM CAPTAIN NAME (OPTIONAL)", "Enter captain name", captain, { captain = it }, R.drawable.baseline_person_outline_24)
+                    TeamTextField("TEAM CAPTAIN / COORDINATOR *", "+91   Enter mobile number", mobile, { mobile = it }, R.drawable.baseline_local_phone_24, KeyboardType.Phone, error = if (showRequiredErrors && mobile.isBlank()) "Captain / coordinator number is required" else null)
+                    TeamTextField("TEAM CAPTAIN NAME *", "Enter captain name", captain, { captain = it }, R.drawable.baseline_person_outline_24, error = if (showRequiredErrors && captain.isBlank()) "Captain name is required" else null)
                     AddMyselfCard(addMyself) { addMyself = it }
                     Spacer(Modifier.height(100.dp))
                 }
-                CreateButton(enabled = teamName.isNotBlank() && city.isNotBlank()) {
-                    if (teamName.isBlank() || city.isBlank()) showRequiredErrors = true else onContinue(teamName.trim(), city.trim(), captain.trim(), mobile.trim(), addMyself)
+                CreateButton(enabled = teamName.isNotBlank() && city.isNotBlank() && captain.isNotBlank() && mobile.isNotBlank()) {
+                    if (teamName.isBlank() || city.isBlank() || captain.isBlank() || mobile.isBlank()) {
+                        showRequiredErrors = true
+                    } else {
+                        onContinue(teamName.trim(), city.trim(), captain.trim(), mobile.trim(), addMyself)
+                    }
                 }
             }
         }
