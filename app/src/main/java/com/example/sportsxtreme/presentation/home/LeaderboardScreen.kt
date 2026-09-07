@@ -134,17 +134,6 @@ private fun LeaderboardTopStrip(onMenuClick: () -> Unit) {
                 .height(32.dp)
                 .clip(RoundedCornerShape(5.dp))
         )
-        Spacer(Modifier.width(8.dp))
-        Box(
-            modifier = Modifier
-                .width(76.dp)
-                .height(24.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(LeaderboardAccent),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("PRO @ 69", color = Color(0xFF081007), fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-        }
         Spacer(Modifier.weight(1f))
         HeaderBell()
     }

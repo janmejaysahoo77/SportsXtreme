@@ -286,17 +286,6 @@ private fun CricketTopStrip(onMenuClick: () -> Unit) {
             Text("Match command center", color = CricketMuted, fontSize = 8.5.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.weight(1f))
-        Box(
-            modifier = Modifier
-                .height(25.dp)
-                .clip(RoundedCornerShape(13.dp))
-                .background(CricketAccent)
-                .padding(horizontal = 12.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("PRO", color = Color(0xFF081007), fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
-        }
-        Spacer(Modifier.width(12.dp))
         HeaderBell()
     }
 }

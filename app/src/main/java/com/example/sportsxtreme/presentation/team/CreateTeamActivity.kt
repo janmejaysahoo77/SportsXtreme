@@ -22,8 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -69,13 +67,13 @@ class CreateTeamActivity : ComponentActivity() {
         window.statusBarColor = android.graphics.Color.rgb(2, 11, 18)
         window.navigationBarColor = android.graphics.Color.rgb(2, 11, 18)
         setContent {
-            CreateTeamScreen(::finish) { teamName, city, captainName, captainMobile, addMyself ->
-                saveTeamAndContinue(teamName, city, captainName, captainMobile, addMyself)
+            CreateTeamScreen(::finish) { teamName, city, captainName, captainMobile ->
+                saveTeamAndContinue(teamName, city, captainName, captainMobile)
             }
         }
     }
 
-    private fun saveTeamAndContinue(teamName: String, city: String, captainName: String, captainMobile: String, addMyself: Boolean) {
+    private fun saveTeamAndContinue(teamName: String, city: String, captainName: String, captainMobile: String) {
         if (isSavingTeam) return
         val userId = firebaseAuth.currentUser?.uid ?: run {
             Toast.makeText(this, "Sign in to create a team", Toast.LENGTH_SHORT).show()
@@ -85,11 +83,16 @@ class CreateTeamActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 val teamRef = firestore.collection("teams").document()
-                val members: List<Map<String, Any>> = if (addMyself) {
-                    listOf(mapOf("userId" to userId, "role" to "OWNER", "joinedAtEpochMs" to System.currentTimeMillis()))
-                } else {
-                    emptyList()
-                }
+                // The creator is always the initial admin and captain. These are
+                // independent roles, so one member can legitimately hold both.
+                val members = listOf(
+                    mapOf(
+                        "userId" to userId,
+                        "roles" to listOf("ADMIN", "CAPTAIN"),
+                        "playingRole" to "PLAYER",
+                        "joinedAtEpochMs" to System.currentTimeMillis()
+                    )
+                )
                 teamRef.set(
                     mapOf(
                         "teamId" to teamRef.id,
@@ -105,7 +108,7 @@ class CreateTeamActivity : ComponentActivity() {
                         "coachManager" to "",
                         "teamMotto" to "",
                         "ownerUserId" to userId,
-                        "memberIds" to if (addMyself) listOf(userId) else emptyList<String>(),
+                        "memberIds" to listOf(userId),
                         "members" to members,
                         "type" to "USER_CREATED",
                         "createdAtEpochMs" to System.currentTimeMillis(),
@@ -136,10 +139,9 @@ class CreateTeamActivity : ComponentActivity() {
     private val border = Color(0xFF26343C)
 
     @Composable
-    private fun CreateTeamScreen(onBack: () -> Unit, onContinue: (String, String, String, String, Boolean) -> Unit) {
+    private fun CreateTeamScreen(onBack: () -> Unit, onContinue: (String, String, String, String) -> Unit) {
         var teamName by rememberSaveable { mutableStateOf("") }; var city by rememberSaveable { mutableStateOf("") }
         var mobile by rememberSaveable { mutableStateOf("") }; var captain by rememberSaveable { mutableStateOf("") }
-        var addMyself by rememberSaveable { mutableStateOf(true) }
         var showRequiredErrors by rememberSaveable { mutableStateOf(false) }
         val focusManager = LocalFocusManager.current
 
@@ -176,14 +178,14 @@ class CreateTeamActivity : ComponentActivity() {
                     TeamTextField("CITY / TOWN *", "Enter city / town", city, { city = it }, R.drawable.baseline_edit_location_24, error = if (showRequiredErrors && city.isBlank()) "City / town is required" else null)
                     TeamTextField("TEAM CAPTAIN / COORDINATOR *", "+91   Enter mobile number", mobile, { mobile = it }, R.drawable.baseline_local_phone_24, KeyboardType.Phone, error = if (showRequiredErrors && mobile.isBlank()) "Captain / coordinator number is required" else null)
                     TeamTextField("TEAM CAPTAIN NAME *", "Enter captain name", captain, { captain = it }, R.drawable.baseline_person_outline_24, error = if (showRequiredErrors && captain.isBlank()) "Captain name is required" else null)
-                    AddMyselfCard(addMyself) { addMyself = it }
+                    CreatorRoleCard()
                     Spacer(Modifier.height(100.dp))
                 }
                 CreateButton(enabled = teamName.isNotBlank() && city.isNotBlank() && captain.isNotBlank() && mobile.isNotBlank()) {
                     if (teamName.isBlank() || city.isBlank() || captain.isBlank() || mobile.isBlank()) {
                         showRequiredErrors = true
                     } else {
-                        onContinue(teamName.trim(), city.trim(), captain.trim(), mobile.trim(), addMyself)
+                        onContinue(teamName.trim(), city.trim(), captain.trim(), mobile.trim())
                     }
                 }
             }
@@ -249,6 +251,6 @@ class CreateTeamActivity : ComponentActivity() {
             error?.let { Text(it, color = Color(0xFFFF8A8A), fontSize = 10.sp, modifier = Modifier.align(Alignment.BottomStart).padding(start = 13.dp)) }
         }
     }
-    @Composable private fun AddMyselfCard(checked: Boolean, onCheckedChange: (Boolean) -> Unit) = Row(Modifier.fillMaxWidth().padding(top = 11.dp).background(surface, RoundedCornerShape(10.dp)).border(1.dp, accent.copy(.55f), RoundedCornerShape(10.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(34.dp).background(accent.copy(.13f), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.outline_groups_24), null, tint = accent, modifier = Modifier.size(21.dp)) }; Column(Modifier.padding(start = 10.dp).weight(1f)) { Text("Add yourself in the team", color = textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp); Text("You will be added as a member", color = textSecondary, fontSize = 10.sp) }; Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = accent, uncheckedThumbColor = textSecondary, uncheckedTrackColor = border)) }
+    @Composable private fun CreatorRoleCard() = Row(Modifier.fillMaxWidth().padding(top = 11.dp).background(surface, RoundedCornerShape(10.dp)).border(1.dp, accent.copy(.55f), RoundedCornerShape(10.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(34.dp).background(accent.copy(.13f), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.outline_groups_24), null, tint = accent, modifier = Modifier.size(21.dp)) }; Column(Modifier.padding(start = 10.dp).weight(1f)) { Text("You will lead this team", color = textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp); Text("You will be added as its admin and captain.", color = textSecondary, fontSize = 10.sp) } }
     @Composable private fun CreateButton(enabled: Boolean, onContinue: () -> Unit) = Box(Modifier.fillMaxWidth().padding(bottom = 10.dp, top = 4.dp).height(54.dp).background(if (enabled) Brush.horizontalGradient(listOf(accent, accentGreen)) else Brush.horizontalGradient(listOf(border, border)), RoundedCornerShape(10.dp)).clickable(onClick = onContinue), contentAlignment = Alignment.Center) { Text("Create Team", color = if (enabled) background else textSecondary, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold); Icon(painterResource(R.drawable.outline_arrow_back_ios_24), null, tint = if (enabled) background else textSecondary, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 17.dp).size(20.dp).graphicsLayer(rotationZ = 180f)) }
 }
