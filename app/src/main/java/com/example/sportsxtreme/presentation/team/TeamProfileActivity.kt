@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.ListenerRegistration
 
 class TeamProfileActivity : ComponentActivity() {
@@ -70,14 +71,50 @@ private data class TeamProfileData(
 
 private data class EditableProfileField(val key: String, val label: String, val icon: String, val value: String)
 
+private data class TeamMemberData(
+    val userId: String,
+    val name: String,
+    val teamRole: String,
+    val playingRole: String,
+    val joinedAtEpochMs: Long
+)
+
+private data class TeamMatchData(
+    val id: String,
+    val title: String,
+    val teamName: String,
+    val opponentName: String,
+    val status: String,
+    val dateEpochMs: Long?,
+    val venue: String,
+    val teamScore: String,
+    val opponentScore: String,
+    val result: String?
+)
+
 @Composable
 private fun TeamProfileScreen(teamId: String, onBack: () -> Unit) {
     var selectedTab by remember { mutableStateOf("Profile") }
     var team by remember(teamId) { mutableStateOf(TeamProfileData()) }
+    var members by remember(teamId) { mutableStateOf<List<TeamMemberData>>(emptyList()) }
+    var matches by remember(teamId) { mutableStateOf<List<TeamMatchData>>(emptyList()) }
     DisposableEffect(teamId) {
+        val firestore = FirebaseFirestore.getInstance()
         var registration: ListenerRegistration? = null
+        var teamARegistration: ListenerRegistration? = null
+        var teamBRegistration: ListenerRegistration? = null
+        val memberRegistrations = mutableListOf<ListenerRegistration>()
+        val teamAMatches = mutableMapOf<String, TeamMatchData>()
+        val teamBMatches = mutableMapOf<String, TeamMatchData>()
+
+        fun publishMatches() {
+            matches = (teamAMatches.values + teamBMatches.values)
+                .distinctBy { it.id }
+                .sortedByDescending { it.dateEpochMs ?: Long.MAX_VALUE }
+        }
+
         if (teamId.isNotBlank()) {
-            registration = FirebaseFirestore.getInstance().collection("teams").document(teamId)
+            registration = firestore.collection("teams").document(teamId)
                 .addSnapshotListener { document, _ ->
                     if (document != null && document.exists()) {
                         fun firstValue(vararg keys: String): String = keys
@@ -96,10 +133,74 @@ private fun TeamProfileScreen(teamId: String, onBack: () -> Unit) {
                             coachManager = firstValue("coachManager"),
                             teamMotto = firstValue("teamMotto")
                         )
+
+                        // `members` is only changed after a user has joined. Do not use
+                        // invitations or placeholder player records for this screen.
+                        val joinedMembers = (document.get("members") as? List<*>)
+                            .orEmpty()
+                            .mapNotNull { it as? Map<*, *> }
+                            .mapNotNull { member ->
+                                val userId = member["userId"] as? String ?: return@mapNotNull null
+                                TeamMemberData(
+                                    userId = userId,
+                                    name = "",
+                                    teamRole = (member["role"] as? String).orEmpty(),
+                                    playingRole = "",
+                                    joinedAtEpochMs = (member["joinedAtEpochMs"] as? Number)?.toLong() ?: 0L
+                                )
+                            }
+                            .distinctBy { it.userId }
+
+                        memberRegistrations.forEach { it.remove() }
+                        memberRegistrations.clear()
+                        if (joinedMembers.isEmpty()) {
+                            members = emptyList()
+                        } else {
+                            val memberProfiles = mutableMapOf<String, TeamMemberData>()
+                            joinedMembers.forEach { joinedMember ->
+                                memberRegistrations += firestore.collection("users").document(joinedMember.userId)
+                                    .addSnapshotListener { user, _ ->
+                                        val profile = if (user?.exists() == true) {
+                                            joinedMember.copy(
+                                                name = user.getString("name").orEmpty().ifBlank { "Team member" },
+                                                playingRole = user.getString("role").orEmpty().ifBlank { "Player" }
+                                            )
+                                        } else {
+                                            joinedMember.copy(name = "Team member", playingRole = "Player")
+                                        }
+                                        memberProfiles[joinedMember.userId] = profile
+                                        members = joinedMembers.mapNotNull { memberProfiles[it.userId] }
+                                            .sortedBy { it.joinedAtEpochMs }
+                                    }
+                            }
+                        }
                     }
                 }
+            teamARegistration = firestore.collection("matches")
+                .whereEqualTo("teamA.teamId", teamId)
+                .addSnapshotListener { snapshot, _ ->
+                    teamAMatches.clear()
+                    snapshot?.documents.orEmpty().forEach { match ->
+                        match.toTeamMatchData(teamId)?.let { teamAMatches[it.id] = it }
+                    }
+                    publishMatches()
+                }
+            teamBRegistration = firestore.collection("matches")
+                .whereEqualTo("teamB.teamId", teamId)
+                .addSnapshotListener { snapshot, _ ->
+                    teamBMatches.clear()
+                    snapshot?.documents.orEmpty().forEach { match ->
+                        match.toTeamMatchData(teamId)?.let { teamBMatches[it.id] = it }
+                    }
+                    publishMatches()
+                }
         }
-        onDispose { registration?.remove() }
+        onDispose {
+            registration?.remove()
+            teamARegistration?.remove()
+            teamBRegistration?.remove()
+            memberRegistrations.forEach { it.remove() }
+        }
     }
     Column(Modifier.fillMaxSize().background(ProfileBackground)) {
         TopBar(onBack)
@@ -114,10 +215,10 @@ private fun TeamProfileScreen(teamId: String, onBack: () -> Unit) {
                         )
                     }
                 }
-                "Matches" -> MatchesTabContent()
-                "Stats" -> StatsTabContent()
+                "Matches" -> MatchesTabContent(matches)
+                "Stats" -> StatsTabContent(matches)
                 "Leaderboard" -> LeaderboardTabContent()
-                "Members" -> MembersTabContent()
+                "Members" -> MembersTabContent(members)
                 "Photos" -> PhotosTabContent()
             }
             Spacer(Modifier.height(100.dp))
@@ -245,6 +346,51 @@ private fun ProfileFieldEditor(field: EditableProfileField, onDismiss: () -> Uni
 private fun String.initials(): String = split(Regex("\\s+")).filter { it.isNotBlank() }.take(2)
     .joinToString("") { it.first().uppercase() }.ifBlank { "TM" }
 
+private fun DocumentSnapshot.toTeamMatchData(teamId: String): TeamMatchData? {
+    val teamA = get("teamA") as? Map<*, *> ?: return null
+    val teamB = get("teamB") as? Map<*, *> ?: return null
+    val isTeamA = teamA["teamId"] == teamId
+    val ownTeam = if (isTeamA) teamA else teamB
+    val opponent = if (isTeamA) teamB else teamA
+    val innings = get("innings") as? List<*> ?: emptyList<Any>()
+    val scores = innings.mapNotNull { it as? Map<*, *> }
+        .groupBy { it["battingTeamId"] as? String }
+        .mapValues { (_, entries) ->
+            entries.sumOf { (it["score"] as? Number)?.toInt() ?: 0 } to
+                entries.sumOf { (it["wickets"] as? Number)?.toInt() ?: 0 }
+        }
+    fun scoreFor(id: String): String = scores[id]?.let { "${it.first}/${it.second}" }.orEmpty()
+    val ownId = ownTeam["teamId"] as? String ?: return null
+    val opponentId = opponent["teamId"] as? String ?: return null
+    val status = getString("status").orEmpty().ifBlank { "CREATED" }
+    val result = if (status == "COMPLETED") {
+        val ownScore = scores[ownId]?.first
+        val opponentScore = scores[opponentId]?.first
+        when {
+            ownScore == null || opponentScore == null -> "Completed"
+            ownScore > opponentScore -> "Won"
+            ownScore < opponentScore -> "Lost"
+            else -> "Tied"
+        }
+    } else null
+    return TeamMatchData(
+        id = id,
+        title = getString("title").orEmpty().ifBlank { "Match" },
+        teamName = (ownTeam["name"] as? String).orEmpty().ifBlank { "Your team" },
+        opponentName = (opponent["name"] as? String).orEmpty().ifBlank { "Opponent" },
+        status = status,
+        dateEpochMs = getLong("matchDateEpochMs"),
+        venue = getString("venue").orEmpty(),
+        teamScore = scoreFor(ownId),
+        opponentScore = scoreFor(opponentId),
+        result = result
+    )
+}
+
+private fun TeamMatchData.dateLabel(): String = dateEpochMs?.let {
+    java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(it))
+}.orEmpty()
+
 @Composable
 private fun AchievementsCard() {
     Column(Modifier.fillMaxWidth().padding(top = 14.dp).background(ProfileCard, RoundedCornerShape(18.dp)).border(1.dp, ProfileStroke, RoundedCornerShape(18.dp)).padding(16.dp)) {
@@ -260,17 +406,33 @@ private fun Achievement(text: String) {
 }
 
 @Composable
-private fun MatchesTabContent() {
+private fun MatchesTabContent(matches: List<TeamMatchData>) {
+    val completed = matches.filter { it.status == "COMPLETED" || it.status == "ABANDONED" }
+    val upcoming = matches.filter { it.status != "COMPLETED" && it.status != "ABANDONED" }
     Column(Modifier.padding(horizontal = 12.dp)) {
         MatchSectionHeader("Recent Matches", "Latest match results and performance.")
-        RecentMatch("Bhubaneswar Premier League", "Addd", "156/4", "Royal Strikers", "149/8", "Won by 7 runs", true)
-        RecentMatch("Odisha Super League", "Addd", "128/7", "Eastern Royals", "162/6", "Lost by 34 runs", false)
-        RecentMatch("City Cricket Cup", "Addd", "201/5", "Northern Knights", "198/9", "Won by 3 runs", true)
+        if (completed.isEmpty()) EmptyTeamTab("No completed matches yet.") else completed.forEach { TeamMatchCard(it) }
         MatchSectionHeader("Upcoming Matches", "Stay tuned for our next challenges.")
-        UpcomingMatch("City Cricket Cup", "Lion Hearts", "18 Aug 2026", "10:00 AM")
-        UpcomingMatch("Bhubaneswar Premier League", "Falcon XI", "24 Aug 2026", "02:30 PM")
-        UpcomingMatch("Odisha Super League", "Rising Stars", "1 Sep 2026", "04:00 PM")
+        if (upcoming.isEmpty()) EmptyTeamTab("No upcoming matches scheduled.") else upcoming.forEach { TeamMatchCard(it) }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun EmptyTeamTab(message: String) = Text(message, color = ProfileMuted, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+
+@Composable
+private fun TeamMatchCard(match: TeamMatchData) {
+    val won = match.result == "Won"
+    Column(Modifier.fillMaxWidth().padding(top = 9.dp).background(ProfileCard, RoundedCornerShape(10.dp)).border(1.dp, ProfileStroke, RoundedCornerShape(10.dp)).padding(10.dp)) {
+        Row { Text("♛  ${match.title}", color = ProfileMuted, fontSize = 8.sp, modifier = Modifier.weight(1f)); Text(listOf(match.dateLabel(), match.venue).filter { it.isNotBlank() }.joinToString("  •  "), color = ProfileMuted, fontSize = 8.sp) }
+        Row(Modifier.fillMaxWidth().padding(top = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            TeamBadge(match.teamName); Column(Modifier.weight(1f).padding(start = 8.dp)) { Text(match.teamName, color = Color.White, fontSize = 11.sp); Text(match.teamScore, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+            Text("vs", color = ProfileMuted, fontSize = 10.sp)
+            Column(Modifier.weight(1f).padding(start = 8.dp)) { Text(match.opponentScore, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold); Text(match.opponentName, color = Color.White, fontSize = 11.sp) }
+        }
+        val label = match.result ?: match.status.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
+        Text(label, color = Color.White, fontSize = 10.sp, modifier = Modifier.fillMaxWidth().padding(top = 7.dp).background(if (won) Color(0xFF075E38) else Color(0xFF0752A9), RoundedCornerShape(4.dp)).padding(vertical = 3.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
@@ -306,22 +468,23 @@ private fun UpcomingMatch(league: String, opponent: String, date: String, time: 
 @Composable private fun TeamBadge(name: String) = Box(Modifier.size(26.dp).background(Color(0xFF925443), CircleShape).border(1.dp, Color.White, CircleShape), contentAlignment = Alignment.Center) { Text(name.take(1), color = Color.White, fontSize = 11.sp) }
 
 @Composable
-private fun StatsTabContent() {
+private fun StatsTabContent(matches: List<TeamMatchData>) {
+    val completed = matches.filter { it.status == "COMPLETED" }
+    val won = completed.count { it.result == "Won" }
+    val lost = completed.count { it.result == "Lost" }
+    val tied = completed.count { it.result == "Tied" }
+    val winRate = if (completed.isEmpty()) "0%" else "${(won * 100.0 / completed.size).let { "%.1f".format(it) }}%"
     Column(Modifier.padding(horizontal = 12.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Team Statistics", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold); Text("Complete overview of our performance", color = ProfileMuted, fontSize = 11.sp) }; Text("All Tournaments ⌄", color = Color.White, fontSize = 9.sp, modifier = Modifier.border(1.dp, ProfileStroke, RoundedCornerShape(10.dp)).padding(10.dp)) }
-        StatGrid()
-        StatTitle("Toss Statistics", "How we perform at the toss")
-        SplitStatCard("▣", "Toss Won", "14", "58.3%", "▤", "Toss Lost", "10", "41.7%")
-        StatTitle("Innings Choice", "What we do after winning the toss")
-        SplitStatCard("▰", "Bat First", "8", "57.1%", "◉", "Field First", "6", "42.9%")
-        Row(Modifier.fillMaxWidth().padding(top = 13.dp).background(Color(0xFF0A2830), RoundedCornerShape(10.dp)).border(1.dp, Color(0xFF315D38), RoundedCornerShape(10.dp)).padding(13.dp), verticalAlignment = Alignment.CenterVertically) { Text("💡", fontSize = 20.sp); Column(Modifier.padding(start = 10.dp).weight(1f)) { Text("Key Insight", color = ProfileAccent, fontSize = 10.sp); Text("We have a winning percentage of 66.7% and prefer to bat first\nafter winning the toss.", color = ProfileMuted, fontSize = 10.sp) }; Text("→", color = Color.White) }
+        StatGrid(matches.size, matches.count { it.status != "COMPLETED" && it.status != "ABANDONED" }, won, lost, tied, winRate)
+        Row(Modifier.fillMaxWidth().padding(top = 13.dp).background(Color(0xFF0A2830), RoundedCornerShape(10.dp)).border(1.dp, Color(0xFF315D38), RoundedCornerShape(10.dp)).padding(13.dp), verticalAlignment = Alignment.CenterVertically) { Text("💡", fontSize = 20.sp); Column(Modifier.padding(start = 10.dp).weight(1f)) { Text("Key Insight", color = ProfileAccent, fontSize = 10.sp); Text("$won wins from ${completed.size} completed matches.", color = ProfileMuted, fontSize = 10.sp) }; Text("→", color = Color.White) }
         Spacer(Modifier.height(20.dp))
     }
 }
 
 @Composable
-private fun StatGrid() {
-    val stats = listOf("♟|Matches|24", "▣|Upcoming|6", "♕|Won|16", "✕|Lost|6", "⌁|Tie|0", "═|Drawn|1", "⊗|NR|1", "↗|Win %|66.7%")
+private fun StatGrid(matches: Int, upcoming: Int, won: Int, lost: Int, tied: Int, winRate: String) {
+    val stats = listOf("♟|Matches|$matches", "▣|Upcoming|$upcoming", "♕|Won|$won", "✕|Lost|$lost", "⌁|Tie|$tied", "═|Drawn|0", "⊗|NR|0", "↗|Win %|$winRate")
     Column(Modifier.fillMaxWidth().padding(top = 13.dp).background(ProfileCard, RoundedCornerShape(10.dp)).border(1.dp, ProfileStroke, RoundedCornerShape(10.dp)).padding(8.dp)) { stats.chunked(4).forEach { row -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { row.forEach { item -> val parts = item.split("|"); Column(Modifier.weight(1f).height(61.dp).background(Color(0xFF0B1D30), RoundedCornerShape(7.dp)).padding(8.dp)) { Text(parts[0], color = ProfileAccent, fontSize = 17.sp); Text(parts[1], color = ProfileMuted, fontSize = 9.sp); Text(parts[2], color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold) } } }; Spacer(Modifier.height(8.dp)) } }
 }
 
@@ -352,50 +515,36 @@ private fun LeaderboardRow(rank: Int, record: String) {
 }
 
 @Composable
-private fun MembersTabContent() {
-    val members = listOf(
-        "#18|Rahul Sharma|All-rounder|Captain|Right Hand|Right Arm Off",
-        "#07|Amit Verma|Batsman|Vice Captain|Right Hand|Right Arm Medium",
-        "#03|Rohit Sahu|All-rounder||Left Hand|Right Arm Medium",
-        "#11|Siddharth Das|Batsman||Right Hand|Right Arm Off",
-        "#21|Karan Patel|Wicket Keeper||Right Hand|Right Arm Medium",
-        "#08|Manish Nayak|Batsman||Left Hand|Right Arm Off",
-        "#10|Aditya Rout|All-rounder||Right Hand|Right Arm Medium",
-        "#14|Vikram Singh|Batsman||Right Hand|Right Arm Medium",
-        "#25|Prakash Lenka|Bowler||Right Hand|Left Arm Fast",
-        "#17|Subham Mohanty|Bowler||Right Hand|Right Arm Fast",
-        "#27|Debasish Panda|Batsman||Right Hand|Right Arm Fast",
-        "#30|Chinmay Behera|All-rounder||Left Hand|Right Arm Medium"
-    )
+private fun MembersTabContent(members: List<TeamMemberData>) {
     Column(Modifier.padding(horizontal = 12.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { Text("Team Members", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold); Text("Meet the warriors behind our journey", color = ProfileMuted, fontSize = 10.sp) }
-            Text("12 Players", color = ProfileMuted, fontSize = 10.sp)
+            Text("${members.size} ${if (members.size == 1) "Member" else "Members"}", color = ProfileMuted, fontSize = 10.sp)
         }
-        members.forEachIndexed { index, member -> MemberRow(index, member) }
+        if (members.isEmpty()) EmptyTeamTab("No members have joined this team yet.") else members.forEachIndexed { index, member -> MemberRow(index, member) }
         Spacer(Modifier.height(20.dp))
     }
 }
 
 @Composable
-private fun MemberRow(index: Int, record: String) {
-    val member = record.split("|")
-    val captain = member[3]
+private fun MemberRow(index: Int, member: TeamMemberData) {
+    val isOwner = member.teamRole == "OWNER"
+    val teamRole = if (isOwner) "Owner" else member.teamRole.lowercase().replaceFirstChar { it.uppercase() }
     Row(
-        Modifier.fillMaxWidth().padding(top = 7.dp).height(40.dp).background(if (index == 0) Color(0xFF12291E) else ProfileCard, RoundedCornerShape(7.dp)).border(if (index == 0) 1.dp else 0.dp, if (index == 0) ProfileAccent else Color.Transparent, RoundedCornerShape(7.dp)).padding(horizontal = 7.dp),
+        Modifier.fillMaxWidth().padding(top = 7.dp).height(40.dp).background(if (isOwner) Color(0xFF12291E) else ProfileCard, RoundedCornerShape(7.dp)).border(if (isOwner) 1.dp else 0.dp, if (isOwner) ProfileAccent else Color.Transparent, RoundedCornerShape(7.dp)).padding(horizontal = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(member[0], color = Color.White, fontSize = 9.sp, modifier = Modifier.width(32.dp))
-        Box(Modifier.size(31.dp).background(Color(0xFF925443), CircleShape).border(1.dp, Color.White, CircleShape), contentAlignment = Alignment.Center) { Text(member[1].take(1), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+        Text("#${index + 1}", color = Color.White, fontSize = 9.sp, modifier = Modifier.width(32.dp))
+        Box(Modifier.size(31.dp).background(Color(0xFF925443), CircleShape).border(1.dp, Color.White, CircleShape), contentAlignment = Alignment.Center) { Text(member.name.take(1), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
         Column(Modifier.width(140.dp).padding(start = 7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(member[1], color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                if (captain.isNotEmpty()) Text("  $captain", color = if (captain == "Captain") Color(0xFF122300) else Color(0xFF071421), fontSize = 6.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 2.dp).background(if (captain == "Captain") ProfileAccent else Color(0xFF9EB6DE), RoundedCornerShape(3.dp)).padding(horizontal = 4.dp, vertical = 2.dp))
+                Text(member.name, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                if (teamRole.isNotBlank()) Text("  $teamRole", color = if (isOwner) Color(0xFF122300) else Color(0xFF071421), fontSize = 6.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 2.dp).background(if (isOwner) ProfileAccent else Color(0xFF9EB6DE), RoundedCornerShape(3.dp)).padding(horizontal = 4.dp, vertical = 2.dp))
             }
-            Text(member[2], color = ProfileMuted, fontSize = 8.sp)
+            Text(member.playingRole, color = ProfileMuted, fontSize = 8.sp)
         }
-        Column(Modifier.weight(1f)) { Text("▰  Batting", color = Color.White, fontSize = 7.sp); Text(member[4], color = ProfileMuted, fontSize = 7.sp) }
-        Column(Modifier.weight(1f)) { Text("◉  Bowling", color = Color.White, fontSize = 7.sp); Text(member[5], color = ProfileMuted, fontSize = 7.sp) }
+        Column(Modifier.weight(1f)) { Text("▰  Joined", color = Color.White, fontSize = 7.sp); Text("Team member", color = ProfileMuted, fontSize = 7.sp) }
+        Column(Modifier.weight(1f)) { Text("◉  Role", color = Color.White, fontSize = 7.sp); Text(member.teamRole.lowercase().replaceFirstChar { it.uppercase() }, color = ProfileMuted, fontSize = 7.sp) }
         Text("›", color = Color.White, fontSize = 20.sp)
     }
 }
