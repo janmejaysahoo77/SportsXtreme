@@ -34,12 +34,14 @@ import com.example.sportsxtreme.domain.model.TossDecision
 import com.example.sportsxtreme.domain.model.TeamType
 import com.example.sportsxtreme.domain.repository.CreateMatchRequest
 import com.example.sportsxtreme.domain.repository.MatchRepository
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.tasks.await
 
 @Singleton
 class MatchRepositoryImpl @Inject constructor(
@@ -51,7 +53,8 @@ class MatchRepositoryImpl @Inject constructor(
     private val ballEventDao: BallEventDao,
     private val firestoreMatchSyncDataSource: FirebaseFirestoreMatchSyncDataSource,
     private val firestoreMatchClaimsDataSource: FirebaseFirestoreMatchClaimsDataSource,
-    private val firestoreScoringDataSource: FirestoreScoringDataSource
+    private val firestoreScoringDataSource: FirestoreScoringDataSource,
+    private val firestore: FirebaseFirestore
 ) : MatchRepository {
     override suspend fun createMatch(request: CreateMatchRequest): Resource<Match> = runCatching {
         val matchId = UUID.randomUUID().toString()
@@ -109,6 +112,10 @@ class MatchRepositoryImpl @Inject constructor(
         teamBId: String
     ): Resource<Match> = runCatching {
         require(teamAId != teamBId) { "Team A and Team B cannot be the same team" }
+        // Team selection now comes from the user's Firestore teams. Hydrate those teams
+        // locally before the existing match engine validates and starts the match.
+        syncFirestoreTeamIfNeeded(teamAId)
+        syncFirestoreTeamIfNeeded(teamBId)
         database.withTransaction {
             val match = requireMatch(matchId)
             val teamA = requireNotNull(teamDao.getTeam(teamAId)) { "Team A not found" }
@@ -124,6 +131,60 @@ class MatchRepositoryImpl @Inject constructor(
         }
         Resource.Success(loadAndSyncMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to update match teams") }
+
+    private suspend fun syncFirestoreTeamIfNeeded(teamId: String) {
+        val document = firestore.collection("teams").document(teamId).get().await()
+        if (!document.exists()) {
+            // Local fixture teams are valid, but a selected cloud team must exist remotely.
+            require(teamDao.getTeam(teamId) != null) { "Selected team is no longer available" }
+            return
+        }
+        val teamName = document.getString("teamName").orEmpty()
+            .ifBlank { document.getString("name").orEmpty().ifBlank { teamId } }
+        val members = buildList {
+            (document.get("members") as? List<*>).orEmpty()
+            .mapNotNull { it as? Map<*, *> }
+            .forEach { member ->
+                val userId = member["userId"] as? String ?: return@forEach
+                val role = (member["playingRole"] as? String).orEmpty()
+                    .uppercase().replace(' ', '_').let { value ->
+                        if (value in setOf("BATTER", "BOWLER", "ALL_ROUNDER", "WICKET_KEEPER")) value else "UNKNOWN"
+                    }
+                val profile = runCatching { firestore.collection("users").document(userId).get().await() }.getOrNull()
+                val displayName = (member["displayName"] as? String).orEmpty()
+                    .ifBlank { (member["name"] as? String).orEmpty() }
+                    .ifBlank { profile?.getString("name").orEmpty() }
+                    .ifBlank { profile?.getString("displayName").orEmpty() }
+                    .ifBlank { "Team member" }
+                add(PlayerEntity(
+                    // A user can legitimately be a member of both teams; player IDs must
+                    // therefore be scoped to their team inside the local match engine.
+                    playerId = "$teamId::$userId",
+                    teamId = teamId,
+                    playerName = displayName,
+                    linkedUserId = userId,
+                    role = role,
+                    isGuestPlayer = false
+                ))
+            }
+        }
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            teamDao.insertTeam(
+                TeamEntity(
+                    teamId = teamId,
+                    teamName = teamName,
+                    shortName = document.getString("shortName").orEmpty().ifBlank { teamName.take(3).uppercase() },
+                    type = TeamType.USER_CREATED.name,
+                    ownerUserId = document.getString("ownerUserId"),
+                    createdAtEpochMs = (document.get("createdAtEpochMs") as? Number)?.toLong() ?: now,
+                    updatedAtEpochMs = now
+                )
+            )
+            playerDao.deletePlayersForTeam(teamId)
+            playerDao.insertPlayers(members)
+        }
+    }
 
     override suspend fun selectPlayingXI(
         matchId: String,
@@ -192,6 +253,18 @@ class MatchRepositoryImpl @Inject constructor(
         database.withTransaction {
             val match = requireMatch(matchId)
             require(strikerId != nonStrikerId) { "Opening batters must be different players" }
+            val battingTeamId = requireNotNull(match.battingTeamId) { "Toss must be completed first" }
+            val bowlingTeamId = requireNotNull(match.bowlingTeamId) { "Toss must be completed first" }
+            val striker = requireNotNull(playerDao.getPlayer(strikerId)) { "Selected striker was not found" }
+            val nonStriker = requireNotNull(playerDao.getPlayer(nonStrikerId)) { "Selected non-striker was not found" }
+            val bowler = requireNotNull(playerDao.getPlayer(bowlerId)) { "Selected bowler was not found" }
+            require(striker.teamId == battingTeamId) { "Striker must belong to the batting team" }
+            require(nonStriker.teamId == battingTeamId) { "Non-striker must belong to the batting team" }
+            require(bowler.teamId == bowlingTeamId) { "Bowler must belong to the bowling team" }
+            val battingUserIds = setOfNotNull(striker.linkedUserId, nonStriker.linkedUserId)
+            require(bowler.linkedUserId !in battingUserIds) {
+                "A player can represent only one team in this match"
+            }
             matchDao.updateMatch(
                 match.copy(
                     status = MatchStatus.OPENERS_SELECTED.name,

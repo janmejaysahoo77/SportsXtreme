@@ -55,6 +55,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
@@ -96,6 +98,9 @@ import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import android.graphics.Bitmap
 import android.widget.Toast
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FirebaseFirestore
 
 @AndroidEntryPoint
 class SelectTeamAorBActivity : ComponentActivity() {
@@ -128,11 +133,13 @@ class SelectTeamAorBActivity : ComponentActivity() {
                 .collectAsState(initial = initialMatchResult)
             val claimedTeamAName = matchResult.data?.teamAClaim?.displayName
             val claimedTeamBName = matchResult.data?.teamBClaim?.displayName
+            val userTeams = rememberSelectableUserTeams()
             SelectTeamAScreen(
                 teamSlot = teamSlot,
                 initialTeamId = selectedTeamId,
                 invite = inviteState.invite,
                 inviteError = inviteState.errorMessage,
+                teams = userTeams,
                 onBack = { finish() },
                 claimedTeamAName = claimedTeamAName,
                 claimedTeamBName = claimedTeamBName,
@@ -187,6 +194,43 @@ private data class FriendlyTeamOption(
     val id: String,
     val name: String
 )
+
+/** Teams the signed-in person owns or has joined, kept live from Firestore. */
+@Composable
+private fun rememberSelectableUserTeams(): List<FriendlyTeamOption> {
+    var teams by remember { mutableStateOf(emptyList<FriendlyTeamOption>()) }
+    DisposableEffect(Unit) {
+        val userId = FirebaseAuth.getInstance().currentUser?.uid
+        if (userId == null) {
+            teams = emptyList()
+            onDispose { }
+        } else {
+            val registration = FirebaseFirestore.getInstance().collection("teams")
+                .addSnapshotListener { snapshot, error ->
+                    teams = if (error == null) snapshot?.documents.orEmpty()
+                        .filter { it.belongsToCurrentUser(userId) }
+                        .map { it.toSelectableTeam() }
+                        .sortedBy { it.name.lowercase() }
+                    else emptyList()
+                }
+            onDispose { registration.remove() }
+        }
+    }
+    return teams
+}
+
+private fun DocumentSnapshot.belongsToCurrentUser(userId: String): Boolean {
+    if (getString("ownerUserId") == userId || getString("ownerId") == userId) return true
+    if (userId in (get("memberIds") as? List<*>)?.filterIsInstance<String>().orEmpty()) return true
+    return listOf("members", "players").flatMap { field ->
+        (get(field) as? List<*>)?.filterIsInstance<Map<*, *>>().orEmpty()
+    }.any { it["userId"] == userId || it["linkedUserId"] == userId || it["playerId"] == userId }
+}
+
+private fun DocumentSnapshot.toSelectableTeam(): FriendlyTeamOption {
+    val teamName = getString("teamName").orEmpty().ifBlank { getString("name").orEmpty().ifBlank { id } }
+    return FriendlyTeamOption(id, teamName)
+}
 
 private val FRIENDLY_TEAM_OPTIONS = listOf(
     FriendlyTeamOption("friendly-team-a", "Team A"),
@@ -244,6 +288,7 @@ private fun SelectTeamAScreen(
     initialTeamId: String,
     invite: CreatedMatchInvite?,
     inviteError: String?,
+    teams: List<FriendlyTeamOption>,
     onBack: () -> Unit,
     claimedTeamAName: String?,
     claimedTeamBName: String?,
@@ -257,8 +302,12 @@ private fun SelectTeamAScreen(
     var swipeAmount by remember { mutableStateOf(0f) }
     var previousTab by remember { mutableIntStateOf(0) }
     var selectedTeamId by rememberSaveable { mutableStateOf(initialTeamId) }
-    val selectedTeam = FRIENDLY_TEAM_OPTIONS.firstOrNull { it.id == selectedTeamId }
-        ?: FRIENDLY_TEAM_OPTIONS.first()
+    LaunchedEffect(teams, initialTeamId) {
+        if (teams.isNotEmpty() && teams.none { it.id == selectedTeamId }) {
+            selectedTeamId = teams.first().id
+        }
+    }
+    val selectedTeam = teams.firstOrNull { it.id == selectedTeamId } ?: teams.firstOrNull()
 
     fun switchTab(tab: Int) {
         if (tab != selectedTab) {
@@ -297,9 +346,6 @@ private fun SelectTeamAScreen(
                     .padding(horizontal = 12.dp, vertical = if (selectedTab == 0) 16.dp else 14.dp),
                 verticalArrangement = Arrangement.spacedBy(if (selectedTab == 0) 14.dp else 13.dp)
             ) {
-                if (claimedSlotName == null) {
-                    MatchInviteCard(invite, inviteError, onCopyInvite, onShareInvite)
-                }
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
@@ -313,15 +359,14 @@ private fun SelectTeamAScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(if (tab == 0) 14.dp else 13.dp)) {
                         if (tab == 0) {
                             TournamentTeamsContent(
+                                teams = teams,
                                 selectedTeamId = selectedTeamId,
-                                teamAName = claimedTeamAName ?: "Team A",
-                                teamBName = claimedTeamBName ?: "Team B",
                                 onTeamSelected = { selectedTeamId = it },
                                 onAddTeams = { switchTab(1) },
                                 onViewDetails = onViewDetails
                             )
                         } else {
-                            AddTeamContent()
+                            AddTeamContent(invite, inviteError, onCopyInvite, onShareInvite)
                         }
                     }
                 }
@@ -342,7 +387,7 @@ private fun SelectTeamAScreen(
                     .shadow(20.dp, RoundedCornerShape(12.dp), clip = false)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Brush.horizontalGradient(listOf(TeamAAccent, Color(0xFF9BFF00))))
-                    .clickable(onClick = { if (selectedTab == 0) onNext(selectedTeam) }),
+                    .clickable(onClick = { if (selectedTab == 0 && selectedTeam != null) onNext(selectedTeam) }),
                 contentAlignment = Alignment.Center
             ) {
                 Text(if (selectedTab == 0) "NEXT->" else "ADD TEAM", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black)
@@ -390,7 +435,6 @@ private fun SelectTeamATopBar(title: String, onBack: () -> Unit) {
             modifier = Modifier.padding(start = 20.dp).weight(1f),
             maxLines = 1
         )
-        TeamAQrIcon(Modifier.size(25.dp), Color.White)
         TeamAInfoIcon(Modifier.padding(start = 24.dp).size(24.dp), Color.White)
     }
 }
@@ -412,7 +456,7 @@ private fun TeamATabs(selectedTab: Int, onSelectTab: (Int) -> Unit) {
         ) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 Text(
-                    "Tournament teams",
+                    "Your Teams",
                     color = if (selectedTab == 0) TeamAAccent else TeamAMuted,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Black,
@@ -466,33 +510,28 @@ private fun TeamATabs(selectedTab: Int, onSelectTab: (Int) -> Unit) {
 
 @Composable
 private fun TournamentTeamsContent(
+    teams: List<FriendlyTeamOption>,
     selectedTeamId: String,
-    teamAName: String,
-    teamBName: String,
     onTeamSelected: (String) -> Unit,
     onAddTeams: () -> Unit,
     onViewDetails: (FriendlyTeamOption) -> Unit
 ) {
     SearchBox()
     LeagueHeader(onAddTeams)
-    TeamRow(
-        initials = "TA",
-        title = teamAName,
-        subtitle = "Ready for Draft",
-        selected = selectedTeamId == "friendly-team-a",
-        color = Color(0xFF1E73FF),
-        onSelect = { onTeamSelected("friendly-team-a") },
-        onViewDetails = { onViewDetails(FRIENDLY_TEAM_OPTIONS[0]) }
-    )
-    TeamRow(
-        initials = "TB",
-        title = teamBName,
-        subtitle = "Pending Entry",
-        selected = selectedTeamId == "friendly-team-b",
-        color = Color(0xFF007A70),
-        onSelect = { onTeamSelected("friendly-team-b") },
-        onViewDetails = { onViewDetails(FRIENDLY_TEAM_OPTIONS[1]) }
-    )
+    if (teams.isEmpty()) {
+        Text("You have not joined any teams yet.", color = TeamAMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp))
+    } else teams.forEach { team ->
+        val colors = listOf(Color(0xFF1E73FF), Color(0xFF007A70), Color(0xFF7B32D9), Color(0xFFD51D49))
+        TeamRow(
+            initials = team.name.split(Regex("\\s+")).filter { it.isNotBlank() }.take(2).joinToString("") { it.first().uppercase() }.ifBlank { "TM" },
+            title = team.name,
+            subtitle = "Available to play",
+            selected = selectedTeamId == team.id,
+            color = colors[(team.id.hashCode() and Int.MAX_VALUE) % colors.size],
+            onSelect = { onTeamSelected(team.id) },
+            onViewDetails = { onViewDetails(team) }
+        )
+    }
 }
 
 @Composable
@@ -539,7 +578,18 @@ private fun LeagueHeader(onAddTeams: () -> Unit) {
 }
 
 @Composable
-private fun AddTeamContent() {
+private fun AddTeamContent(
+    invite: CreatedMatchInvite?,
+    inviteError: String?,
+    onCopyInvite: (String) -> Unit,
+    onShareInvite: (String) -> Unit
+) {
+    var addTeamTab by rememberSaveable { mutableIntStateOf(0) }
+    AddTeamSubTabs(addTeamTab) { addTeamTab = it }
+    if (addTeamTab == 0) {
+        MatchInviteCard(invite, inviteError, onCopyInvite, onShareInvite)
+        return
+    }
     Column {
         Text("Create Team", color = Color(0xFFBBE5ED), fontSize = 36.sp, fontWeight = FontWeight.Black, maxLines = 1)
         Text(
@@ -555,6 +605,23 @@ private fun AddTeamContent() {
     TeamFormCard()
     JoinPlayerRow()
     AddTeamInfoCard()
+}
+
+@Composable
+private fun AddTeamSubTabs(selectedTab: Int, onSelect: (Int) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0xFF111B2A)).padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        listOf("Share and Join", "Create Team").forEachIndexed { index, label ->
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                    .background(if (selectedTab == index) TeamAAccent else Color.Transparent)
+                    .clickable { onSelect(index) }.padding(vertical = 11.dp),
+                contentAlignment = Alignment.Center
+            ) { Text(label, color = if (selectedTab == index) Color(0xFF111604) else TeamAMuted, fontSize = 11.sp, fontWeight = FontWeight.Black) }
+        }
+    }
 }
 
 @Composable
@@ -682,7 +749,7 @@ private fun AddTeamInfoCard() {
     ) {
         TeamAInfoIcon(Modifier.size(18.dp), Color(0xFF73C1FF))
         Text(
-            "Added teams will appear in\nTournament Teams",
+            "Added teams will appear in\nYour Teams",
             color = Color(0xFFDCE7EB),
             fontSize = 10.sp,
             lineHeight = 13.sp,

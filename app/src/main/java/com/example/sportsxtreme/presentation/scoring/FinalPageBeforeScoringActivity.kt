@@ -70,6 +70,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.domain.model.Player
@@ -78,6 +79,7 @@ import com.example.sportsxtreme.domain.repository.TeamRepository
 import com.example.sportsxtreme.presentation.match.OpeningPlayersViewModel
 import com.example.sportsxtreme.presentation.match.OpeningPlayersUiState
 import com.example.sportsxtreme.presentation.match.SelectPlayingTeamsActivity
+import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -85,6 +87,7 @@ import javax.inject.Inject
 class FinalPageBeforeScoringActivity : ComponentActivity() {
     @Inject lateinit var matchUseCases: MatchUseCases
     @Inject lateinit var teamRepository: TeamRepository
+    @Inject lateinit var firestore: FirebaseFirestore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -94,7 +97,7 @@ class FinalPageBeforeScoringActivity : ComponentActivity() {
 
         val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
         val viewModel: OpeningPlayersViewModel by viewModels {
-            OpeningPlayersViewModel.factory(matchId, matchUseCases, teamRepository)
+            OpeningPlayersViewModel.factory(matchId, matchUseCases, teamRepository, firestore)
         }
 
         setContent {
@@ -153,6 +156,10 @@ private fun FinalPageBeforeScoringScreen(
     val selectedStriker = battingPlayers.firstOrNull { it.id == uiState.selectedStrikerId }
     val selectedNonStriker = battingPlayers.firstOrNull { it.id == uiState.selectedNonStrikerId }
     val selectedBowler = bowlingPlayers.firstOrNull { it.id == uiState.selectedBowlerId }
+    val openingBatterUserIds = setOfNotNull(selectedStriker?.linkedUserId, selectedNonStriker?.linkedUserId)
+    // A member may belong to both teams, but they cannot represent both in this match.
+    val eligibleBowlingPlayers = bowlingPlayers.filter { it.linkedUserId !in openingBatterUserIds }
+    val eligibleSelectedBowler = selectedBowler?.takeIf { it.linkedUserId !in openingBatterUserIds }
 
     Box(
         modifier = Modifier
@@ -200,48 +207,51 @@ private fun FinalPageBeforeScoringScreen(
                 InningsSectionTitle("BOWLING - ${uiState.bowlingTeamName.uppercase()}", Modifier.padding(top = 33.dp))
                 Row(modifier = Modifier.padding(top = 15.dp)) {
                     PlayerPickCard(
-                        label = selectedBowler?.displayName ?: "SELECT BOWLER",
+                        label = eligibleSelectedBowler?.displayName ?: "SELECT BOWLER",
                         imageRes = R.drawable.choosebowler,
-                        selected = selectedBowler != null,
+                        selected = eligibleSelectedBowler != null,
                         modifier = Modifier.width(166.dp),
                         onClick = { showBowlerPicker = true }
                     )
                     Spacer(Modifier.weight(1f))
                 }
-                // Striker picker
-                if (showStrikerPicker && battingPlayers.isNotEmpty()) {
-                    PlayerPickerList(
-                        title = "SELECT STRIKER",
-                        players = battingPlayers,
-                        selectedPlayerId = uiState.selectedStrikerId,
-                        disabledPlayerId = uiState.selectedNonStrikerId,
-                        onSelect = { onSelectStriker(it); showStrikerPicker = false },
-                        onDismiss = { showStrikerPicker = false }
-                    )
-                }
-                // Non-Striker picker
-                if (showNonStrikerPicker && battingPlayers.isNotEmpty()) {
-                    PlayerPickerList(
-                        title = "SELECT NON-STRIKER",
-                        players = battingPlayers,
-                        selectedPlayerId = uiState.selectedNonStrikerId,
-                        disabledPlayerId = uiState.selectedStrikerId,
-                        onSelect = { onSelectNonStriker(it); showNonStrikerPicker = false },
-                        onDismiss = { showNonStrikerPicker = false }
-                    )
-                }
-                // Bowler picker
-                if (showBowlerPicker && bowlingPlayers.isNotEmpty()) {
-                    PlayerPickerList(
-                        title = "SELECT BOWLER",
-                        players = bowlingPlayers,
-                        selectedPlayerId = uiState.selectedBowlerId,
-                        disabledPlayerId = null,
-                        onSelect = { onSelectBowler(it); showBowlerPicker = false },
-                        onDismiss = { showBowlerPicker = false }
-                    )
-                }
                 Spacer(Modifier.height(150.dp))
+            }
+        }
+        if (showStrikerPicker) {
+            Dialog(onDismissRequest = { showStrikerPicker = false }) {
+                PlayerPickerList(
+                    title = "SELECT STRIKER",
+                    players = battingPlayers,
+                    selectedPlayerId = uiState.selectedStrikerId,
+                    disabledPlayerId = uiState.selectedNonStrikerId,
+                    onSelect = { onSelectStriker(it); showStrikerPicker = false },
+                    onDismiss = { showStrikerPicker = false }
+                )
+            }
+        }
+        if (showNonStrikerPicker) {
+            Dialog(onDismissRequest = { showNonStrikerPicker = false }) {
+                PlayerPickerList(
+                    title = "SELECT NON-STRIKER",
+                    players = battingPlayers,
+                    selectedPlayerId = uiState.selectedNonStrikerId,
+                    disabledPlayerId = uiState.selectedStrikerId,
+                    onSelect = { onSelectNonStriker(it); showNonStrikerPicker = false },
+                    onDismiss = { showNonStrikerPicker = false }
+                )
+            }
+        }
+        if (showBowlerPicker) {
+            Dialog(onDismissRequest = { showBowlerPicker = false }) {
+                PlayerPickerList(
+                    title = "SELECT BOWLER",
+                    players = eligibleBowlingPlayers,
+                    selectedPlayerId = uiState.selectedBowlerId,
+                    disabledPlayerId = null,
+                    onSelect = { onSelectBowler(it); showBowlerPicker = false },
+                    onDismiss = { showBowlerPicker = false }
+                )
             }
         }
         CameraBubble(
@@ -292,6 +302,14 @@ private fun PlayerPickerList(
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.clickable(onClick = onDismiss).padding(horizontal = 8.dp)
+            )
+        }
+        if (players.isEmpty()) {
+            Text(
+                "No eligible players are available for this team.",
+                color = InningsMuted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 18.dp)
             )
         }
         players.forEach { player ->
