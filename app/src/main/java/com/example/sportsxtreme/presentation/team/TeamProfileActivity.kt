@@ -1,5 +1,6 @@
 package com.example.sportsxtreme.presentation.team
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -13,6 +14,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -26,6 +29,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,7 +46,19 @@ class TeamProfileActivity : ComponentActivity() {
         window.statusBarColor = android.graphics.Color.rgb(2, 10, 20)
         window.navigationBarColor = android.graphics.Color.rgb(2, 10, 20)
         val teamId = intent.getStringExtra(EXTRA_TEAM_ID).orEmpty()
-        setContent { TeamProfileScreen(teamId, ::finish) }
+        setContent {
+            TeamProfileScreen(
+                teamId = teamId,
+                onBack = ::finish,
+                onShareTeam = { teamName ->
+                    startActivity(
+                        Intent(this, AddPlayerActivity::class.java)
+                            .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_ID, teamId)
+                            .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_NAME, teamName)
+                    )
+                }
+            )
+        }
     }
 
     companion object {
@@ -74,9 +90,14 @@ private data class EditableProfileField(val key: String, val label: String, val 
 private data class TeamMemberData(
     val userId: String,
     val name: String,
-    val teamRole: String,
+    val teamRoles: List<String>,
     val playingRole: String,
     val joinedAtEpochMs: Long
+)
+
+private data class MemberProfileData(
+    val displayName: String,
+    val playingRole: String
 )
 
 private data class TeamMatchData(
@@ -93,17 +114,22 @@ private data class TeamMatchData(
 )
 
 @Composable
-private fun TeamProfileScreen(teamId: String, onBack: () -> Unit) {
+private fun TeamProfileScreen(
+    teamId: String,
+    onBack: () -> Unit,
+    onShareTeam: (String) -> Unit
+) {
     var selectedTab by remember { mutableStateOf("Profile") }
     var team by remember(teamId) { mutableStateOf(TeamProfileData()) }
     var members by remember(teamId) { mutableStateOf<List<TeamMemberData>>(emptyList()) }
     var matches by remember(teamId) { mutableStateOf<List<TeamMatchData>>(emptyList()) }
+    var canManageTeam by remember(teamId) { mutableStateOf(false) }
+    var viewerRoles by remember(teamId) { mutableStateOf<List<String>>(emptyList()) }
     DisposableEffect(teamId) {
         val firestore = FirebaseFirestore.getInstance()
         var registration: ListenerRegistration? = null
         var teamARegistration: ListenerRegistration? = null
         var teamBRegistration: ListenerRegistration? = null
-        val memberRegistrations = mutableListOf<ListenerRegistration>()
         val teamAMatches = mutableMapOf<String, TeamMatchData>()
         val teamBMatches = mutableMapOf<String, TeamMatchData>()
 
@@ -144,34 +170,35 @@ private fun TeamProfileScreen(teamId: String, onBack: () -> Unit) {
                                 TeamMemberData(
                                     userId = userId,
                                     name = "",
-                                    teamRole = (member["role"] as? String).orEmpty(),
-                                    playingRole = "",
+                                    teamRoles = member.teamRoles(),
+                                    playingRole = (member["playingRole"] as? String).orEmpty(),
                                     joinedAtEpochMs = (member["joinedAtEpochMs"] as? Number)?.toLong() ?: 0L
                                 )
                             }
                             .distinctBy { it.userId }
+                        val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+                        viewerRoles = joinedMembers
+                            .firstOrNull { it.userId == currentUserId }
+                            ?.teamRoles
+                            .orEmpty()
+                        canManageTeam = viewerRoles.any { it == "ADMIN" || it == "CAPTAIN" }
 
-                        memberRegistrations.forEach { it.remove() }
-                        memberRegistrations.clear()
                         if (joinedMembers.isEmpty()) {
                             members = emptyList()
                         } else {
-                            val memberProfiles = mutableMapOf<String, TeamMemberData>()
-                            joinedMembers.forEach { joinedMember ->
-                                memberRegistrations += firestore.collection("users").document(joinedMember.userId)
-                                    .addSnapshotListener { user, _ ->
-                                        val profile = if (user?.exists() == true) {
-                                            joinedMember.copy(
-                                                name = user.getString("name").orEmpty().ifBlank { "Team member" },
-                                                playingRole = user.getString("role").orEmpty().ifBlank { "Player" }
-                                            )
-                                        } else {
-                                            joinedMember.copy(name = "Team member", playingRole = "Player")
-                                        }
-                                        memberProfiles[joinedMember.userId] = profile
-                                        members = joinedMembers.mapNotNull { memberProfiles[it.userId] }
-                                            .sortedBy { it.joinedAtEpochMs }
-                                    }
+                            members = joinedMembers
+                            fetchTeamMemberProfiles(teamId, joinedMembers) { profileByUserId ->
+                                members = joinedMembers.map { member ->
+                                    profileByUserId[member.userId]?.let { profile ->
+                                        member.copy(
+                                            name = profile.displayName,
+                                            playingRole = member.playingRole.ifBlank { profile.playingRole }
+                                        )
+                                    } ?: member.copy(
+                                        name = "Team member",
+                                        playingRole = member.playingRole.ifBlank { "Player" }
+                                    )
+                                }.sortedBy { it.joinedAtEpochMs }
                             }
                         }
                     }
@@ -199,26 +226,29 @@ private fun TeamProfileScreen(teamId: String, onBack: () -> Unit) {
             registration?.remove()
             teamARegistration?.remove()
             teamBRegistration?.remove()
-            memberRegistrations.forEach { it.remove() }
         }
     }
     Column(Modifier.fillMaxSize().background(ProfileBackground)) {
-        TopBar(onBack)
+        TopBar(
+            onBack = onBack,
+            canShare = viewerRoles.any { it == "ADMIN" || it == "CAPTAIN" || it == "VICE_CAPTAIN" },
+            onShare = { onShareTeam(team.name) }
+        )
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             TeamHero(team)
             ProfileTabs(selectedTab) { selectedTab = it }
             when (selectedTab) {
-                "Profile" -> ProfileTabContent(team) { key, value ->
+                "Profile" -> ProfileTabContent(team, canManageTeam) { key, value ->
                     if (teamId.isNotBlank()) {
-                        FirebaseFirestore.getInstance().collection("teams").document(teamId).update(
-                            mapOf(key to value.trim(), "updatedAtEpochMs" to System.currentTimeMillis())
-                        )
+                        com.google.firebase.functions.FirebaseFunctions.getInstance()
+                            .getHttpsCallable("updateTeamProfile")
+                            .call(mapOf("teamId" to teamId, "changes" to mapOf(key to value.trim())))
                     }
                 }
                 "Matches" -> MatchesTabContent(matches)
                 "Stats" -> StatsTabContent(matches)
                 "Leaderboard" -> LeaderboardTabContent()
-                "Members" -> MembersTabContent(members)
+                "Members" -> MembersTabContent(teamId, members, viewerRoles)
                 "Photos" -> PhotosTabContent()
             }
             Spacer(Modifier.height(100.dp))
@@ -227,7 +257,8 @@ private fun TeamProfileScreen(teamId: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun TopBar(onBack: () -> Unit) {
+private fun TopBar(onBack: () -> Unit, canShare: Boolean, onShare: () -> Unit) {
+    var menuExpanded by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("‹", color = Color.White, fontSize = 34.sp, modifier = Modifier.clickable { onBack() }.padding(end = 15.dp))
         Column(Modifier.weight(1f)) {
@@ -235,7 +266,30 @@ private fun TopBar(onBack: () -> Unit) {
             Text("PLAY  •  SCORE  •  BELONG", color = ProfileMuted, fontSize = 7.sp, letterSpacing = 1.sp)
         }
         Text("⌕", color = Color.White, fontSize = 25.sp, modifier = Modifier.padding(end = 18.dp))
-        Text("⋮", color = Color.White, fontSize = 26.sp)
+        if (canShare) {
+            Box {
+                Text(
+                    "⋮",
+                    color = Color.White,
+                    fontSize = 26.sp,
+                    modifier = Modifier
+                        .clickable { menuExpanded = true }
+                        .padding(start = 4.dp)
+                )
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Share") },
+                        onClick = {
+                            menuExpanded = false
+                            onShare()
+                        }
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -275,25 +329,25 @@ private fun ProfileTabs(selectedTab: String, onSelect: (String) -> Unit) {
 }
 
 @Composable
-private fun ProfileTabContent(team: TeamProfileData, onSave: (String, String) -> Unit) {
+private fun ProfileTabContent(team: TeamProfileData, canEdit: Boolean, onSave: (String, String) -> Unit) {
     Column(Modifier.padding(horizontal = 13.dp, vertical = 4.dp)) {
-        AboutCard(team, onSave)
+        AboutCard(team, canEdit, onSave)
         AchievementsCard()
         Spacer(Modifier.height(18.dp))
     }
 }
 
 @Composable
-private fun AboutCard(team: TeamProfileData, onSave: (String, String) -> Unit) {
+private fun AboutCard(team: TeamProfileData, canEdit: Boolean, onSave: (String, String) -> Unit) {
     Column(Modifier.fillMaxWidth().background(ProfileCard, RoundedCornerShape(18.dp)).border(1.dp, ProfileStroke, RoundedCornerShape(18.dp)).padding(16.dp)) {
         var editingField by remember { mutableStateOf<EditableProfileField?>(null) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(28.dp).background(Color(0xFF1C3823), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Text("i", color = ProfileAccent, fontWeight = FontWeight.Bold) }
             Text("About the team", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 9.dp).weight(1f))
-            EditButton { editingField = EditableProfileField("description", "About the team", "", team.description) }
+            if (canEdit) EditButton { editingField = EditableProfileField("description", "About the team", "", team.description) }
         }
         Text(team.description, color = ProfileMuted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 14.dp))
-        DetailsBox(team) { editingField = it }
+        DetailsBox(team, canEdit) { editingField = it }
         editingField?.let { field ->
             ProfileFieldEditor(field, onDismiss = { editingField = null }) { value -> onSave(field.key, value); editingField = null }
         }
@@ -301,7 +355,7 @@ private fun AboutCard(team: TeamProfileData, onSave: (String, String) -> Unit) {
 }
 
 @Composable
-private fun DetailsBox(team: TeamProfileData, onEdit: (EditableProfileField) -> Unit) {
+private fun DetailsBox(team: TeamProfileData, canEdit: Boolean, onEdit: (EditableProfileField) -> Unit) {
     val rows = listOf(
         EditableProfileField("founded", "Founded", "▣", team.founded),
         EditableProfileField("homeGround", "Home Ground", "▤", team.homeGround),
@@ -316,7 +370,7 @@ private fun DetailsBox(team: TeamProfileData, onEdit: (EditableProfileField) -> 
                 Text(field.icon, color = Color(0xFFD8E6FF), fontSize = 18.sp, modifier = Modifier.width(34.dp))
                 Text(field.label, color = ProfileMuted, fontSize = 10.sp, modifier = Modifier.weight(1f))
                 Text(field.value, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1.25f))
-                EditButton { onEdit(field) }
+                if (canEdit) EditButton { onEdit(field) }
             }
             if (index < rows.lastIndex) Spacer(Modifier.fillMaxWidth().height(1.dp).background(ProfileStroke))
         }
@@ -515,23 +569,54 @@ private fun LeaderboardRow(rank: Int, record: String) {
 }
 
 @Composable
-private fun MembersTabContent(members: List<TeamMemberData>) {
+private fun MembersTabContent(
+    teamId: String,
+    members: List<TeamMemberData>,
+    viewerRoles: List<String>
+) {
     Column(Modifier.padding(horizontal = 12.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { Text("Team Members", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold); Text("Meet the warriors behind our journey", color = ProfileMuted, fontSize = 10.sp) }
             Text("${members.size} ${if (members.size == 1) "Member" else "Members"}", color = ProfileMuted, fontSize = 10.sp)
         }
-        if (members.isEmpty()) EmptyTeamTab("No members have joined this team yet.") else members.forEachIndexed { index, member -> MemberRow(index, member) }
+        if (members.isEmpty()) {
+            EmptyTeamTab("No members have joined this team yet.")
+        } else {
+            members.forEachIndexed { index, member ->
+                MemberRow(index, teamId, member, viewerRoles)
+            }
+        }
         Spacer(Modifier.height(20.dp))
     }
 }
 
 @Composable
-private fun MemberRow(index: Int, member: TeamMemberData) {
-    val isOwner = member.teamRole == "OWNER"
-    val teamRole = if (isOwner) "Owner" else member.teamRole.lowercase().replaceFirstChar { it.uppercase() }
+private fun MemberRow(
+    index: Int,
+    teamId: String,
+    member: TeamMemberData,
+    viewerRoles: List<String>
+) {
+    val context = LocalContext.current
+    val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+    val isManager = viewerRoles.any { it == "ADMIN" || it == "CAPTAIN" }
+    val isViceCaptain = "VICE_CAPTAIN" in viewerRoles
+    val isSelf = member.userId == currentUserId
+    val targetIsAdmin = "ADMIN" in member.teamRoles
+    val targetHasLeadershipRole = member.teamRoles.isNotEmpty()
+    val canShowActions = isManager || isViceCaptain
+    val canAssignRoles = isManager && !isSelf
+    val canRemove = !isSelf && (
+        isManager && !targetIsAdmin ||
+            isViceCaptain && !targetHasLeadershipRole
+        )
+    var actionsExpanded by remember(member.userId) { mutableStateOf(false) }
+    val isLeader = member.teamRoles.any { it == "ADMIN" || it == "CAPTAIN" }
+    val teamRole = member.teamRoles.joinToString(" • ") { role ->
+        role.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }
+    }
     Row(
-        Modifier.fillMaxWidth().padding(top = 7.dp).height(40.dp).background(if (isOwner) Color(0xFF12291E) else ProfileCard, RoundedCornerShape(7.dp)).border(if (isOwner) 1.dp else 0.dp, if (isOwner) ProfileAccent else Color.Transparent, RoundedCornerShape(7.dp)).padding(horizontal = 7.dp),
+        Modifier.fillMaxWidth().padding(top = 7.dp).height(40.dp).background(if (isLeader) Color(0xFF12291E) else ProfileCard, RoundedCornerShape(7.dp)).border(if (isLeader) 1.dp else 0.dp, if (isLeader) ProfileAccent else Color.Transparent, RoundedCornerShape(7.dp)).padding(horizontal = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text("#${index + 1}", color = Color.White, fontSize = 9.sp, modifier = Modifier.width(32.dp))
@@ -539,14 +624,141 @@ private fun MemberRow(index: Int, member: TeamMemberData) {
         Column(Modifier.width(140.dp).padding(start = 7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(member.name, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                if (teamRole.isNotBlank()) Text("  $teamRole", color = if (isOwner) Color(0xFF122300) else Color(0xFF071421), fontSize = 6.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 2.dp).background(if (isOwner) ProfileAccent else Color(0xFF9EB6DE), RoundedCornerShape(3.dp)).padding(horizontal = 4.dp, vertical = 2.dp))
+                if (teamRole.isNotBlank()) Text("  $teamRole", color = if (isLeader) Color(0xFF122300) else Color(0xFF071421), fontSize = 6.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 2.dp).background(if (isLeader) ProfileAccent else Color(0xFF9EB6DE), RoundedCornerShape(3.dp)).padding(horizontal = 4.dp, vertical = 2.dp))
             }
             Text(member.playingRole, color = ProfileMuted, fontSize = 8.sp)
         }
         Column(Modifier.weight(1f)) { Text("▰  Joined", color = Color.White, fontSize = 7.sp); Text("Team member", color = ProfileMuted, fontSize = 7.sp) }
-        Column(Modifier.weight(1f)) { Text("◉  Role", color = Color.White, fontSize = 7.sp); Text(member.teamRole.lowercase().replaceFirstChar { it.uppercase() }, color = ProfileMuted, fontSize = 7.sp) }
-        Text("›", color = Color.White, fontSize = 20.sp)
+        Column(Modifier.weight(1f)) { Text("◉  Role", color = Color.White, fontSize = 7.sp); Text(teamRole.ifBlank { "Player" }, color = ProfileMuted, fontSize = 7.sp) }
+        if (canShowActions) {
+            Box {
+                Text(
+                    "⋮",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    modifier = Modifier
+                        .clickable { actionsExpanded = true }
+                        .padding(start = 6.dp, end = 2.dp)
+                )
+                DropdownMenu(
+                    expanded = actionsExpanded,
+                    onDismissRequest = { actionsExpanded = false }
+                ) {
+                    if (canAssignRoles && "CAPTAIN" !in member.teamRoles) {
+                        TeamMemberAction("Make captain") {
+                            actionsExpanded = false
+                            updateMemberRole(teamId, member.userId, "CAPTAIN", null, context)
+                        }
+                    }
+                    if (canAssignRoles && "VICE_CAPTAIN" !in member.teamRoles) {
+                        TeamMemberAction("Make vice-captain") {
+                            actionsExpanded = false
+                            updateMemberRole(teamId, member.userId, "VICE_CAPTAIN", null, context)
+                        }
+                    }
+                    if (canAssignRoles && member.playingRole != "WICKET_KEEPER") {
+                        TeamMemberAction("Make wicketkeeper") {
+                            actionsExpanded = false
+                            updateMemberRole(teamId, member.userId, null, "WICKET_KEEPER", context)
+                        }
+                    }
+                    if (canRemove) {
+                        TeamMemberAction("Remove player") {
+                            actionsExpanded = false
+                            removeMember(teamId, member.userId, context)
+                        }
+                    }
+                    if (!canAssignRoles && !canRemove) {
+                        DropdownMenuItem(
+                            text = { Text("No actions available") },
+                            onClick = {},
+                            enabled = false
+                        )
+                    }
+                }
+            }
+        } else {
+            Text("›", color = Color.White, fontSize = 20.sp)
+        }
     }
+}
+
+@Composable
+private fun TeamMemberAction(label: String, onClick: () -> Unit) {
+    DropdownMenuItem(text = { Text(label) }, onClick = onClick)
+}
+
+private fun updateMemberRole(
+    teamId: String,
+    targetUserId: String,
+    teamRole: String?,
+    playingRole: String?,
+    context: android.content.Context
+) {
+    val payload = mutableMapOf<String, Any>("teamId" to teamId, "targetUserId" to targetUserId)
+    teamRole?.let { payload["teamRole"] = it }
+    playingRole?.let { payload["playingRole"] = it }
+    com.google.firebase.functions.FirebaseFunctions.getInstance()
+        .getHttpsCallable("updateTeamMemberRole")
+        .call(payload)
+        .addOnFailureListener { error ->
+            android.widget.Toast.makeText(context, error.message ?: "Unable to update the player role.", android.widget.Toast.LENGTH_SHORT).show()
+        }
+}
+
+private fun removeMember(teamId: String, targetUserId: String, context: android.content.Context) {
+    com.google.firebase.functions.FirebaseFunctions.getInstance()
+        .getHttpsCallable("removeTeamMember")
+        .call(mapOf("teamId" to teamId, "targetUserId" to targetUserId))
+        .addOnFailureListener { error ->
+            android.widget.Toast.makeText(context, error.message ?: "Unable to remove the player.", android.widget.Toast.LENGTH_SHORT).show()
+        }
+}
+
+private fun Map<*, *>.teamRoles(): List<String> {
+    val explicitRoles = (this["roles"] as? List<*>).orEmpty().filterIsInstance<String>()
+    if (explicitRoles.isNotEmpty()) return explicitRoles
+    return when (this["role"] as? String) {
+        "OWNER" -> listOf("ADMIN", "CAPTAIN")
+        "CAPTAIN" -> listOf("CAPTAIN")
+        "VICE_CAPTAIN" -> listOf("VICE_CAPTAIN")
+        else -> emptyList()
+    }
+}
+
+private fun fetchTeamMemberProfiles(
+    teamId: String,
+    members: List<TeamMemberData>,
+    onLoaded: (Map<String, MemberProfileData>) -> Unit
+) {
+    com.google.firebase.functions.FirebaseFunctions.getInstance()
+        .getHttpsCallable("getTeamMemberProfiles")
+        .call(mapOf("teamId" to teamId))
+        .addOnSuccessListener { result ->
+            val data = result.data as? Map<*, *> ?: return@addOnSuccessListener
+            val profiles = (data["members"] as? List<*>)
+                .orEmpty()
+                .mapNotNull { it as? Map<*, *> }
+                .mapNotNull { profile ->
+                    val userId = profile["userId"] as? String ?: return@mapNotNull null
+                    userId to MemberProfileData(
+                        displayName = (profile["displayName"] as? String).orEmpty().ifBlank { "Team member" },
+                        playingRole = (profile["playingRole"] as? String).orEmpty().ifBlank { "Player" }
+                    )
+                }
+                .toMap()
+            onLoaded(profiles)
+        }
+        .addOnFailureListener {
+            // The roster remains usable with safe placeholders if the network
+            // is unavailable; a later team snapshot will retry this request.
+            onLoaded(members.associate { member ->
+                member.userId to MemberProfileData(
+                    displayName = member.name.ifBlank { "Team member" },
+                    playingRole = member.playingRole.ifBlank { "Player" }
+                )
+            })
+        }
 }
 
 @Composable

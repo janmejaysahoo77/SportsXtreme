@@ -213,23 +213,6 @@ private fun CommunityTopStrip(onMenuClick: () -> Unit) {
                 .height(32.dp)
                 .clip(RoundedCornerShape(5.dp))
         )
-        Spacer(Modifier.width(8.dp))
-        Box(
-            modifier = Modifier
-                .width(76.dp)
-                .height(24.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(CommunityAccent),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "PRO @ 69",
-                color = Color(0xFF081007),
-                fontSize = 8.5.sp,
-                fontWeight = FontWeight.ExtraBold,
-                maxLines = 1
-            )
-        }
         Spacer(Modifier.weight(1f))
         Canvas(Modifier.size(21.dp)) {
             val tint = Color(0xFF8E9E99)

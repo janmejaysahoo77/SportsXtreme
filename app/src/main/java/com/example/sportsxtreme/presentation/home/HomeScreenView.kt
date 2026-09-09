@@ -229,41 +229,12 @@ class HomeScreenView @JvmOverloads constructor(
                     topMargin = dp(4)
                 })
 
-                // Pro Member Row
-                addView(LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    
-                    addView(LinearLayout(context).apply {
-                        gravity = Gravity.CENTER_VERTICAL
-                        background = GradientDrawable().apply {
-                            cornerRadius = dp(12).toFloat()
-                            setColor(primary)
-                        }
-                        setPadding(dp(8), dp(4), dp(8), dp(4))
-                        addView(DrawerIconView(context, DrawerIconView.Icon.PRO_STAR).apply {
-                            setTint(Color.BLACK)
-                        }, LinearLayout.LayoutParams(dp(12), dp(12)))
-                        addView(TextView(context).apply {
-                            text = "PRO MEMBER"
-                            setTextColor(Color.BLACK)
-                            textSize = 10f
-                            typeface = Typeface.DEFAULT_BOLD
-                            includeFontPadding = false
-                        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                            leftMargin = dp(4)
-                        })
-                    })
-
-                    addView(TextView(context).apply {
-                        text = "Profile completed • 58%"
-                        setTextColor(primary)
-                        textSize = 11f
-                        typeface = Typeface.DEFAULT_BOLD
-                        includeFontPadding = false
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                        leftMargin = dp(12)
-                    })
+                addView(TextView(context).apply {
+                    text = "Profile completed • 58%"
+                    setTextColor(primary)
+                    textSize = 11f
+                    typeface = Typeface.DEFAULT_BOLD
+                    includeFontPadding = false
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                     topMargin = dp(16)
                 })
@@ -301,46 +272,6 @@ class HomeScreenView @JvmOverloads constructor(
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(20), 0, dp(20), dp(40))
-
-                    // Pro Banner
-                    addView(LinearLayout(context).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        gravity = Gravity.CENTER_VERTICAL
-                        background = GradientDrawable().apply {
-                            cornerRadius = dp(8).toFloat()
-                            setColor(Color.rgb(35, 45, 30))
-                            setStroke(dp(1), Color.argb(100, 193, 255, 0))
-                        }
-                        setPadding(dp(16), dp(16), dp(16), dp(16))
-                        
-                        addView(DrawerIconView(context, DrawerIconView.Icon.PRO_STAR).apply {
-                            setTint(Color.BLACK)
-                            background = GradientDrawable().apply {
-                                shape = GradientDrawable.OVAL
-                                setColor(primary)
-                            }
-                            setPadding(dp(4), dp(4), dp(4), dp(4))
-                        }, LinearLayout.LayoutParams(dp(24), dp(24)))
-                        
-                        addView(TextView(context).apply {
-                            text = "PRO at ₹199"
-                            setTextColor(Color.WHITE)
-                            textSize = 13f
-                            typeface = Typeface.DEFAULT_BOLD
-                            includeFontPadding = false
-                        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                            leftMargin = dp(12)
-                        })
-
-                        addView(TextView(context).apply {
-                            text = "No autopay"
-                            setTextColor(Color.GRAY)
-                            textSize = 11f
-                            includeFontPadding = false
-                        })
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                        bottomMargin = dp(20)
-                    })
 
                     // Drawer Items
                     val items = listOf(
@@ -1221,21 +1152,6 @@ class HomeScreenView @JvmOverloads constructor(
                 scaleType = ImageView.ScaleType.CENTER_CROP
             }, LinearLayout.LayoutParams(dp(52), dp(30)).apply {
                 leftMargin = dp(20)
-            })
-            addView(TextView(context).apply {
-                text = "PRO @ 69"
-                gravity = Gravity.CENTER
-                setTextColor(Color.rgb(8, 16, 7))
-                textSize = 8.5f
-                typeface = Typeface.DEFAULT_BOLD
-                includeFontPadding = false
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(16).toFloat()
-                    setColor(primary)
-                }
-                elevation = dp(8).toFloat()
-            }, LinearLayout.LayoutParams(dp(76), dp(24)).apply {
-                leftMargin = dp(8)
             })
             addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
             addView(TopIconView(context, TopIconView.Icon.BELL).apply {
