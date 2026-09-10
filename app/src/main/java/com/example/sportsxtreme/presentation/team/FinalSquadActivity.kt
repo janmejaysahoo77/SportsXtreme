@@ -13,6 +13,7 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
 import android.content.Intent
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -40,6 +41,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +71,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
+import com.google.firebase.functions.FirebaseFunctions
 
 class FinalSquadActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,9 +86,12 @@ class FinalSquadActivity : ComponentActivity() {
         val selectedTeamId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID).orEmpty()
         val selectedTeamName = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME).orEmpty()
         setContent {
+            val members = rememberFinalSquadMembers(selectedTeamId)
             FinalSquadScreen(
+                members = members,
                 onBack = { finish() },
-                onNext = {
+                onNext = { matchRoles ->
+                    saveMatchSquad(matchId, teamSlot, selectedTeamId, selectedTeamName, members, matchRoles) {
                     val resultIntent = Intent().apply {
                         putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, teamSlot)
                         if (teamSlot == "A") {
@@ -96,10 +104,91 @@ class FinalSquadActivity : ComponentActivity() {
                     }
                     setResult(android.app.Activity.RESULT_OK, resultIntent)
                     finish()
+                    }
                 }
             )
         }
     }
+
+    private fun saveMatchSquad(
+        matchId: String,
+        teamSlot: String,
+        teamId: String,
+        teamName: String,
+        members: List<FinalSquadMember>,
+        matchRoles: Map<String, Set<String>>,
+        onSaved: () -> Unit
+    ) {
+        if (matchId.isBlank() || teamId.isBlank()) return
+        val squad = mapOf(
+            "teamId" to teamId,
+            "teamName" to teamName,
+            "players" to members.map { member ->
+                mapOf(
+                    "userId" to member.userId,
+                    "displayName" to member.name,
+                    "playingRole" to member.playingRole,
+                    "permanentTeamRoles" to member.teamRoles,
+                    "matchRoles" to matchRoles[member.userId].orEmpty().sorted()
+                )
+            },
+            "updatedAtEpochMs" to System.currentTimeMillis()
+        )
+        FirebaseFirestore.getInstance().collection("matches").document(matchId)
+            .set(mapOf("matchSquads" to mapOf(teamSlot to squad)), SetOptions.merge())
+            .addOnSuccessListener { onSaved() }
+            .addOnFailureListener { error ->
+                Toast.makeText(this, error.message ?: "Unable to save match squad", Toast.LENGTH_SHORT).show()
+            }
+    }
+}
+
+private data class FinalSquadMember(
+    val userId: String,
+    val name: String,
+    val playingRole: String,
+    val teamRoles: List<String>
+)
+
+@Composable
+private fun rememberFinalSquadMembers(teamId: String): List<FinalSquadMember> {
+    var members by remember(teamId) { mutableStateOf(emptyList<FinalSquadMember>()) }
+    DisposableEffect(teamId) {
+        if (teamId.isBlank()) {
+            members = emptyList()
+            onDispose { }
+        } else {
+            val registration = FirebaseFirestore.getInstance().collection("teams").document(teamId)
+                .addSnapshotListener { document, _ ->
+                    val baseMembers = (document?.get("members") as? List<*>).orEmpty()
+                        .mapNotNull { it as? Map<*, *> }
+                        .mapNotNull { value ->
+                            val userId = value["userId"] as? String ?: return@mapNotNull null
+                            FinalSquadMember(
+                                userId = userId,
+                                name = (value["displayName"] as? String).orEmpty(),
+                                playingRole = (value["playingRole"] as? String).orEmpty().ifBlank { "Player" },
+                                teamRoles = ((value["roles"] ?: value["teamRoles"]) as? List<*>)
+                                    ?.filterIsInstance<String>().orEmpty()
+                            )
+                        }.distinctBy { it.userId }
+                    members = baseMembers
+                    // The profile function is already used by Team Profile and supplies current member names.
+                    FirebaseFunctions.getInstance().getHttpsCallable("getTeamMemberProfiles")
+                        .call(mapOf("teamId" to teamId))
+                        .addOnSuccessListener { result ->
+                            val profiles = ((result.data as? Map<*, *>)?.get("members") as? List<*>).orEmpty()
+                                .mapNotNull { it as? Map<*, *> }
+                                .associate { (it["userId"] as? String).orEmpty() to (it["displayName"] as? String).orEmpty() }
+                            members = baseMembers.map { member ->
+                                member.copy(name = profiles[member.userId].orEmpty().ifBlank { member.name.ifBlank { "Team member" } })
+                            }
+                        }
+                }
+            onDispose { registration.remove() }
+        }
+    }
+    return members
 }
 
 private fun Intent.copyTeamSelectionExtras(): Bundle = Bundle().apply {
@@ -129,7 +218,30 @@ private val SquadStroke = Color(0xFF25314A)
 private val SquadMuted = Color(0xFFAAB6C4)
 
 @Composable
-private fun FinalSquadScreen(onBack: () -> Unit, onNext: () -> Unit) {
+private fun FinalSquadScreen(
+    members: List<FinalSquadMember>,
+    onBack: () -> Unit,
+    onNext: (Map<String, Set<String>>) -> Unit
+) {
+    var matchRoles by remember(members) {
+        mutableStateOf<Map<String, Set<String>>>(members.associate { member ->
+            member.userId to buildSet<String> {
+                if ("CAPTAIN" in member.teamRoles) add("CAPTAIN")
+                if ("VICE_CAPTAIN" in member.teamRoles) add("VICE_CAPTAIN")
+                if (member.playingRole == "WICKET_KEEPER") add("WICKET_KEEPER")
+            }
+        })
+    }
+    fun setRole(userId: String, role: String) {
+        val alreadySelected = role in matchRoles[userId].orEmpty()
+        matchRoles = matchRoles.mapValues { (memberId, roles) ->
+            when {
+                memberId == userId && alreadySelected -> roles - role
+                memberId == userId -> roles + role
+                else -> roles - role // Captain, VC and WK are unique for this match only.
+            }
+        }
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -152,30 +264,18 @@ private fun FinalSquadScreen(onBack: () -> Unit, onNext: () -> Unit) {
                     .padding(horizontal = 12.dp, vertical = 20.dp)
             ) {
                 FinalSquadHeader()
-                SquadPlayerCard(
-                    name = "ANSHU Gita",
-                    role = "Batsman",
-                    isCaptain = true,
-                    isViceCaptain = false,
-                    isWicketKeeper = false,
-                    modifier = Modifier.padding(top = 22.dp)
-                )
-                SquadPlayerCard(
-                    name = "Abhimanyu Majhi",
-                    role = "All Rounder",
-                    isCaptain = false,
-                    isViceCaptain = true,
-                    isWicketKeeper = false,
-                    modifier = Modifier.padding(top = 12.dp)
-                )
-                SquadPlayerCard(
-                    name = "Raj Kumar",
-                    role = "Wicket Keeper",
-                    isCaptain = false,
-                    isViceCaptain = false,
-                    isWicketKeeper = true,
-                    modifier = Modifier.padding(top = 12.dp)
-                )
+                members.forEachIndexed { index, member ->
+                    val roles = matchRoles[member.userId].orEmpty()
+                    SquadPlayerCard(
+                        name = member.name,
+                        role = member.playingRole,
+                        isCaptain = "CAPTAIN" in roles,
+                        isViceCaptain = "VICE_CAPTAIN" in roles,
+                        isWicketKeeper = "WICKET_KEEPER" in roles,
+                        onRoleClick = { setRole(member.userId, it) },
+                        modifier = Modifier.padding(top = if (index == 0) 22.dp else 12.dp)
+                    )
+                }
                 Spacer(Modifier.height(110.dp))
             }
         }
@@ -195,7 +295,7 @@ private fun FinalSquadScreen(onBack: () -> Unit, onNext: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(64.dp)
-                    .bounceClick(onNext)
+                    .bounceClick { onNext(matchRoles) }
                     .clip(RoundedCornerShape(12.dp))
                     .background(SquadAccent),
                 contentAlignment = Alignment.Center
@@ -246,11 +346,11 @@ private fun FinalSquadHeader() {
 }
 
 @Composable
-private fun SquadRoleButton(text: String, selected: Boolean) {
+private fun SquadRoleButton(text: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(38.dp)
-            .bounceClick()
+            .bounceClick(onClick)
             .clip(CircleShape)
             .background(if (selected) SquadAccent else Color.Transparent)
             .border(1.dp, if (selected) Color.Transparent else Color(0xFF25314A), CircleShape),
@@ -266,7 +366,7 @@ private fun SquadRoleButton(text: String, selected: Boolean) {
 }
 
 @Composable
-private fun SquadPlayerCard(name: String, role: String, isCaptain: Boolean, isViceCaptain: Boolean, isWicketKeeper: Boolean, modifier: Modifier = Modifier) {
+private fun SquadPlayerCard(name: String, role: String, isCaptain: Boolean, isViceCaptain: Boolean, isWicketKeeper: Boolean, onRoleClick: (String) -> Unit, modifier: Modifier = Modifier) {
     val isSelected = isCaptain || isViceCaptain || isWicketKeeper
     Row(
         modifier = modifier
@@ -310,13 +410,13 @@ private fun SquadPlayerCard(name: String, role: String, isCaptain: Boolean, isVi
                         .clip(CircleShape)
                         .background(if (isSelected) SquadAccent else Color(0xFF555B66))
                 )
-                Text("Played last match", color = SquadMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp))
+                Text(role, color = SquadMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp))
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SquadRoleButton("C", selected = isCaptain)
-            SquadRoleButton("VC", selected = isViceCaptain)
-            SquadRoleButton("WK", selected = isWicketKeeper)
+            SquadRoleButton("C", selected = isCaptain, onClick = { onRoleClick("CAPTAIN") })
+            SquadRoleButton("VC", selected = isViceCaptain, onClick = { onRoleClick("VICE_CAPTAIN") })
+            SquadRoleButton("WK", selected = isWicketKeeper, onClick = { onRoleClick("WICKET_KEEPER") })
         }
     }
 }

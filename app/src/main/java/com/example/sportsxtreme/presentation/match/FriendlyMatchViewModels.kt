@@ -7,6 +7,7 @@ import com.example.sportsxtreme.domain.model.Match
 import com.example.sportsxtreme.domain.model.CreatedMatchInvite
 import com.example.sportsxtreme.domain.model.MatchType
 import com.example.sportsxtreme.domain.model.Player
+import com.example.sportsxtreme.domain.model.PlayerRole
 import com.example.sportsxtreme.domain.model.TossDecision
 import com.example.sportsxtreme.domain.repository.TeamRepository
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
@@ -21,6 +22,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.functions.FirebaseFunctions
 
 data class StartMatchUiState(
     val isLoading: Boolean = false,
@@ -430,7 +434,8 @@ data class OpeningPlayersUiState(
 class OpeningPlayersViewModel(
     matchId: String,
     private val matchUseCases: MatchUseCases,
-    private val teamRepository: TeamRepository
+    private val teamRepository: TeamRepository,
+    private val firestore: FirebaseFirestore
 ) : ViewModel() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _uiState = MutableStateFlow(OpeningPlayersUiState())
@@ -472,14 +477,59 @@ class OpeningPlayersViewModel(
         scope.launch(Dispatchers.IO) {
             val battingResult = teamRepository.getTeam(battingTeamId)
             val bowlingResult = teamRepository.getTeam(bowlingTeamId)
-            val battingPlayers = (battingResult as? Resource.Success)?.data?.players ?: emptyList()
-            val bowlingPlayers = (bowlingResult as? Resource.Success)?.data?.players ?: emptyList()
+            val battingPlayers = loadFirestoreTeamPlayers(battingTeamId)
+                .ifEmpty { (battingResult as? Resource.Success)?.data?.players ?: emptyList() }
+            val bowlingPlayers = loadFirestoreTeamPlayers(bowlingTeamId)
+                .ifEmpty { (bowlingResult as? Resource.Success)?.data?.players ?: emptyList() }
             _uiState.value = _uiState.value.copy(
                 battingTeamPlayers = battingPlayers,
                 bowlingTeamPlayers = bowlingPlayers
             )
         }
     }
+
+    private suspend fun loadFirestoreTeamPlayers(teamId: String): List<Player> = runCatching {
+        val team = firestore.collection("teams").document(teamId).get().await()
+        if (!team.exists()) return@runCatching emptyList()
+        // User documents may only be readable by their owner. Resolve the full roster through
+        // the existing server-side profile endpoint used by Team Profile.
+        val profiles = runCatching {
+            val data = FirebaseFunctions.getInstance().getHttpsCallable("getTeamMemberProfiles")
+                .call(mapOf("teamId" to teamId)).await().data as? Map<*, *>
+            (data?.get("members") as? List<*>).orEmpty()
+                .mapNotNull { it as? Map<*, *> }
+                .mapNotNull { profile ->
+                    val userId = profile["userId"] as? String ?: return@mapNotNull null
+                    userId to (profile["displayName"] as? String).orEmpty()
+                }.toMap()
+        }.getOrDefault(emptyMap())
+        buildList {
+            (team.get("members") as? List<*>).orEmpty()
+                .mapNotNull { it as? Map<*, *> }
+                .forEach { member ->
+                    val userId = member["userId"] as? String ?: return@forEach
+                    val profile = runCatching { firestore.collection("users").document(userId).get().await() }.getOrNull()
+                    val name = (member["displayName"] as? String).orEmpty()
+                        .ifBlank { (member["name"] as? String).orEmpty() }
+                        .ifBlank { profiles[userId].orEmpty() }
+                        .ifBlank { profile?.getString("name").orEmpty() }
+                        .ifBlank { profile?.getString("displayName").orEmpty() }
+                        .ifBlank { "Team member" }
+                    val role = (member["playingRole"] as? String).orEmpty()
+                        .uppercase().replace(' ', '_').let { value ->
+                            runCatching { PlayerRole.valueOf(value) }.getOrDefault(PlayerRole.UNKNOWN)
+                        }
+                    add(Player(
+                        id = "$teamId::$userId",
+                        teamId = teamId,
+                        displayName = name,
+                        linkedUserId = userId,
+                        role = role,
+                        isGuestPlayer = false
+                    ))
+                }
+        }
+    }.getOrDefault(emptyList())
 
     override fun onCleared() {
         scope.cancel()
@@ -539,12 +589,12 @@ class OpeningPlayersViewModel(
     }
 
     companion object {
-        fun factory(matchId: String, matchUseCases: MatchUseCases, teamRepository: TeamRepository): ViewModelProvider.Factory =
+        fun factory(matchId: String, matchUseCases: MatchUseCases, teamRepository: TeamRepository, firestore: FirebaseFirestore): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     require(modelClass.isAssignableFrom(OpeningPlayersViewModel::class.java))
-                    return OpeningPlayersViewModel(matchId, matchUseCases, teamRepository) as T
+                    return OpeningPlayersViewModel(matchId, matchUseCases, teamRepository, firestore) as T
                 }
             }
     }

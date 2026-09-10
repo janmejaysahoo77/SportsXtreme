@@ -22,6 +22,9 @@ interface PlayerDao {
     @Query("SELECT * FROM players WHERE teamId = :teamId ORDER BY battingOrder, playerName")
     fun observePlayers(teamId: String): Flow<List<PlayerEntity>>
 
+    @Query("DELETE FROM players WHERE teamId = :teamId")
+    suspend fun deletePlayersForTeam(teamId: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlayingXI(players: List<PlayingXIEntity>)
 

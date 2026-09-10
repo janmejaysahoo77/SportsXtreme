@@ -110,6 +110,28 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         val viewModel: TeamSelectionViewModel by viewModels {
             TeamSelectionViewModel.factory(matchId, matchUseCases, teamA, teamB)
         }
+        val teamPickerLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode != RESULT_OK) return@registerForActivityResult
+            val data = result.data ?: return@registerForActivityResult
+            val selectedId = when (data.getStringExtra(EXTRA_TEAM_SLOT)) {
+                "A" -> data.getStringExtra(EXTRA_TEAM_A_ID).orEmpty()
+                "B" -> data.getStringExtra(EXTRA_TEAM_B_ID).orEmpty()
+                else -> ""
+            }
+            val selectedName = when (data.getStringExtra(EXTRA_TEAM_SLOT)) {
+                "A" -> data.getStringExtra(EXTRA_TEAM_A_NAME).orEmpty()
+                "B" -> data.getStringExtra(EXTRA_TEAM_B_NAME).orEmpty()
+                else -> ""
+            }
+            if (selectedId.isBlank() || selectedName.isBlank()) return@registerForActivityResult
+            if (data.getStringExtra(EXTRA_TEAM_SLOT) == "A") {
+                viewModel.setSelectedTeamA(SelectedTeam(selectedId, selectedName))
+            } else {
+                viewModel.setSelectedTeamB(SelectedTeam(selectedId, selectedName))
+            }
+        }
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
@@ -135,14 +157,18 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                         }
                     )
                 },
-                onSelectTeamA = { openInviteScreen("A", matchId) },
-                onSelectTeamB = { openInviteScreen("B", matchId) }
+                onSelectTeamA = { openInviteScreen("A", matchId, teamPickerLauncher) },
+                onSelectTeamB = { openInviteScreen("B", matchId, teamPickerLauncher) }
             )
         }
     }
 
-    private fun openInviteScreen(teamSlot: String, matchId: String) {
-        startActivity(
+    private fun openInviteScreen(
+        teamSlot: String,
+        matchId: String,
+        launcher: androidx.activity.result.ActivityResultLauncher<Intent>
+    ) {
+        launcher.launch(
             Intent(this, SelectTeamAorBActivity::class.java)
                 .putExtra(SelectTeamAorBActivity.EXTRA_TEAM_SLOT, teamSlot)
                 .putExtra(EXTRA_MATCH_ID, matchId)
