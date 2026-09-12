@@ -1,6 +1,8 @@
 package com.example.sportsxtreme.presentation.tournament
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -40,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -59,6 +62,9 @@ import com.example.sportsxtreme.R
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.presentation.home.HomeScreenView
 import com.example.sportsxtreme.presentation.match.StartMatchActivity
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -100,7 +106,10 @@ private fun RegisterTournamentFinalPage(tournament: Tournament?, onBack: () -> U
         FinalTournamentHeader(tournament)
         FinalTournamentTabs(tabs, selectedTab) { selectedTab = it }
         Box(
-            Modifier.fillMaxSize().pointerInput(selectedTab) {
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .pointerInput(selectedTab) {
                 detectHorizontalDragGestures(
                     onHorizontalDrag = { _, dragAmount -> swipeDistance += dragAmount.toInt() },
                     onDragEnd = {
@@ -123,7 +132,6 @@ private fun RegisterTournamentFinalPage(tournament: Tournament?, onBack: () -> U
                         else -> PointsTab()
                     }
                 }
-                Spacer(modifier = Modifier.height(100.dp))
             }
         }
     }
@@ -254,7 +262,7 @@ private fun AboutTab(tournament: Tournament?) {
         OrganizerCard(tournament)
         TournamentDetailsCard(tournament)
         TeamDetailsCard(tournament)
-        TournamentQrCard()
+        TournamentQrCard(tournament)
         Spacer(Modifier.height(8.dp))
     }
 }
@@ -387,7 +395,20 @@ private fun OverviewDetail(label: String, value: String, valueColor: Color = Col
 }
 
 @Composable
-private fun TournamentQrCard() {
+private fun TournamentQrCard(tournament: Tournament?) {
+    val context = LocalContext.current
+    val tournamentLink = tournament?.id
+        ?.takeIf { it.isNotBlank() }
+        ?.let { tournamentId ->
+            Uri.parse(context.getString(R.string.tournament_share_base_url))
+                .buildUpon()
+                .appendQueryParameter("id", tournamentId)
+                .build()
+                .toString()
+        }
+    val qrBitmap = remember(tournamentLink) {
+        tournamentLink?.let(::tournamentQrBitmap)
+    }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(FinalPanel).padding(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -398,15 +419,40 @@ private fun TournamentQrCard() {
         }
         Spacer(Modifier.height(16.dp))
         Box(Modifier.size(142.dp).clip(RoundedCornerShape(10.dp)).background(Color.White).padding(8.dp)) {
-            Image(
-                painter = painterResource(R.drawable.tournamentlogo),
-                contentDescription = "Temporary QR code placeholder",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
-            )
+            if (qrBitmap != null) {
+                Image(
+                    bitmap = qrBitmap.asImageBitmap(),
+                    contentDescription = "Tournament QR code",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+            }
         }
         Spacer(Modifier.height(14.dp))
-        Text("Let cricketers find this tournament\neasily with QR code.", color = FinalMuted, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 17.sp)
+        Text(
+            if (qrBitmap == null) "Preparing tournament QR code…" else "Let cricketers find this tournament\neasily with QR code.",
+            color = FinalMuted,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+            lineHeight = 17.sp
+        )
+    }
+}
+
+private fun tournamentQrBitmap(value: String): Bitmap {
+    val matrix = QRCodeWriter().encode(
+        value,
+        BarcodeFormat.QR_CODE,
+        512,
+        512,
+        mapOf(EncodeHintType.MARGIN to 1)
+    )
+    return Bitmap.createBitmap(matrix.width, matrix.height, Bitmap.Config.ARGB_8888).apply {
+        for (y in 0 until matrix.height) {
+            for (x in 0 until matrix.width) {
+                setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
     }
 }
 
@@ -456,25 +502,34 @@ private fun MatchesTab(tournament: Tournament?) {
     var selectedMatchTab by remember { mutableIntStateOf(0) }
     val matchTabs = listOf("Live", "Upcoming", "Completed")
 
-    Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Matches", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
+                Text("Manage every tournament fixture", color = FinalMuted, fontSize = 12.sp)
+            }
+            Box(Modifier.clip(RoundedCornerShape(16.dp)).background(FinalAccent.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
+                Text("2 LIVE", color = FinalAccent, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            }
+        }
+        MatchStatusTabs(matchTabs, selectedMatchTab) { selectedMatchTab = it }
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 92.dp),
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(top = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Matches", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
-                    Text("Manage every tournament fixture", color = FinalMuted, fontSize = 12.sp)
-                }
-                Box(Modifier.clip(RoundedCornerShape(16.dp)).background(FinalAccent.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
-                    Text("2 LIVE", color = FinalAccent, fontSize = 10.sp, fontWeight = FontWeight.Black)
-                }
-            }
-            MatchStatusTabs(matchTabs, selectedMatchTab) { selectedMatchTab = it }
             MatchStatusContent(selectedMatchTab, tournamentName, homeCardFactory)
         }
         MatchActions(
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier,
             onSchedule = { context.startActivity(Intent(context, StartMatchActivity::class.java)) },
             onStart = { context.startActivity(Intent(context, StartMatchActivity::class.java)) }
         )
