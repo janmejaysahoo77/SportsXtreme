@@ -24,7 +24,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -95,7 +98,7 @@ private fun ClubLandingScreen(onBack: () -> Unit) {
                 .padding(bottom = 22.dp)
         ) {
             Spacer(Modifier.height(8.dp))
-            CommunityHero()
+            ClubHeroPager()
             Spacer(Modifier.height(12.dp))
             MyClubsCard()
             Spacer(Modifier.height(12.dp))
@@ -182,87 +185,206 @@ private fun HeaderButton(
     content()
 }
 
+private data class HeroPage(
+    val eyebrow: String,
+    val heading: String,
+    val highlightedHeading: String,
+    val description: String,
+    val actions: List<Pair<Int, String>>,
+    val tint: ComposeColor
+)
+
+private val clubHeroPages = listOf(
+    HeroPage(
+        "COMMUNITY HUB",
+        "Build Your",
+        "Cricket Community",
+        "Create, discover and manage cricket clubs, players, tournaments and teams all in one place.",
+        listOf(
+            R.drawable.group to "10K+ clubs",
+            R.drawable.my_club to "2M+ players",
+            R.drawable.cricketlogo to "50K+ matches"
+        ),
+        ComposeColor(18, 53, 39)
+    ),
+    HeroPage(
+        "CLUBS & TEAMS",
+        "Manage",
+        "Your Clubs",
+        "Keep your squads connected, organise members and follow every club activity.",
+        listOf(
+            R.drawable.group to "Manage members",
+            R.drawable.setting to "Club settings",
+            R.drawable.outlined_thunder to "Track activity"
+        ),
+        ComposeColor(35, 58, 33)
+    ),
+    HeroPage(
+        "CLUBS & TEAMS",
+        "Create Your",
+        "Own Club",
+        "Start a cricket club, invite your members and build your community your way.",
+        listOf(
+            R.drawable.group to "Invite members",
+            R.drawable.group to "Run tournaments",
+            R.drawable.setting to "Manage club"
+        ),
+        ComposeColor(59, 47, 28)
+    ),
+    HeroPage(
+        "CLUBS & TEAMS",
+        "Discover &",
+        "Join Clubs",
+        "Find clubs and teams near you, then send a request to become part of the action.",
+        listOf(
+            R.drawable.group to "Browse clubs",
+            R.drawable.location to "Search teams",
+            R.drawable.plus to "Send request"
+        ),
+        ComposeColor(22, 42, 49)
+    )
+)
+
 @Composable
-private fun CommunityHero() = Card(
-    shape = RoundedCornerShape(18.dp),
-    colors = CardDefaults.cardColors(containerColor = CardBlack),
-    modifier = Modifier
-        .fillMaxWidth()
-        .height(290.dp)
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        ComposeColor.White.copy(alpha = 0.1f),
-                        ComposeColor.Black.copy(alpha = 0.6f)
-                    ),
-                    start = Offset(Float.POSITIVE_INFINITY, 0f),
-                    end = Offset(0f, Float.POSITIVE_INFINITY)
-
-                )
-            )
-    ) {
-        Box(
+private fun ClubHeroPager() {
+    val pagerState = rememberPagerState { clubHeroPages.size }
+    Column {
+        HorizontalPager(
+            state = pagerState,
+            pageSpacing = 10.dp,
             modifier = Modifier
-
-                .align(Alignment.BottomEnd)
-                .clip(RoundedCornerShape(topStart = 8.dp)),
+                .fillMaxWidth()
+                .height(350.dp)
+        ) { page -> HeroPageCard(clubHeroPages[page]) }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
         ) {
-            Image(
-                painter = painterResource(R.drawable.club_stadium),
-                contentDescription = null,
-                modifier = Modifier.alpha(0.25f),
-                contentScale = ContentScale.FillBounds
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.linearGradient(
-                            listOf(
-                                ComposeColor.White.copy(alpha = 0.03f),
-                                ComposeColor.Black.copy(alpha = 0.38f)
-                            ),
-                            start = Offset(Float.POSITIVE_INFINITY, 0f),
-                            end = Offset(0f, Float.POSITIVE_INFINITY)
-
+            repeat(clubHeroPages.size) { index ->
+                Box(
+                    Modifier
+                        .padding(horizontal = 3.dp)
+                        .size(if (pagerState.currentPage == index) 7.dp else 5.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (pagerState.currentPage == index) Lime else ComposeColor.White.copy(
+                                alpha = .28f
+                            )
                         )
-                    )
-            )
-        }
-
-        Column(modifier = Modifier.padding(14.dp)) {
-            Tag(stringResource(R.string.community_hub))
-            Spacer(Modifier.height(11.dp))
-            Text(
-                stringResource(R.string.build_cricket_community),
-                color = ComposeColor.White,
-                fontSize = 28.sp,
-
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(7.dp))
-            Text(
-                stringResource(R.string.community_hero_body),
-                color = Muted,
-                fontSize = 12.sp,
-
                 )
-            Spacer(Modifier.weight(1f))
-            Row(horizontalArrangement = Arrangement.spacedBy(21.dp)) {
-                Stat(
-                    stringResource(R.string.stat_10k_plus),
-                    stringResource(R.string.clubs_created)
-                );
-                Stat(stringResource(R.string.stat_2m_plus), stringResource(R.string.players));
-                Stat(stringResource(R.string.stat_50k_plus), stringResource(R.string.matches))
             }
         }
     }
+}
 
+@Composable
+private fun HeroPageCard(page: HeroPage) = Card(
+    shape = RoundedCornerShape(22.dp),
+    border = androidx.compose.foundation.BorderStroke(1.dp, ComposeColor.White.copy(alpha = .22f)),
+    colors = CardDefaults.cardColors(containerColor = CardBlack),
+    modifier = Modifier.fillMaxSize()
+) {
+    Box(Modifier.fillMaxSize()) {
+        Image(
+            painter = painterResource(R.drawable.club_stadium),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(.55f)
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            ScreenBlack.copy(alpha = .96f),
+                            page.tint.copy(alpha = .78f),
+                            ComposeColor.Black.copy(alpha = .20f)
+                        )
+                    )
+                )
+        )
+        Column(Modifier
+            .fillMaxSize()
+            .padding(18.dp)) {
+            Tag(
+                page.eyebrow,
+                bgColor = ComposeColor.White.copy(alpha = .12f),
+                borderColor = ComposeColor.White.copy(alpha = .28f)
+            )
+            Spacer(Modifier.height(20.dp))
+            Text(
+                page.heading,
+                color = ComposeColor.White,
+                fontSize = 31.sp,
+                fontWeight = FontWeight.ExtraBold,
+                lineHeight = 34.sp
+            )
+            Text(
+                page.highlightedHeading,
+                color = Lime,
+                fontSize = 31.sp,
+                fontWeight = FontWeight.ExtraBold,
+                lineHeight = 34.sp
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                page.description,
+                color = ComposeColor.White.copy(alpha = .76f),
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                modifier = Modifier.fillMaxWidth(.68f)
+            )
+            Spacer(Modifier.weight(1f))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                page.actions.forEach { (icon, label) ->
+                    HeroActionTile(
+                        icon,
+                        label,
+                        Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeroActionTile(icon: Int, label: String, modifier: Modifier = Modifier) = Card(
+    modifier = modifier.height(76.dp),
+    shape = RoundedCornerShape(14.dp),
+    border = androidx.compose.foundation.BorderStroke(1.dp, ComposeColor.White.copy(alpha = .20f)),
+    colors = CardDefaults.cardColors(containerColor = ComposeColor.Black.copy(alpha = .28f))
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Image(
+            painter = painterResource(icon),
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            colorFilter = ColorFilter.tint(ComposeColor.White)
+        )
+        Spacer(Modifier.height(5.dp))
+        Text(
+            label,
+            color = ComposeColor.White,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
+            lineHeight = 11.sp,
+            maxLines = 2
+        )
+    }
 }
 
 @Composable

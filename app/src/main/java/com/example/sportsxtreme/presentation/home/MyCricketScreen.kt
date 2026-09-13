@@ -1,18 +1,8 @@
 package com.example.sportsxtreme.presentation.home
 
-import com.example.sportsxtreme.R
-import com.example.sportsxtreme.presentation.tournament.*
-import com.example.sportsxtreme.presentation.components.*
-import com.example.sportsxtreme.presentation.auth.*
-import com.example.sportsxtreme.presentation.scoring.*
-import com.example.sportsxtreme.presentation.match.*
-import com.example.sportsxtreme.presentation.media.*
-import com.example.sportsxtreme.presentation.home.*
-import com.example.sportsxtreme.presentation.team.*
-import com.example.sportsxtreme.presentation.profile.*
-import com.example.sportsxtreme.presentation.store.*
 import android.content.Intent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,9 +24,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -46,49 +41,71 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.team.TeamProfileActivity
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 
-private val CricketAccent = Color(0xFFC1FF00)
-private val CricketBg = Color(0xFF010509)
-private val CricketPanel = Color(0xFF08111D)
-private val CricketCard = Color(0xFF091424)
-private val CricketMuted = Color(0xFF94A19E)
-private val CricketStroke = Color(0x3D6A7480)
+private val CricketAccent = Color(190, 255, 24) // Lime from ClubLanding
+private val CricketBg = Color(5, 7, 8) // ScreenBlack from ClubLanding
+private val CricketPanel = Color(15, 17, 17) // CardBlack from ClubLanding
+private val CricketCard = Color(15, 17, 17)
+private val CricketMuted = Color(162, 169, 164) // Muted from ClubLanding
+private val CricketStroke = Color(45, 51, 46) // CardBorder from ClubLanding
 private val CricketBlue = Color(0xFF2ED8FF)
 
-private val cricketTabs = listOf("Matches", "Tournaments", "Teams", "Stats", "History")
+private val ClubCardBlack = Color(15, 17, 17)
+private val ClubCardBorder = Color(45, 51, 46)
+private val ClubMuted = Color(162, 169, 164)
+
+private val cricketTabs = listOf("Matches", "Tournaments", "Teams", "Stats", "Highlights")
 
 private data class CricketMatch(
     val type: String,
     val title: String,
     val status: String,
     val left: String,
+    val leftScore: String? = null,
     val right: String,
-    val score: String,
+    val rightScore: String? = null,
+    val scoreCenter: String? = null,
     val meta: String,
+    val location: String? = null,
     val result: String? = null,
+    val potm: String? = null,
     val live: Boolean = false,
+    val liveSoon: Boolean = false,
     val accent: Color = CricketAccent
 )
 
-private data class CricketTeam(val id: String, val name: String, val initials: String, val location: String, val accent: Color)
+private data class CricketTeam(
+    val id: String,
+    val name: String,
+    val initials: String,
+    val location: String,
+    val accent: Color
+)
 
 private data class CricketTournament(
     val name: String,
@@ -127,7 +144,7 @@ private fun rememberJoinedTeams(): List<CricketTeam> {
     return teams
 }
 
-private fun com.google.firebase.firestore.DocumentSnapshot.belongsTo(userId: String): Boolean {
+private fun DocumentSnapshot.belongsTo(userId: String): Boolean {
     if (getString("ownerUserId") == userId || getString("ownerId") == userId) return true
 
     val ids = (get("memberIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
@@ -142,13 +159,28 @@ private fun com.google.firebase.firestore.DocumentSnapshot.belongsTo(userId: Str
 }
 
 private fun com.google.firebase.firestore.DocumentSnapshot.toCricketTeam(): CricketTeam {
-    val name = getString("teamName").orEmpty().ifBlank { getString("name").orEmpty().ifBlank { id } }
+    val name =
+        getString("teamName").orEmpty().ifBlank { getString("name").orEmpty().ifBlank { id } }
     val location = getString("city").orEmpty().ifBlank {
-        getString("cityTown").orEmpty().ifBlank { getString("location").orEmpty().ifBlank { "Team" } }
+        getString("cityTown").orEmpty()
+            .ifBlank { getString("location").orEmpty().ifBlank { "Team" } }
     }
-    val initials = name.split(Regex("\\s+")).filter { it.isNotBlank() }.take(2).joinToString("") { it.first().uppercase() }.ifBlank { "TM" }
-    val accents = listOf(Color(0xFF1E6CF1), Color(0xFF7B32D9), Color(0xFF079F89), Color(0xFFD51D49), Color(0xFFFFB340))
-    return CricketTeam(id, name, initials, location, accents[(id.hashCode() and Int.MAX_VALUE) % accents.size])
+    val initials = name.split(Regex("\\s+")).filter { it.isNotBlank() }.take(2)
+        .joinToString("") { it.first().uppercase() }.ifBlank { "TM" }
+    val accents = listOf(
+        Color(0xFF1E6CF1),
+        Color(0xFF7B32D9),
+        Color(0xFF079F89),
+        Color(0xFFD51D49),
+        Color(0xFFFFB340)
+    )
+    return CricketTeam(
+        id,
+        name,
+        initials,
+        location,
+        accents[(id.hashCode() and Int.MAX_VALUE) % accents.size]
+    )
 }
 
 private val sampleMatches = listOf(
@@ -158,29 +190,32 @@ private val sampleMatches = listOf(
         status = "Upcoming",
         left = "Syndicate",
         right = "Thunder",
-        score = "VS",
+        scoreCenter = "VS",
         meta = "Today, 6:30 PM",
         accent = CricketBlue
     ),
     CricketMatch(
         type = "CORPORATE LEAGUE",
         title = "Phoenix XI vs Titans CC",
-        status = "Live soon",
+        status = "LIVE SOON",
         left = "Phoenix XI",
         right = "Titans CC",
-        score = "9:00",
+        scoreCenter = "9:00 AM",
         meta = "Tomorrow",
-        live = true
+        location = "Riverside Ground",
+        liveSoon = true
     ),
     CricketMatch(
-        type = "WEEKEND CUP - FINAL",
+        type = "WEEKEND CUP • FINAL",
         title = "Warriors CC vs Blue Hawks",
         status = "Finished",
         left = "Warriors CC",
+        leftScore = "184/6 (20)",
         right = "Blue Hawks",
-        score = "184/6 (20)",
-        meta = "POTM: R Sharma",
+        rightScore = "166/9 (20)",
+        meta = "Warriors won by 18 runs",
         result = "Warriors won by 18 runs",
+        potm = "R. Sharma (74)",
         accent = Color(0xFFFFCA64)
     ),
     CricketMatch(
@@ -189,7 +224,7 @@ private val sampleMatches = listOf(
         status = "Scheduled",
         left = "SITAM CSE",
         right = "Apex College",
-        score = "VS",
+        scoreCenter = "VS",
         meta = "League fixture",
         accent = Color(0xFFFF8FB0)
     ),
@@ -198,22 +233,55 @@ private val sampleMatches = listOf(
         title = "Challengers vs Royals",
         status = "Result",
         left = "Challengers",
+        leftScore = "128/10",
         right = "Royals",
-        score = "128/10",
+        rightScore = "131/5",
         meta = "Royals won by 5 wickets",
         result = "Royals won by 5 wickets"
     )
 )
 
 private val tournaments = listOf(
-    CricketTournament("Neon Pro League", "20 Jun - 30 Jun 2026", "BHUBANESWAR", "UPCOMING", CricketBlue, TournamentVisual.NEON),
-    CricketTournament("Corporate Cricket Cup", "15 Jun - 25 Jun 2026", "HYDERABAD", "LIVE", CricketAccent, TournamentVisual.FIELD),
-    CricketTournament("Balisahi Premier League (BPL)", "03 Jun - 05 Jun 2026", "ODISHA", "PAST", Color(0xFF88909A), TournamentVisual.TROPHY),
-    CricketTournament("Summer Slam T20", "10 Jul - 20 Jul 2026", "MUMBAI", "SCHEDULED", Color(0xFFBFD8FF), TournamentVisual.SLAM)
+    CricketTournament(
+        "Neon Pro League",
+        "20 Jun - 30 Jun 2026",
+        "BHUBANESWAR",
+        "UPCOMING",
+        CricketBlue,
+        TournamentVisual.NEON
+    ),
+    CricketTournament(
+        "Corporate Cricket Cup",
+        "15 Jun - 25 Jun 2026",
+        "HYDERABAD",
+        "LIVE",
+        CricketAccent,
+        TournamentVisual.FIELD
+    ),
+    CricketTournament(
+        "Balisahi Premier League (BPL)",
+        "03 Jun - 05 Jun 2026",
+        "ODISHA",
+        "PAST",
+        Color(0xFF88909A),
+        TournamentVisual.TROPHY
+    ),
+    CricketTournament(
+        "Summer Slam T20",
+        "10 Jul - 20 Jul 2026",
+        "MUMBAI",
+        "SCHEDULED",
+        Color(0xFFBFD8FF),
+        TournamentVisual.SLAM
+    )
 )
 
 @Composable
-fun MyCricketScreen(onMenuClick: () -> Unit = {}, onStartMatch: () -> Unit = {}, initialTab: Int = 0) {
+fun MyCricketScreen(
+    onMenuClick: () -> Unit = {},
+    onStartMatch: () -> Unit = {},
+    initialTab: Int = 0
+) {
     var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
     val joinedTeams = rememberJoinedTeams()
 
@@ -221,17 +289,17 @@ fun MyCricketScreen(onMenuClick: () -> Unit = {}, onStartMatch: () -> Unit = {},
         modifier = Modifier
             .fillMaxSize()
             .background(CricketBg)
-            .drawBehind {
-                drawCircle(Color(0x1F00D2FF), radius = size.width * 0.65f, center = Offset(size.width * 0.05f, size.height * 0.16f))
-                drawCircle(Color(0x242D4211), radius = size.width * 0.7f, center = Offset(size.width * 0.98f, size.height * 0.36f))
-                drawCircle(Color(0x16007AFF), radius = size.width * 0.55f, center = Offset(size.width * 0.45f, size.height * 0.92f))
-            }
     ) {
-        CricketTopStrip(onMenuClick)
+        CricketTopStrip(onMenuClick, selectedTab)
         CricketTabs(selectedTab = selectedTab, onSelect = { selectedTab = it })
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 10.dp, top = 10.dp, end = 10.dp, bottom = 100.dp),
+            contentPadding = PaddingValues(
+                start = 10.dp,
+                top = 10.dp,
+                end = 10.dp,
+                bottom = 100.dp
+            ),
             verticalArrangement = Arrangement.spacedBy(13.dp)
         ) {
             when (selectedTab) {
@@ -240,13 +308,23 @@ fun MyCricketScreen(onMenuClick: () -> Unit = {}, onStartMatch: () -> Unit = {},
                     item { SegmentPills(listOf("You", "Playing", "Network", "All"), active = 0) }
                     items(sampleMatches) { match -> MatchCard(match) }
                 }
+
                 1 -> {
                     item { HostTournamentPrompt() }
-                    item { SegmentPills(listOf("Your", "Participate", "Network"), active = 0) }
+                    item {
+                        SegmentPills(
+                            listOf("Your", "Participate", "Network"),
+                            active = 0,
+                            activeColor = CricketBlue
+                        )
+                    }
                     items(tournaments) { tournament -> TournamentCard(tournament) }
                 }
+
                 2 -> {
                     item { CreateTeamPrompt() }
+                    item { TeamFilterPills() }
+                    item { QuickSearchBar() }
                     item { ActiveTeamsHeader(joinedTeams.size) }
                     if (joinedTeams.isEmpty()) {
                         item { NoJoinedTeamsCard() }
@@ -254,40 +332,80 @@ fun MyCricketScreen(onMenuClick: () -> Unit = {}, onStartMatch: () -> Unit = {},
                         items(joinedTeams) { team -> TeamCard(team) }
                     }
                 }
+
                 3 -> {
-                    item { SectionTitle("Performance Hub", "Live numbers from your cricket universe") }
-                    item { StatsMatrix() }
-                    item { MomentumCard() }
+                    item { StatsProContent() }
                 }
+
                 else -> {
-                    item { SectionTitle("Match History", "Recent scorecards and completed fixtures") }
-                    items(sampleMatches.filter { it.status == "Finished" || it.status == "Result" }) { match -> MatchCard(match) }
+                    item {
+                        SectionTitle(
+                            "Match History",
+                            "Recent scorecards and completed fixtures"
+                        )
+                    }
+                    items(sampleMatches.filter { it.status == "Finished" || it.status == "Result" }) { match ->
+                        MatchCard(
+                            match
+                        )
+                    }
                     item { TimelineCard() }
                 }
             }
+            item {
+                Spacer(
+                    Modifier
+                        .height(30.dp)
+                )
+            }
         }
+
     }
 }
 
+
 @Composable
-private fun CricketTopStrip(onMenuClick: () -> Unit) {
+private fun CricketTopStrip(onMenuClick: () -> Unit, selectedTab: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .background(Brush.horizontalGradient(listOf(Color(0xFF050D11), Color(0xFF030A16))))
+            .height(64.dp)
+            .background(CricketBg)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         HeaderMenuButton(onMenuClick)
-        Spacer(Modifier.width(14.dp))
-        Column {
-            Text("My Cricket", color = Color.White, fontSize = 16.sp, lineHeight = 18.sp, fontWeight = FontWeight.ExtraBold)
-            Text("Match command center", color = CricketMuted, fontSize = 8.5.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+            Text("Sports", color = CricketAccent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Xtreme", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(12.dp))
+            val proBadgeColor = CricketAccent
+            ProBadge(proBadgeColor)
         }
-        Spacer(Modifier.weight(1f))
-        HeaderBell()
+        Image(painter = painterResource(R.drawable.telegram), contentDescription = "Messages", modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(12.dp))
+        Image(painter = painterResource(R.drawable.ghanti), contentDescription = "Notifications", modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(12.dp))
+        Image(painter = painterResource(R.drawable.user), contentDescription = "Profile", modifier = Modifier.size(20.dp).clip(CircleShape))
     }
+}
+
+@Composable
+private fun ProBadge(backgroundColor: Color) = Box(
+    modifier = Modifier
+        .clip(RoundedCornerShape(12.dp))
+        .background(backgroundColor)
+        .padding(horizontal = 8.dp, vertical = 4.dp),
+    contentAlignment = Alignment.Center
+) {
+    Text(
+        "PRO @ ₹199",
+        color = if (backgroundColor == CricketAccent) Color.Black else Color.White,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.ExtraBold,
+        maxLines = 1
+    )
 }
 
 @Composable
@@ -295,36 +413,36 @@ private fun CricketTabs(selectedTab: Int, onSelect: (Int) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(40.dp)
-            .background(Color(0xFF040A12))
+            .height(48.dp)
+            .background(CricketBg)
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(19.dp),
-        verticalAlignment = Alignment.Bottom
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         cricketTabs.forEachIndexed { index, label ->
             Column(
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(48.dp)
                     .clickable { onSelect(index) },
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Bottom
+                verticalArrangement = Arrangement.Center
             ) {
                 Text(
                     label,
-                    color = if (index == selectedTab) CricketAccent else Color(0xFFC5D1CE),
-                    fontSize = 10.sp,
-                    lineHeight = 12.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1
+                    color = if (index == selectedTab) CricketAccent else Color.White.copy(alpha = 0.7f),
+                    fontSize = 14.sp,
+                    fontWeight = if (index == selectedTab) FontWeight.Bold else FontWeight.Normal
                 )
-                Spacer(Modifier.height(8.dp))
-                Box(
-                    Modifier
-                        .width(if (index == selectedTab) 34.dp else 0.dp)
-                        .height(2.dp)
-                        .background(CricketAccent)
-                )
+                if (index == selectedTab) {
+                    Spacer(Modifier.height(4.dp))
+                    Box(
+                        Modifier
+                            .width(20.dp)
+                            .height(2.dp)
+                            .background(CricketAccent)
+                    )
+                }
             }
         }
     }
@@ -335,47 +453,95 @@ private fun StartMatchPrompt(onStartMatch: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(11.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF101827), Color(0xFF07101B), Color(0xFF101E14))))
-            .border(1.dp, Color(0x304E5B64), RoundedCornerShape(11.dp))
-            .padding(13.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(CricketCard)
+            .border(1.dp, CricketStroke, RoundedCornerShape(18.dp))
+            .padding(20.dp)
     ) {
-        Column {
-            Text("Ready to organize your next match?", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-            Text("Setup custom matches, invite teams, and track live scores effortlessly.", color = CricketMuted, fontSize = 9.sp, lineHeight = 12.sp, modifier = Modifier.padding(top = 5.dp))
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "Ready to organize your next match?",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Setup custom matches, invite teams, and track live scores effortlessly.",
+                color = CricketMuted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Spacer(Modifier.height(16.dp))
             Box(
                 modifier = Modifier
-                    .padding(top = 12.dp)
-                    .height(34.dp)
-                    .width(145.dp)
-                    .clip(RoundedCornerShape(17.dp))
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(8.dp))
                     .background(CricketAccent)
-                    .clickable(onClick = onStartMatch),
+                    .clickable(onClick = onStartMatch)
+                    .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Start Match", color = Color(0xFF0A1204), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Image(
+                        painter = painterResource(R.drawable.baseline_add_24),
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        colorFilter = ColorFilter.tint(Color.Black)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "Start Match",
+                        color = Color.Black,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun SegmentPills(labels: List<String>, active: Int) {
+private fun SegmentPills(
+    labels: List<String>,
+    active: Int,
+    activeColor: Color = CricketAccent,
+    onTabClick: (Int) -> Unit = {}
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         labels.forEachIndexed { index, label ->
             Box(
                 modifier = Modifier
-                    .height(29.dp)
-                    .clip(RoundedCornerShape(15.dp))
-                    .background(if (index == active) Color(0x221B2604) else Color(0xFF121A28))
-                    .border(1.dp, if (index == active) CricketAccent else CricketStroke, RoundedCornerShape(15.dp))
-                    .padding(horizontal = 16.dp),
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(if (index == active) activeColor else CricketPanel)
+                    .border(
+                        1.dp,
+                        if (index == active) activeColor else CricketStroke,
+                        RoundedCornerShape(18.dp)
+                    )
+                    .clickable { onTabClick(index) }
+                    .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(label, color = if (index == active) CricketAccent else Color(0xFFD7DFE5), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    label,
+                    color = if (index == active) {
+                        if (activeColor == CricketAccent) Color.Black else Color.White
+                    } else {
+                        Color.White.copy(alpha = 0.7f)
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
@@ -386,33 +552,223 @@ private fun MatchCard(match: CricketMatch) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(11.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF0B1728), Color(0xFF070E19), Color(0xFF0D1812))))
-            .border(1.dp, if (match.live) CricketAccent.copy(alpha = 0.65f) else CricketStroke, RoundedCornerShape(11.dp))
-            .padding(13.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(CricketCard)
+            .border(1.dp, CricketStroke, RoundedCornerShape(18.dp))
+            .padding(16.dp)
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(match.type, color = match.accent, fontSize = 7.5.sp, lineHeight = 9.sp, fontWeight = FontWeight.ExtraBold)
-                    Text(match.title, color = Color.White, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        match.type,
+                        color = match.accent,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        match.title,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
                 }
-                StatusBadge(match.status, match.live)
+                StatusBadge(match.status, match.live, match.liveSoon)
             }
-            Spacer(Modifier.height(17.dp))
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TeamNode(match.left, match.accent, Modifier.weight(1f))
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(82.dp)) {
-                    Text(match.score, color = Color.White, fontSize = if (match.score == "VS") 18.sp else 16.sp, fontWeight = FontWeight.ExtraBold, fontStyle = if (match.score == "VS") FontStyle.Italic else FontStyle.Normal)
-                    Text(match.meta, color = CricketAccent, fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(20.dp))
+
+            when (match.status) {
+                "Upcoming" -> UpcomingMatchLayout(match)
+                "LIVE SOON" -> LiveSoonMatchLayout(match)
+                "Finished" -> FinishedMatchLayout(match)
+                "Scheduled" -> ScheduledMatchLayout(match)
+                "Result" -> ResultMatchLayout(match)
+                else -> UpcomingMatchLayout(match)
+            }
+
+            match.location?.let {
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Image(
+                        painter = painterResource(R.drawable.loca),
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(it, color = CricketMuted, fontSize = 12.sp)
                 }
-                TeamNode(match.right, match.accent, Modifier.weight(1f))
             }
+
             match.result?.let {
-                Spacer(Modifier.height(14.dp))
-                Text(it, color = CricketAccent, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    it,
+                    color = CricketAccent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontStyle = FontStyle.Italic
+                )
+            }
+
+            match.potm?.let {
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White.copy(alpha = 0.1f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        "POTM: $it",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun UpcomingMatchLayout(match: CricketMatch) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        TeamNode(match.left, match.accent, Modifier.weight(1f))
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.width(100.dp)
+        ) {
+            Text(
+                match.scoreCenter ?: "VS",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(match.meta, color = CricketAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+        TeamNode(match.right, match.accent, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun LiveSoonMatchLayout(match: CricketMatch) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        TeamNode(match.left, match.accent, Modifier.weight(1f))
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.width(100.dp)
+        ) {
+            Text("Tomorrow", color = CricketMuted, fontSize = 10.sp)
+            Text(
+                match.scoreCenter ?: "9:00",
+                color = Color.White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text("AM", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        }
+        TeamNode(match.right, match.accent, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun FinishedMatchLayout(match: CricketMatch) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ScoreRow(match.left, match.leftScore ?: "")
+        ScoreRow(match.right, match.rightScore ?: "")
+    }
+}
+
+@Composable
+private fun ScheduledMatchLayout(match: CricketMatch) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        BigTeamNode(match.left, match.accent, Modifier.weight(1f))
+        Text(
+            "vs",
+            color = Color.White.copy(alpha = 0.3f),
+            fontSize = 16.sp,
+            fontStyle = FontStyle.Italic
+        )
+        BigTeamNode(match.right, match.accent, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ResultMatchLayout(match: CricketMatch) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(match.left, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Text(
+                match.leftScore ?: "",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(match.right, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Text(
+                match.rightScore ?: "",
+                color = CricketAccent,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.1f))
+                .padding(vertical = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                match.result ?: "",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScoreRow(team: String, score: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.1f))
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            team,
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f)
+        )
+        Text(score, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun BigTeamNode(name: String, accent: Color, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(70.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color.White.copy(alpha = 0.1f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(name.take(1), color = accent, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(name, color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center)
     }
 }
 
@@ -421,103 +777,451 @@ private fun TeamNode(name: String, accent: Color, modifier: Modifier = Modifier)
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .size(45.dp)
+                .size(60.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF101827))
-                .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(12.dp)),
+                .background(Color.White.copy(alpha = 0.1f)),
             contentAlignment = Alignment.Center
         ) {
-            CricketCrest(accent)
+            Image(
+                painter = painterResource(R.drawable.ball),
+                contentDescription = null,
+                modifier = Modifier.size(40.dp)
+            )
         }
-        Text(name, color = Color.White, fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 7.dp))
+        Spacer(Modifier.height(8.dp))
+        Text(
+            name,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
-@Composable
-private fun CricketCrest(accent: Color) {
-    Canvas(Modifier.size(28.dp)) {
-        val path = Path().apply {
-            moveTo(size.width * 0.5f, size.height * 0.08f)
-            lineTo(size.width * 0.82f, size.height * 0.22f)
-            lineTo(size.width * 0.73f, size.height * 0.72f)
-            quadraticTo(size.width * 0.5f, size.height * 0.93f, size.width * 0.27f, size.height * 0.72f)
-            lineTo(size.width * 0.18f, size.height * 0.22f)
-            close()
-        }
-        drawPath(path, accent.copy(alpha = 0.2f))
-        drawPath(path, accent, style = Stroke(width = 1.3.dp.toPx(), cap = StrokeCap.Round))
-        drawCircle(Color.White.copy(alpha = 0.18f), radius = size.minDimension * 0.13f, center = center)
-    }
-}
 
 @Composable
-private fun StatusBadge(label: String, live: Boolean) {
+private fun StatusBadge(label: String, live: Boolean, liveSoon: Boolean = false) {
+    val bgColor = when {
+        live -> CricketAccent.copy(alpha = 0.15f)
+        liveSoon -> CricketAccent.copy(alpha = 0.1f)
+        label == "Finished" -> Color.White.copy(alpha = 0.1f)
+        else -> Color.White.copy(alpha = 0.05f)
+    }
+
+    val textColor = when {
+        live -> CricketAccent
+        liveSoon -> CricketAccent
+        else -> Color.White.copy(alpha = 0.7f)
+    }
+
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(7.dp))
-            .background(if (live) Color(0x221B2604) else Color(0xFF142036))
-            .border(1.dp, if (live) CricketAccent else Color(0xFF314057), RoundedCornerShape(7.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, color = if (live) CricketAccent else Color(0xFFD8E1EA), fontSize = 7.5.sp, fontWeight = FontWeight.ExtraBold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (liveSoon) {
+                Box(modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(CricketAccent))
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(label, color = textColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
 @Composable
-private fun SectionTitle(title: String, subtitle: String) {
-    Column(modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)) {
-        Text(title, color = Color.White, fontSize = 19.sp, lineHeight = 22.sp, fontWeight = FontWeight.ExtraBold)
-        Text(subtitle, color = CricketMuted, fontSize = 9.5.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 7.dp))
+private fun SectionTitle(title: String, subtitle: String, showInfo: Boolean = false) {
+    Row(
+        modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                color = Color.White,
+                fontSize = 19.sp,
+                lineHeight = 22.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Text(
+                subtitle,
+                color = CricketMuted,
+                fontSize = 9.5.sp,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 7.dp)
+            )
+        }
+        if (showInfo) {
+            Image(
+                imageVector = Icons.Default.Info,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                colorFilter = ColorFilter.tint(Color.White.copy(alpha = 0.6f))
+            )
+        }
     }
 }
+
+private data class StatItem(val label: String, val value: String)
+
+@Composable
+private fun StatsProContent() {
+    var selectedStatTab by remember { mutableIntStateOf(0) }
+    var isUnlocked by remember { mutableStateOf(false) }
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(84.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(CricketPanel)
+                .border(
+                    1.dp,
+                    Brush.verticalGradient(listOf(CricketAccent.copy(alpha = 0.5f), Color.Transparent)),
+                    RoundedCornerShape(18.dp)
+                )
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Want to improve your stats?",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+            Box(
+                Modifier
+                    .height(37.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(CricketAccent)
+                    .padding(horizontal = 20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "ANALYSE",
+                    color = Color.Black,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        SegmentPills(
+            labels = listOf("Batting", "Bowling", "Fielding", "Captaincy"),
+            active = selectedStatTab,
+            onTabClick = { selectedStatTab = it }
+        )
+
+        Spacer(Modifier.height(28.dp))
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .blur(if (!isUnlocked) 15.dp else 0.dp)
+                    .then(if (!isUnlocked) Modifier.alpha(0.5f) else Modifier)
+            ) {
+                StatCategoryContent(selectedStatTab)
+            }
+
+            if (!isUnlocked) {
+                // Freeze overlay: intercepts all touches so background stats aren't selectable
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable(enabled = false, onClick = { /* Intercept */ })
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 60.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(122.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(CricketPanel)
+                            .border(1.dp, CricketStroke, RoundedCornerShape(28.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(R.drawable.tala),
+                            contentDescription = "PRO locked",
+                            modifier = Modifier.size(61.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(30.dp))
+                    Text(
+                        "Full stats, full story",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Track every run, wicket, and pattern that\ndefines your game with PRO.",
+                        color = CricketMuted,
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(34.dp))
+                    Box(
+                        Modifier
+                            .height(60.dp)
+                            .width(267.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(CricketAccent)
+                            .clickable { isUnlocked = true }
+                            .padding(horizontal = 22.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "PRO starting at ₹69",
+                            color = Color(0xFF091002),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatCategoryContent(tabIndex: Int) {
+    val stats = when (tabIndex) {
+        0 -> battingStats
+        1 -> bowlingStats
+        2 -> fieldingStats
+        else -> captaincyStats
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        StatSection("Overall", stats)
+        StatSection("Tennis ball", stats, isTennis = true)
+    }
+}
+
+@Composable
+private fun StatSection(title: String, stats: List<StatItem>, isTennis: Boolean = false) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            if (isTennis) {
+                Image(
+                    painter = painterResource(R.drawable.badmintonlogo),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+            } else {
+                Box(
+                    Modifier
+                        .width(4.dp)
+                        .height(18.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color(0xFF246CE6))
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                title,
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.weight(1f)
+            )
+            if (!isTennis) {
+                Box(
+                    Modifier
+                        .height(32.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(R.drawable.groups),
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            colorFilter = ColorFilter.tint(CricketAccent)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Compare",
+                            color = CricketAccent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Image(
+                        painter = painterResource(R.drawable.network),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        colorFilter = ColorFilter.tint(CricketAccent)
+                    )
+                    Text("WW", color = CricketAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Image(
+                        painter = painterResource(R.drawable.list),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        colorFilter = ColorFilter.tint(Color.White.copy(alpha = 0.6f))
+                    )
+                }
+            }
+        }
+        
+        Spacer(Modifier.height(16.dp))
+        
+        StatGrid(stats)
+    }
+}
+
+@Composable
+private fun StatGrid(items: List<StatItem>) {
+    // Custom grid using Rows to avoid nested scrolling issues in LazyColumn if any
+    val rows = items.chunked(3)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        rows.forEach { rowItems ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowItems.forEach { item ->
+                    StatBox(item, Modifier.weight(1f))
+                }
+                // Fill empty slots if last row has fewer than 3 items
+                repeat(3 - rowItems.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatBox(item: StatItem, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .height(80.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(CricketPanel)
+            .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp)),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            item.value,
+            color = if (item.value.contains("%")) CricketAccent else Color.White,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            item.label,
+            color = CricketMuted,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+private val battingStats = listOf(
+    StatItem("MAT", "1"), StatItem("INNS", "1"), StatItem("NO", "1"),
+    StatItem("RUNS", "1"), StatItem("HS", "1*"), StatItem("AVG", "-"),
+    StatItem("SR", "100"), StatItem("30s", "0"), StatItem("50s", "0"),
+    StatItem("100s", "0"), StatItem("4s", "0"), StatItem("6s", "0"),
+    StatItem("DUCKS", "0"), StatItem("WON", "1"), StatItem("LOSS", "0")
+)
+
+private val bowlingStats = listOf(
+    StatItem("MAT", "1"), StatItem("INNS", "1"), StatItem("OVERS", "1"),
+    StatItem("MAIDENS", "0"), StatItem("RUNS", "16"), StatItem("WKTS", "0"),
+    StatItem("BB", "0/16"), StatItem("3 WKTS", "0"), StatItem("5 WKTS", "0"),
+    StatItem("ECO", "16"), StatItem("SR", "0"), StatItem("AVG", "0"),
+    StatItem("WD", "0"), StatItem("NB", "0"), StatItem("DOTS", "3"),
+    StatItem("4S", "1"), StatItem("6S", "2")
+)
+
+private val fieldingStats = listOf(
+    StatItem("MAT", "1"), StatItem("CATCHES", "0"), StatItem("C.B", "0"),
+    StatItem("R/O", "0"), StatItem("ST", "0"), StatItem("ASST. R/O", "0"),
+    StatItem("BYES", "0")
+)
+
+private val captaincyStats = listOf(
+    StatItem("MAT", "1"), StatItem("TOSS WON", "1"),
+    StatItem("WIN %", "100.00%"), StatItem("LOSS %", "0.00%")
+)
 
 @Composable
 private fun HostTournamentPrompt() {
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(116.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF07111F), Color(0xFF081221), Color(0xFF061018))))
-            .border(1.dp, Color(0x253E4C60), RoundedCornerShape(10.dp))
-            .padding(horizontal = 18.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .clip(RoundedCornerShape(18.dp))
+            .background(CricketCard)
+            .border(1.dp, CricketStroke, RoundedCornerShape(18.dp))
+            .padding(20.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF0B1F42))
-                .border(1.dp, Color(0xFF1D5EF7), CircleShape),
-            contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Canvas(Modifier.size(20.dp)) {
-                val tint = Color(0xFFBFD8FF)
-                drawCircle(tint.copy(alpha = 0.2f), radius = size.minDimension * 0.46f, center = center)
-                drawCircle(tint, radius = size.minDimension * 0.36f, center = center, style = Stroke(width = 1.4.dp.toPx()))
-                drawLine(tint, Offset(size.width * 0.5f, size.height * 0.28f), Offset(size.width * 0.5f, size.height * 0.72f), strokeWidth = 1.4.dp.toPx(), cap = StrokeCap.Round)
-                drawLine(tint, Offset(size.width * 0.28f, size.height * 0.5f), Offset(size.width * 0.72f, size.height * 0.5f), strokeWidth = 1.4.dp.toPx(), cap = StrokeCap.Round)
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF1D5EF7).copy(alpha = 0.2f))
+                    .border(1.dp, Color(0xFF1D5EF7), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.jod),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    colorFilter = ColorFilter.tint(Color(0xFFBFD8FF))
+                )
             }
-        }
-        Spacer(Modifier.width(13.dp))
-        Text(
-            text = "Want to host\na\ntournament?",
-            color = Color.White,
-            fontSize = 19.sp,
-            lineHeight = 24.sp,
-            fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.weight(1f)
-        )
-        Box(
-            modifier = Modifier
-                .height(38.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(CricketAccent)
-                .padding(horizontal = 20.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("Register", color = Color(0xFF0A1204), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.width(16.dp))
+            Text(
+                text = "Want to host\na tournament?",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            Box(
+                modifier = Modifier
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(CricketAccent)
+                    .clickable { /* Handle register */ }
+                    .padding(horizontal = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Register",
+                    color = Color.Black,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
@@ -527,197 +1231,163 @@ private fun TournamentCard(tournament: CricketTournament) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFF060D18))
-            .border(1.dp, if (tournament.status == "LIVE") CricketAccent else CricketStroke, RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(18.dp))
+            .background(CricketCard)
+            .border(
+                1.dp,
+                if (tournament.status == "LIVE") CricketAccent else CricketStroke,
+                RoundedCornerShape(18.dp)
+            )
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(151.dp)
-                .background(Color(0xFF07111D))
+                .height(200.dp)
         ) {
             TournamentVisualPanel(tournament)
+
+            // Gradient overlay for title readability
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f)),
+                            startY = 300f
+                        )
+                    )
+            )
+
             TournamentStatusTag(
                 label = tournament.status,
                 live = tournament.status == "LIVE",
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 10.dp, end = 10.dp)
+                    .padding(12.dp)
             )
+
             Text(
                 tournament.name,
                 color = Color.White,
-                fontSize = 13.sp,
-                lineHeight = 15.sp,
-                fontWeight = FontWeight.ExtraBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(start = 12.dp, end = 12.dp, bottom = 13.dp)
+                    .padding(16.dp)
             )
         }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(57.dp)
-                .background(Brush.horizontalGradient(listOf(Color(0xFF050A12), Color(0xFF07111E), tournament.accent.copy(alpha = 0.12f))))
-                .padding(start = 12.dp, end = 10.dp),
+                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                TournamentMetaLine(tournament.date, calendar = true)
-                TournamentMetaLine(tournament.location, calendar = false)
+            Column(modifier = Modifier.weight(1f)) {
+                TournamentMetaLine(tournament.date, iconRes = R.drawable.calender)
+                Spacer(Modifier.height(6.dp))
+                TournamentMetaLine(tournament.location, iconRes = R.drawable.loca)
             }
-            TournamentArrow(tournament.accent)
+            TournamentArrow(if (tournament.status == "LIVE") CricketAccent else Color.White)
         }
     }
 }
 
 @Composable
 private fun TournamentVisualPanel(tournament: CricketTournament) {
-    Canvas(Modifier.fillMaxSize()) {
-        val base = when (tournament.visual) {
-            TournamentVisual.NEON -> Color(0xFF08345A)
-            TournamentVisual.FIELD -> Color(0xFF2E4B18)
-            TournamentVisual.TROPHY -> Color(0xFF23272D)
-            TournamentVisual.SLAM -> Color(0xFF0A2C54)
-        }
-        drawRect(base.copy(alpha = 0.68f))
-        drawRect(Color.Black.copy(alpha = if (tournament.visual == TournamentVisual.TROPHY) 0.62f else 0.32f))
-        drawCircle(tournament.accent.copy(alpha = 0.2f), radius = size.width * 0.55f, center = Offset(size.width * 0.78f, size.height * 0.18f))
-        drawCircle(CricketBlue.copy(alpha = 0.14f), radius = size.width * 0.46f, center = Offset(size.width * 0.15f, size.height * 0.04f))
-
-        when (tournament.visual) {
-            TournamentVisual.FIELD -> drawFieldScene(tournament.accent)
-            TournamentVisual.TROPHY -> drawTrophyScene()
-            TournamentVisual.SLAM -> drawSlamScene(tournament.accent)
-            TournamentVisual.NEON -> drawNeonStadium(tournament.accent)
-        }
-
-        drawRect(
-            Brush.verticalGradient(
-                listOf(Color.Transparent, Color.Black.copy(alpha = 0.18f), Color.Black.copy(alpha = 0.82f)),
-                startY = size.height * 0.28f,
-                endY = size.height
-            )
-        )
+    val imageRes = when (tournament.visual) {
+        TournamentVisual.NEON -> R.drawable.stadium
+        TournamentVisual.FIELD -> R.drawable.club_stadium
+        TournamentVisual.TROPHY -> R.drawable.trophyfull
+        TournamentVisual.SLAM -> R.drawable.cricketblast
     }
-}
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawNeonStadium(accent: Color) {
-    val stroke = 1.dp.toPx()
-    repeat(12) { index ->
-        val y = size.height * (0.12f + index * 0.045f)
-        drawLine(Color.White.copy(alpha = 0.08f), Offset(0f, y), Offset(size.width, y + 18.dp.toPx()), strokeWidth = stroke)
-    }
-    repeat(8) { index ->
-        val x = size.width * (index / 7f)
-        drawLine(accent.copy(alpha = 0.2f), Offset(x, size.height * 0.1f), Offset(size.width * 0.5f, size.height * 0.72f), strokeWidth = stroke)
-    }
-    drawOval(
-        color = Color.White.copy(alpha = 0.16f),
-        topLeft = Offset(size.width * 0.1f, size.height * 0.46f),
-        size = Size(size.width * 0.8f, size.height * 0.38f),
-        style = Stroke(width = 1.4.dp.toPx())
+    Image(
+        painter = painterResource(imageRes),
+        contentDescription = null,
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Crop
     )
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFieldScene(accent: Color) {
-    drawOval(
-        color = Color(0xFF6D8F27).copy(alpha = 0.55f),
-        topLeft = Offset(size.width * 0.04f, size.height * 0.48f),
-        size = Size(size.width * 0.92f, size.height * 0.43f)
-    )
-    drawOval(
-        color = Color(0xFF141B0F).copy(alpha = 0.34f),
-        topLeft = Offset(size.width * 0.18f, size.height * 0.56f),
-        size = Size(size.width * 0.64f, size.height * 0.25f),
-        style = Stroke(width = 1.2.dp.toPx())
-    )
-    repeat(4) { index ->
-        val x = size.width * (0.16f + index * 0.23f)
-        drawCircle(Color.White.copy(alpha = 0.72f), radius = 4.5.dp.toPx(), center = Offset(x, size.height * 0.18f))
-        drawLine(Color.White.copy(alpha = 0.18f), Offset(x, size.height * 0.2f), Offset(size.width * 0.5f, size.height * 0.58f), strokeWidth = 1.dp.toPx())
-    }
-    drawLine(accent.copy(alpha = 0.7f), Offset(size.width * 0.47f, size.height * 0.64f), Offset(size.width * 0.54f, size.height * 0.64f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-}
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrophyScene() {
-    val cup = Color.White.copy(alpha = 0.28f)
-    val left = size.width * 0.42f
-    val top = size.height * 0.23f
-    val w = size.width * 0.16f
-    val h = size.height * 0.34f
-    drawRoundRect(cup, Offset(left, top), Size(w, h * 0.56f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()), style = Stroke(width = 2.dp.toPx()))
-    drawLine(cup, Offset(size.width * 0.5f, top + h * 0.56f), Offset(size.width * 0.5f, top + h * 0.82f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-    drawLine(cup, Offset(size.width * 0.44f, top + h * 0.84f), Offset(size.width * 0.56f, top + h * 0.84f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-    drawLine(cup, Offset(size.width * 0.38f, top + h), Offset(size.width * 0.62f, top + h), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-    repeat(9) { index ->
-        val y = size.height * (0.18f + index * 0.07f)
-        drawLine(Color.White.copy(alpha = 0.035f), Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
-    }
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSlamScene(accent: Color) {
-    repeat(9) { index ->
-        val y = size.height * (0.18f + index * 0.065f)
-        drawLine(Color.White.copy(alpha = 0.06f), Offset(size.width * 0.02f, y), Offset(size.width * 0.92f, y + 8.dp.toPx()), strokeWidth = 1.dp.toPx())
-    }
-    repeat(10) { index ->
-        val startX = size.width * (0.12f + index * 0.075f)
-        drawLine(
-            color = if (index % 2 == 0) accent.copy(alpha = 0.72f) else CricketAccent.copy(alpha = 0.58f),
-            start = Offset(startX, size.height * 0.78f),
-            end = Offset(startX + size.width * 0.22f, size.height * 0.28f),
-            strokeWidth = 3.dp.toPx(),
-            cap = StrokeCap.Round
-        )
-    }
-}
 
 @Composable
 private fun TournamentStatusTag(label: String, live: Boolean, modifier: Modifier = Modifier) {
+    val bgColor = when {
+        live -> CricketAccent
+        label == "PAST" -> Color.White.copy(alpha = 0.1f)
+        else -> CricketStroke.copy(alpha = 0.4f)
+    }
+    val textColor = when {
+        live -> Color.Black
+        label == "PAST" -> Color.White.copy(alpha = 0.5f)
+        else -> Color.White
+    }
+
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(3.dp))
-            .background(if (live) CricketAccent else Color(0xFFDDE7FF))
+            .clip(RoundedCornerShape(6.dp))
+            .background(bgColor)
             .padding(horizontal = 10.dp, vertical = 5.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, color = Color(0xFF071007), fontSize = 7.5.sp, fontWeight = FontWeight.ExtraBold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (live) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black)
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(
+                label,
+                color = textColor,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 
 @Composable
-private fun TournamentMetaLine(text: String, calendar: Boolean) {
+private fun TournamentMetaLine(text: String, iconRes: Int) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Canvas(Modifier.size(10.dp)) {
-            val tint = Color(0xFFB7C4C8)
-            if (calendar) {
-                drawRect(tint.copy(alpha = 0.18f), topLeft = Offset(size.width * 0.16f, size.height * 0.22f), size = Size(size.width * 0.68f, size.height * 0.62f), style = Stroke(width = 1.dp.toPx()))
-                drawLine(tint, Offset(size.width * 0.16f, size.height * 0.4f), Offset(size.width * 0.84f, size.height * 0.4f), strokeWidth = 1.dp.toPx())
-            } else {
-                val path = Path().apply {
-                    moveTo(size.width * 0.5f, size.height * 0.92f)
-                    cubicTo(size.width * 0.2f, size.height * 0.58f, size.width * 0.25f, size.height * 0.18f, size.width * 0.5f, size.height * 0.18f)
-                    cubicTo(size.width * 0.75f, size.height * 0.18f, size.width * 0.8f, size.height * 0.58f, size.width * 0.5f, size.height * 0.92f)
-                }
-                drawPath(path, tint, style = Stroke(width = 1.dp.toPx(), cap = StrokeCap.Round))
-                drawCircle(tint, radius = 1.dp.toPx(), center = Offset(size.width * 0.5f, size.height * 0.43f))
-            }
-        }
-        Spacer(Modifier.width(6.dp))
-        Text(text, color = Color(0xFFD7E0E3), fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+        Image(
+            painter = painterResource(iconRes),
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            colorFilter = ColorFilter.tint(Color.White.copy(alpha = 0.6f))
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = text,
+            color = Color.White.copy(alpha = 0.8f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 
 @Composable
 private fun TournamentArrow(accent: Color) {
     Canvas(Modifier.size(24.dp)) {
-        drawLine(accent, Offset(size.width * 0.36f, size.height * 0.2f), Offset(size.width * 0.68f, size.height * 0.5f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-        drawLine(accent, Offset(size.width * 0.68f, size.height * 0.5f), Offset(size.width * 0.36f, size.height * 0.8f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+        drawLine(
+            accent,
+            Offset(size.width * 0.36f, size.height * 0.2f),
+            Offset(size.width * 0.68f, size.height * 0.5f),
+            strokeWidth = 2.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            accent,
+            Offset(size.width * 0.68f, size.height * 0.5f),
+            Offset(size.width * 0.36f, size.height * 0.8f),
+            strokeWidth = 2.dp.toPx(),
+            cap = StrokeCap.Round
+        )
     }
 }
 
@@ -726,41 +1396,50 @@ private fun CreateTeamPrompt() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(105.dp)
-            .clip(RoundedCornerShape(13.dp))
-            .background(Color(0xFF08101C))
-            .border(1.dp, Color(0x263D4C5F), RoundedCornerShape(13.dp))
+            .clip(RoundedCornerShape(18.dp))
+            .background(ClubCardBlack)
+            .border(1.dp, ClubCardBorder, RoundedCornerShape(18.dp))
             .drawBehind {
                 drawLine(
                     color = CricketAccent,
-                    start = Offset(1.dp.toPx(), 9.dp.toPx()),
-                    end = Offset(1.dp.toPx(), size.height - 9.dp.toPx()),
-                    strokeWidth = 4.dp.toPx(),
+                    start = Offset(4.dp.toPx(), 16.dp.toPx()),
+                    end = Offset(4.dp.toPx(), size.height - 16.dp.toPx()),
+                    strokeWidth = 6.dp.toPx(),
                     cap = StrokeCap.Round
                 )
             }
-            .padding(start = 17.dp, end = 13.dp),
+            .padding(start = 24.dp, top = 20.dp, end = 20.dp, bottom = 20.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text("Want to create a new\nteam?", color = Color.White, fontSize = 18.sp, lineHeight = 22.sp, fontWeight = FontWeight.ExtraBold)
             Text(
-                "Start your own legacy in the\ncommunity.",
-                color = Color(0xFFD1D8DE),
+                "Want to create a new team?",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Start your own legacy in the community.",
+                color = ClubMuted,
                 fontSize = 14.sp,
-                lineHeight = 19.sp,
-                modifier = Modifier.padding(top = 7.dp)
+                modifier = Modifier.padding(top = 8.dp)
             )
         }
         Box(
             modifier = Modifier
-                .height(39.dp)
-                .clip(RoundedCornerShape(11.dp))
+                .height(40.dp)
+                .clip(RoundedCornerShape(16.dp))
                 .background(CricketAccent)
-                .padding(horizontal = 24.dp),
+                .clickable { /* Create team action */ }
+                .padding(horizontal = 20.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text("Create", color = Color(0xFF071007), fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+            Text(
+                "Create",
+                color = Color.Black,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.W800
+            )
         }
     }
 }
@@ -777,19 +1456,25 @@ private fun TeamFilterPills() {
         labels.forEachIndexed { index, label ->
             Box(
                 modifier = Modifier
-                    .height(42.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(if (index == 0) CricketAccent else Color(0xFF151A24))
-                    .border(1.dp, if (index == 0) Color(0xFFE5FF66) else Color(0xFF3A4352), RoundedCornerShape(22.dp))
-                    .padding(horizontal = if (index == 0) 22.dp else 24.dp),
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(if (index == 0) CricketAccent else Color.White.copy(alpha = 0.1f))
+                    .then(
+                        if (index != 0) Modifier.border(
+                            1.dp,
+                            ClubCardBorder,
+                            RoundedCornerShape(20.dp)
+                        ) else Modifier
+                    )
+                    .clickable { /* Filter action */ }
+                    .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     label,
-                    color = if (index == 0) Color(0xFF071007) else Color(0xFFE1E7EC),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1
+                    color = if (index == 0) Color.Black else Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold
                 )
             }
         }
@@ -801,21 +1486,27 @@ private fun QuickSearchBar() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .clip(RoundedCornerShape(13.dp))
-            .background(Color(0xFF151A21))
-            .border(1.dp, Color(0xFF3B4451), RoundedCornerShape(13.dp))
+            .height(56.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(ClubCardBlack)
+            .border(1.dp, ClubCardBorder, RoundedCornerShape(18.dp))
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.CenterStart
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Canvas(Modifier.size(17.dp)) {
-                val tint = Color(0xFF98A4B3)
-                drawCircle(tint, radius = size.minDimension * 0.31f, center = Offset(size.width * 0.43f, size.height * 0.43f), style = Stroke(width = 1.7.dp.toPx()))
-                drawLine(tint, Offset(size.width * 0.66f, size.height * 0.66f), Offset(size.width * 0.88f, size.height * 0.88f), strokeWidth = 1.7.dp.toPx(), cap = StrokeCap.Round)
-            }
-            Spacer(Modifier.width(10.dp))
-            Text("Quick search", color = Color(0xFFD8DEE7), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+            Image(
+                painter = painterResource(R.drawable.search),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                colorFilter = ColorFilter.tint(ClubMuted)
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                "Quick search",
+                color = ClubMuted,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }
@@ -825,22 +1516,22 @@ private fun ActiveTeamsHeader(teamCount: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 37.dp, bottom = 2.dp),
+            .padding(top = 24.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .width(5.dp)
-                .height(21.dp)
-                .clip(RoundedCornerShape(3.dp))
+                .width(4.dp)
+                .height(16.dp)
+                .clip(RoundedCornerShape(2.dp))
                 .background(CricketAccent)
         )
-        Spacer(Modifier.width(7.dp))
+        Spacer(Modifier.width(8.dp))
         Text(
-            if (teamCount == 1) "YOUR TEAM" else "YOUR TEAMS ($teamCount)",
+            "ACTIVE TEAMS",
             color = CricketAccent,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.ExtraBold
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold
         )
     }
 }
@@ -850,18 +1541,23 @@ private fun NoJoinedTeamsCard() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF09111E))
-            .border(1.dp, CricketStroke, RoundedCornerShape(12.dp))
-            .padding(20.dp),
+            .clip(RoundedCornerShape(18.dp))
+            .background(ClubCardBlack)
+            .border(1.dp, ClubCardBorder, RoundedCornerShape(18.dp))
+            .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("No teams joined yet", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+        Text(
+            "No teams joined yet",
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold
+        )
         Text(
             "Teams you join will appear here automatically.",
-            color = CricketMuted,
-            fontSize = 11.sp,
-            modifier = Modifier.padding(top = 6.dp),
+            color = ClubMuted,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(top = 8.dp),
             textAlign = TextAlign.Center
         )
     }
@@ -870,80 +1566,85 @@ private fun NoJoinedTeamsCard() {
 @Composable
 private fun TeamCard(team: CricketTeam) {
     val context = LocalContext.current
-    var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(69.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF09111E))
-            .border(1.dp, Color(0x272E3A4A), RoundedCornerShape(12.dp))
-            .clickable { context.startActivity(Intent(context, TeamProfileActivity::class.java).putExtra(TeamProfileActivity.EXTRA_TEAM_ID, team.id)) }
-            .padding(start = 14.dp, end = 16.dp),
+            .clip(RoundedCornerShape(18.dp))
+            .background(ClubCardBlack)
+            .border(1.dp, ClubCardBorder, RoundedCornerShape(18.dp))
+            .clickable {
+                context.startActivity(
+                    Intent(
+                        context,
+                        TeamProfileActivity::class.java
+                    ).putExtra(TeamProfileActivity.EXTRA_TEAM_ID, team.id)
+                )
+            }
+            .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(48.dp)
+                .size(56.dp)
                 .clip(CircleShape)
-                .background(team.accent)
-                .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape),
+                .background(team.accent),
             contentAlignment = Alignment.Center
         ) {
-            Canvas(Modifier.fillMaxSize()) {
-                drawCircle(Color.White.copy(alpha = 0.12f), radius = size.minDimension * 0.48f, center = Offset(size.width * 0.34f, size.height * 0.24f))
-                drawCircle(Color.Black.copy(alpha = 0.12f), radius = size.minDimension * 0.48f, center = Offset(size.width * 0.7f, size.height * 0.72f))
-            }
-            Text(team.initials, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(team.name, color = Color.White, fontSize = 15.sp, lineHeight = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(modifier = Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Canvas(Modifier.size(12.dp)) {
-                    val tint = Color(0xFFB9C3CB)
-                    val path = Path().apply {
-                        moveTo(size.width * 0.5f, size.height * 0.92f)
-                        cubicTo(size.width * 0.2f, size.height * 0.58f, size.width * 0.25f, size.height * 0.18f, size.width * 0.5f, size.height * 0.18f)
-                        cubicTo(size.width * 0.75f, size.height * 0.18f, size.width * 0.8f, size.height * 0.58f, size.width * 0.5f, size.height * 0.92f)
-                    }
-                    drawPath(path, tint, style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round))
-                    drawCircle(tint, radius = 1.1.dp.toPx(), center = Offset(size.width * 0.5f, size.height * 0.43f))
-                }
-                Spacer(Modifier.width(4.dp))
-                Text(team.location, color = Color(0xFFD1D8DE), fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-        Box(contentAlignment = Alignment.CenterEnd) {
             Text(
-                "⋮",
-                color = CricketAccent,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.ExtraBold,
-                modifier = Modifier.clickable { menuExpanded = true }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp)
+                team.initials,
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
             )
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false },
-                modifier = Modifier.background(Color(0xFF121A22), RoundedCornerShape(10.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                team.name,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                DropdownMenuItem(
-                    text = { Text("Leave", color = Color(0xFFFF5A5F), fontWeight = FontWeight.Bold) },
-                    onClick = { menuExpanded = false }
+                Image(
+                    painter = painterResource(R.drawable.loca),
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    colorFilter = ColorFilter.tint(ClubMuted)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    team.location,
+                    color = ClubMuted,
+                    fontSize = 14.sp
                 )
             }
         }
+        Text(
+            "⋮",
+            color = Color.White.copy(alpha = 0.3f),
+            fontSize = 20.sp
+        )
     }
 }
 
 @Composable
 private fun StatsMatrix() {
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
             StatTile("Matches", "42", "+8 this month", CricketAccent, Modifier.weight(1f))
             StatTile("Win Rate", "68%", "last 12 games", CricketBlue, Modifier.weight(1f))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
             StatTile("Runs", "5.8K", "team total", Color(0xFFFFCA64), Modifier.weight(1f))
             StatTile("Wickets", "214", "all squads", Color(0xFFFF8FB0), Modifier.weight(1f))
         }
@@ -951,7 +1652,13 @@ private fun StatsMatrix() {
 }
 
 @Composable
-private fun StatTile(label: String, value: String, note: String, accent: Color, modifier: Modifier = Modifier) {
+private fun StatTile(
+    label: String,
+    value: String,
+    note: String,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
     Column(
         modifier = modifier
             .height(108.dp)
@@ -962,7 +1669,13 @@ private fun StatTile(label: String, value: String, note: String, accent: Color, 
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Text(label, color = CricketMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-        Text(value, color = Color.White, fontSize = 25.sp, lineHeight = 28.sp, fontWeight = FontWeight.ExtraBold)
+        Text(
+            value,
+            color = Color.White,
+            fontSize = 25.sp,
+            lineHeight = 28.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
         Text(note, color = accent, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
@@ -974,14 +1687,40 @@ private fun MomentumCard() {
             .fillMaxWidth()
             .height(132.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF07101A), Color(0xFF0B2038), Color(0xFF172608))))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF07101A),
+                        Color(0xFF0B2038),
+                        Color(0xFF172608)
+                    )
+                )
+            )
             .border(1.dp, CricketStroke, RoundedCornerShape(12.dp))
             .padding(14.dp)
     ) {
         Column {
-            Text("AI Momentum", color = CricketAccent, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold)
-            Text("Syndicate form is climbing", color = Color.White, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 7.dp))
-            Text("Bowling economy improved by 11% across the last five matches.", color = CricketMuted, fontSize = 10.sp, lineHeight = 14.sp, modifier = Modifier.padding(top = 8.dp))
+            Text(
+                "AI Momentum",
+                color = CricketAccent,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Text(
+                "Syndicate form is climbing",
+                color = Color.White,
+                fontSize = 17.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.padding(top = 7.dp)
+            )
+            Text(
+                "Bowling economy improved by 11% across the last five matches.",
+                color = CricketMuted,
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+                modifier = Modifier.padding(top = 8.dp)
+            )
         }
     }
 }
@@ -997,10 +1736,22 @@ private fun TimelineCard() {
             .padding(13.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text("Saved scorecards", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
-        listOf("Phoenix XI beat Titans CC", "Royals chased 132 in 18.4 overs", "Warriors CC lifted Weekend Cup").forEach {
+        Text(
+            "Saved scorecards",
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+        listOf(
+            "Phoenix XI beat Titans CC",
+            "Royals chased 132 in 18.4 overs",
+            "Warriors CC lifted Weekend Cup"
+        ).forEach {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(CricketAccent))
+                Box(Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(CricketAccent))
                 Spacer(Modifier.width(9.dp))
                 Text(it, color = Color(0xFFDDE7E3), fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
@@ -1020,27 +1771,29 @@ private fun HeaderMenuButton(onMenuClick: () -> Unit) {
         Canvas(Modifier.size(18.dp)) {
             val tint = Color(0xFF8E9E99)
             val stroke = 1.8.dp.toPx()
-            drawLine(tint, Offset(size.width * 0.16f, size.height * 0.28f), Offset(size.width * 0.84f, size.height * 0.28f), strokeWidth = stroke, cap = StrokeCap.Round)
-            drawLine(tint, Offset(size.width * 0.16f, size.height * 0.5f), Offset(size.width * 0.84f, size.height * 0.5f), strokeWidth = stroke, cap = StrokeCap.Round)
-            drawLine(tint, Offset(size.width * 0.16f, size.height * 0.72f), Offset(size.width * 0.84f, size.height * 0.72f), strokeWidth = stroke, cap = StrokeCap.Round)
+            drawLine(
+                tint,
+                Offset(size.width * 0.16f, size.height * 0.28f),
+                Offset(size.width * 0.84f, size.height * 0.28f),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                tint,
+                Offset(size.width * 0.16f, size.height * 0.5f),
+                Offset(size.width * 0.84f, size.height * 0.5f),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                tint,
+                Offset(size.width * 0.16f, size.height * 0.72f),
+                Offset(size.width * 0.84f, size.height * 0.72f),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
         }
     }
 }
 
-@Composable
-private fun HeaderBell() {
-    Canvas(Modifier.size(21.dp)) {
-        val tint = Color(0xFF8E9E99)
-        val stroke = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round)
-        val bell = Path().apply {
-            moveTo(size.width * 0.28f, size.height * 0.61f)
-            cubicTo(size.width * 0.3f, size.height * 0.34f, size.width * 0.38f, size.height * 0.22f, size.width * 0.5f, size.height * 0.22f)
-            cubicTo(size.width * 0.62f, size.height * 0.22f, size.width * 0.7f, size.height * 0.34f, size.width * 0.72f, size.height * 0.61f)
-            lineTo(size.width * 0.8f, size.height * 0.74f)
-            lineTo(size.width * 0.2f, size.height * 0.74f)
-            close()
-        }
-        drawPath(bell, tint, style = stroke)
-        drawLine(tint, Offset(size.width * 0.43f, size.height * 0.84f), Offset(size.width * 0.57f, size.height * 0.84f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-    }
-}
+
