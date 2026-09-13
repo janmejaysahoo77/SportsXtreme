@@ -175,12 +175,8 @@ fun CreateClubStepOneScreen(onBack: () -> Unit, onContinue: () -> Unit) {
             // Pro Tip
             StepOneProTip()
 
-            Spacer(modifier = Modifier.height(32.dp))
 
-            // Profile Strength
-            ProfileStrengthSection()
 
-            Spacer(modifier = Modifier.height(40.dp))
         }
     }
 }
@@ -691,48 +687,6 @@ fun StepOneProTip() {
     }
 }
 
-@Composable
-fun ProfileStrengthSection() {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                Icons.Default.RemoveRedEye,
-                contentDescription = null,
-                tint = ColorTextPrimary,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = stringResource(R.string.profile_strength_label),
-                color = ColorTextPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(CircleShape)
-                .background(ColorCardBorder)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.3f)
-                    .fillMaxHeight()
-                    .clip(CircleShape)
-                    .background(ColorLime)
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = stringResource(R.string.profile_strength_hint),
-            color = ColorTextSecondary,
-            fontSize = 10.sp
-        )
-    }
-}
 
 @Composable
 fun StepOneBottomBar(onContinue: () -> Unit) {

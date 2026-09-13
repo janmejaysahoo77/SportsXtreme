@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,18 +30,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.List
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LocationOn
-import androidx.compose.material.icons.rounded.Menu
-import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.NearMe
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,12 +64,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -80,8 +84,7 @@ import com.example.sportsxtreme.presentation.profile.Lime
 
 /**
  * Professional Google UI/UX implementation for Discover Clubs.
- * Enhanced with interactive search, single selectable tags, and refined stats UI.
- * Now uses professional club logos for Warriors, Royal Kings, and Speedster Academy.
+ * Matches the requested image design precisely.
  */
 class DiscoverClubsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -101,7 +104,7 @@ private val ColorSurface = Color(0xFF121619)
 private val ColorPrimary = Color(0xFFBEFF18) // Neon Lime
 private val ColorTextPrimary = Color.White
 private val ColorTextSecondary = Color(0xFF969DA0)
-private val ColorDivider = Color(0xFF2F3639)
+private val ColorDivider = Color(0xFF272B27)
 private val ColorVerifiedBlue = Color(0xFF3698FF)
 
 @Composable
@@ -120,9 +123,9 @@ fun SportsXtremeTheme(content: @Composable () -> Unit) {
 
 @Composable
 fun DiscoverClubsScreen(onBack: () -> Unit) {
-    var selectedFilter by remember { mutableStateOf("Corporate") }
+    var selectedFilter by remember { mutableStateOf("All Clubs") }
     var searchQuery by remember { mutableStateOf("") }
-    var sortBy by remember { mutableStateOf("Distance") }
+    var sortBy by remember { mutableStateOf("Popular") }
 
     Scaffold(
         topBar = { DiscoverTopBar(onBack) },
@@ -134,77 +137,63 @@ fun DiscoverClubsScreen(onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = 16.dp)
         ) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             SearchField(searchQuery) { searchQuery = it }
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             FilterSection(selectedFilter) { selectedFilter = it }
             Spacer(modifier = Modifier.height(24.dp))
-            LocationBanner()
+
+            FeaturedClubSection()
+
             Spacer(modifier = Modifier.height(32.dp))
-            SectionHeader(sortBy) { sortBy = it }
+
+            AllClubsHeader(sortBy) { sortBy = it }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // Club List Items
             ClubCard(
-                name = stringResource(R.string.club_warriors_name),
+                name = "Warriors Cricket Club",
                 logoResId = R.drawable.delhi,
-                location = stringResource(R.string.club_warriors_loc),
-                distance = "1.2 km",
-                description = stringResource(R.string.club_warriors_desc),
-                stats = listOf(
-                    "2.1K" to R.string.stat_followers,
-                    "235" to R.string.stat_members,
-                    "12" to R.string.stat_tournaments,
-                    "4.9" to R.string.stat_rating
+                location = "CUTTACK, ODISHA",
+                description = "A competitive cricket club focused on performance, discipline and...",
+                stats = mapOf(
+                    "Tournaments" to "12",
+                    "Matches" to "42",
+                    "Members" to "235",
+                    "Rating" to "4.9"
                 ),
-                tags = listOf(
-                    R.string.tag_verified,
-                    R.string.tag_tournament_organizer,
-                    R.string.tag_academy,
-                    R.string.tag_own_ground
-                )
+                tags = listOf("VERIFIED", "ACADEMY", "COACHING AVAILABLE", "WOMAN'S TEAM")
             )
             Spacer(modifier = Modifier.height(16.dp))
             ClubCard(
-                name = stringResource(R.string.club_royal_kings_name),
+                name = "Royal Kings Cricket Club",
                 logoResId = R.drawable.rcb,
-                location = stringResource(R.string.club_royal_kings_loc),
-                distance = "2.7 km",
-                description = stringResource(R.string.club_royal_kings_desc),
-                stats = listOf(
-                    "1.8K" to R.string.stat_followers,
-                    "168" to R.string.stat_members,
-                    "8" to R.string.stat_tournaments,
-                    "4.7" to R.string.stat_rating
+                location = "PURI, ODISHA",
+                description = "Uniting talent and passion for cricket. Join us and be a part of the legacy.",
+                stats = mapOf(
+                    "Tournaments" to "8",
+                    "Matches" to "28",
+                    "Members" to "162",
+                    "Rating" to "4.7"
                 ),
-                tags = listOf(
-                    R.string.tag_verified,
-                    R.string.tag_youth_academy,
-                    R.string.tag_coaching_available,
-                    R.string.tag_cricket_ground
-                )
+                tags = listOf("VERIFIED", "ACADEMY", "COACHING AVAILABLE", "WOMAN'S TEAM")
             )
             Spacer(modifier = Modifier.height(16.dp))
             ClubCard(
-                name = stringResource(R.string.club_speedster_name),
+                name = "Speedster Cricket Academy",
                 logoResId = R.drawable.gujarat,
-                location = stringResource(R.string.club_speedster_loc),
-                distance = "3.4 km",
-                description = stringResource(R.string.club_speedster_desc),
-                stats = listOf(
-                    "1.5K" to R.string.stat_followers,
-                    "310" to R.string.stat_members,
-                    "15" to R.string.stat_tournaments,
-                    "4.8" to R.string.stat_rating
+                location = "BHUBANESWAR, ODISHA",
+                description = "Professional coaching for all age groups. Building future champions.",
+                stats = mapOf(
+                    "Tournaments" to "15",
+                    "Matches" to "35",
+                    "Members" to "310",
+                    "Rating" to "4.8"
                 ),
-                tags = listOf(
-                    R.string.tag_verified,
-                    R.string.tag_academy,
-                    R.string.tag_coaching_available,
-                    R.string.tag_womens_team
-                )
+                tags = listOf("VERIFIED", "ACADEMY", "COACHING AVAILABLE", "WOMAN'S TEAM")
             )
             Spacer(modifier = Modifier.height(100.dp))
         }
@@ -217,7 +206,7 @@ fun DiscoverTopBar(onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 8.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onBack) {
@@ -233,29 +222,37 @@ fun DiscoverTopBar(onBack: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = stringResource(R.string.discover_clubs_header),
+                text = "DISCOVER CLUBS",
                 color = ColorTextPrimary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 1.sp
             )
             Text(
-                text = stringResource(R.string.discover_clubs_subheader),
+                text = "EXPLORE CRICKET COMMUNITIES",
                 color = ColorTextSecondary,
                 fontSize = 10.sp,
-                fontWeight = FontWeight.Medium,
+                fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp
             )
         }
 
-        Spacer(modifier = Modifier.width(16.dp))
-        Icon(
-            painter = painterResource(R.drawable.setting),
-            contentDescription = "Filter",
-            tint = ColorTextPrimary,
-            modifier = Modifier.size(24.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
+        IconButton(onClick = { }) {
+            Icon(
+                Icons.Rounded.Search,
+                contentDescription = "Search",
+                tint = ColorTextPrimary,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        IconButton(onClick = { }) {
+            Icon(
+                Icons.Default.FilterList,
+                contentDescription = "Filter",
+                tint = ColorTextPrimary,
+                modifier = Modifier.size(24.dp)
+            )
+        }
     }
 }
 
@@ -264,17 +261,14 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, Color(45, 51, 46), shape = RoundedCornerShape(16.dp))
-            .height(56.dp)
-            .background(Color.DarkGray.copy(alpha = 0.1f))
-            .clip(
-                RoundedCornerShape(16.dp)
-            )
+            .height(50.dp)
+            .background(ColorSurface, RoundedCornerShape(12.dp))
+            .border(1.dp, ColorDivider, shape = RoundedCornerShape(12.dp))
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            Icons.Default.Search,
+            Icons.Rounded.Search,
             contentDescription = null,
             tint = ColorTextSecondary,
             modifier = Modifier.size(20.dp)
@@ -283,7 +277,7 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
         Box(modifier = Modifier.weight(1f)) {
             if (query.isEmpty()) {
                 Text(
-                    text = stringResource(R.string.search_clubs_hint),
+                    text = "Search clubs, locations, academies...",
                     color = ColorTextSecondary,
                     fontSize = 14.sp
                 )
@@ -301,11 +295,7 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
 
 @Composable
 fun FilterSection(selectedFilter: String, onFilterSelected: (String) -> Unit) {
-    val filters = listOf(
-        stringResource(R.string.filter_all_clubs),
-        stringResource(R.string.filter_corporate),
-        stringResource(R.string.filter_verified)
-    )
+    val filters = listOf("All Clubs", "corporate", "Verified")
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -314,33 +304,29 @@ fun FilterSection(selectedFilter: String, onFilterSelected: (String) -> Unit) {
             Box(
                 modifier = Modifier
                     .clip(CircleShape)
-                    .border(1.dp, if(isSelected) Lime else Color(45, 51, 46) , shape = CircleShape)
-                    .background(if (isSelected) ColorPrimary else Color.DarkGray.copy(alpha = 0.1f))
+                    .background(if (isSelected) ColorPrimary else ColorSurface)
+                    .border(
+                        1.dp,
+                        if (isSelected) ColorPrimary else ColorDivider,
+                        shape = CircleShape
+                    )
                     .clickable { onFilterSelected(filter) }
-                    .padding(horizontal = 24.dp, vertical = 10.dp)
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (filter == stringResource(R.string.filter_all_clubs)) {
+                    if (filter == "Verified") {
                         Icon(
-                            Icons.Rounded.LocationOn,
+                            Icons.Rounded.Check,
                             contentDescription = null,
                             tint = if (isSelected) Color.Black else ColorTextSecondary,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(14.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                    } else if (filter == stringResource(R.string.filter_verified)) {
-                        Icon(
-                            Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            tint = if (isSelected) Color.Black else ColorTextSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                     }
                     Text(
-                        text = filter,
+                        text = if (filter == "All Clubs") filter else filter.lowercase(),
                         color = if (isSelected) Color.Black else ColorTextSecondary,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -350,83 +336,299 @@ fun FilterSection(selectedFilter: String, onFilterSelected: (String) -> Unit) {
 }
 
 @Composable
-fun LocationBanner() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, Color(45, 51, 46), shape = RoundedCornerShape(16.dp))
-            .height(82.dp)
-            .background(Color.DarkGray.copy(alpha = 0.1f))
-            .clip(
-                RoundedCornerShape(16.dp)
-            )
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(ColorPrimary)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
+fun FeaturedClubSection() {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.TrendingUp,
+                    contentDescription = null,
+                    tint = ColorPrimary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "FEATURED CLUB",
+                    color = ColorTextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp
+                )
+            }
             Text(
-                text = stringResource(R.string.showing_clubs_near),
-                color = ColorTextSecondary,
-                fontSize = 10.sp
-            )
-            Text(
-                text = stringResource(R.string.location_bhubaneswar),
-                color = ColorTextPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
+                text = "VIEW ALL >",
+                color = ColorPrimary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { }
             )
         }
-        Icon(
-            Icons.Rounded.LocationOn,
-            contentDescription = null,
-            tint = ColorPrimary,
-            modifier = Modifier.size(16.dp)
-        )
-        Spacer(modifier = Modifier.width(16.dp))
-        Text(
-            text = stringResource(R.string.change_location),
-            color = ColorPrimary,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Black,
-            textAlign = TextAlign.End,
-            modifier = Modifier.clickable { /* Location Action */ }
-        )
+        Spacer(modifier = Modifier.height(16.dp))
+        FeaturedClubCard()
     }
 }
 
 @Composable
-fun SectionHeader(sortBy: String, onSortChange: (String) -> Unit) {
+fun FeaturedClubCard() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            , // Increased height for professional spacing
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, ColorDivider),
+        colors = CardDefaults.cardColors(containerColor = ColorSurface)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Background Image Overlay
+            Image(
+                painter = painterResource(id = R.drawable.stadium),
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(0.15f),
+                contentScale = ContentScale.Crop
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Top: Tournament Badge
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Surface(
+                        color = Color(0xFF3E3615),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, Color(0xFFEAB308).copy(alpha = 0.3f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Star,
+                                contentDescription = null,
+                                tint = Color(0xFFEAB308),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "UPCOMING TOURNAMENT",
+                                color = Color(0xFFEAB308),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(
+                    modifier = Modifier.height(16.dp)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Logo Section with verified badge
+                    Box(modifier = Modifier.size(80.dp)) {
+                        Surface(
+                            modifier = Modifier
+                                .size(70.dp)
+                                .align(Alignment.Center),
+                            shape = CircleShape,
+                            color = Color.Black,
+                            border = BorderStroke(2.dp, Color.White.copy(alpha = 0.15f))
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.appicon),
+                                contentDescription = null,
+                                modifier = Modifier.padding(14.dp)
+                            )
+                        }
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = ColorVerifiedBlue,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .align(Alignment.BottomEnd)
+                                .background(ColorSurface, CircleShape)
+                                .padding(2.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Victory Cricket Club",
+                                color = Color.White,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                tint = ColorVerifiedBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.LocationOn,
+                                null,
+                                tint = ColorPrimary,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "BHUBANESWAR, ODISHA",
+                                color = ColorTextSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "A passionate cricket club focused on developing talent and promoting excellence in sports...",
+                            color = ColorTextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Spacer(
+                    modifier = Modifier.height(16.dp)
+                )
+                // Bottom: Stats and Call-to-Action
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+
+                    ) {
+                    // Stat grid
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        FeaturedStatItem("2.3K", "FOLLOWERS")
+                        FeaturedStatItem("24", "TOURNAMENTS")
+                        FeaturedStatItem("486", "MEMBERS")
+                        FeaturedStatItem("4.8", "RATING")
+                    }
+                    Spacer(
+                        modifier = Modifier.height(16.dp)
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier
+                        ) {
+                            repeat(4) { i ->
+                                Box(
+                                    modifier = Modifier
+                                        .padding(horizontal = 4.dp)
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (i == 0) ColorPrimary else ColorDivider)
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = { },
+                            colors = ButtonDefaults.buttonColors(containerColor = ColorPrimary),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                "View Club",
+                                color = Color.Black,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.W900
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward,
+                                null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RowScope.FeaturedStatItem(value: String, label: String) {
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+            .padding(vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(text = value, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text(
+                text = label,
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 7.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun AllClubsHeader(sortBy: String, onSortChange: (String) -> Unit) {
     var showMenu by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            Icons.Rounded.LocationOn,
-            contentDescription = null,
-            tint = ColorPrimary,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = stringResource(R.string.nearby_clubs_label),
-            color = ColorTextPrimary,
+            text = "ALL CLUBS",
+            color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Black
         )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = "(128)",
+            color = ColorTextSecondary,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold
+        )
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            text = stringResource(R.string.sort_by_label),
+            text = "SORT BY: ",
             color = ColorTextSecondary,
-            fontSize = 12.sp
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
         )
         Box {
             Row(
@@ -436,13 +638,12 @@ fun SectionHeader(sortBy: String, onSortChange: (String) -> Unit) {
                 Text(
                     text = sortBy,
                     color = ColorPrimary,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Spacer(modifier = Modifier.width(4.dp))
                 Icon(
-                    imageVector = if (showMenu) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
+                    Icons.Rounded.KeyboardArrowDown,
+                    null,
                     tint = ColorPrimary,
                     modifier = Modifier.size(18.dp)
                 )
@@ -452,7 +653,7 @@ fun SectionHeader(sortBy: String, onSortChange: (String) -> Unit) {
                 onDismissRequest = { showMenu = false },
                 modifier = Modifier.background(ColorSurface)
             ) {
-                listOf("Distance", "Popularity", "Rating").forEach { option ->
+                listOf("Popular", "Distance", "Rating").forEach { option ->
                     DropdownMenuItem(
                         text = { Text(option, color = ColorTextPrimary) },
                         onClick = {
@@ -471,222 +672,176 @@ fun ClubCard(
     name: String,
     logoResId: Int,
     location: String,
-    distance: String,
     description: String,
-    stats: List<Pair<String, Int>>,
-    tags: List<Int>
+    stats: Map<String, String>,
+    tags: List<String>
 ) {
-    var selectedTag by remember { mutableStateOf<Int?>(null) }
-
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(45, 51, 46)),
-        colors = CardDefaults.cardColors(containerColor = Color.DarkGray.copy(alpha = 0.1f)),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, ColorDivider),
+        colors = CardDefaults.cardColors(containerColor = ColorSurface),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.Top) {
-                // Club Logo Container with overlapping badge fixed
-                Box(modifier = Modifier.size(78.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(70.dp)
-                            .align(Alignment.BottomStart)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.Black),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Image(
-                            painter = painterResource(logoResId),
-                            contentDescription = name,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize().padding(8.dp)
-                        )
-                    }
-                    // Verified Badge - Now outside clipped logo box to prevent cutting
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(end = 4.dp, top = 4.dp)
-                            .size(24.dp)
-                            .clip(CircleShape)
-                            .background(ColorBackground)
-                            .padding(2.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            tint = ColorVerifiedBlue,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
+                Surface(
+                    modifier = Modifier.size(64.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Black,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+                ) {
+                    Image(
+                        painter = painterResource(logoResId),
+                        contentDescription = name,
+                        modifier = Modifier.padding(10.dp)
+                    )
                 }
 
                 Spacer(modifier = Modifier.width(16.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = name,
-                            color = ColorTextPrimary,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.weight(1f),
-                            lineHeight = 22.sp
-                        )
-                        Column(horizontalAlignment = Alignment.End) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Rounded.CheckCircle,
-                                    contentDescription = null,
-                                    tint = ColorPrimary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = distance,
-                                    color = ColorPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Black
-                                )
-                            }
-                            IconButton(onClick = {}, modifier = Modifier.size(24.dp)) {
-                                Icon(
-                                    Icons.Default.MoreVert,
-                                    contentDescription = null,
-                                    tint = ColorTextSecondary
-                                )
-                            }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = name,
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                Icons.Rounded.CheckCircle,
+                                null,
+                                tint = ColorVerifiedBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                        IconButton(onClick = { }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Rounded.MoreHoriz, null, tint = ColorTextSecondary)
                         }
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             Icons.Rounded.LocationOn,
-                            contentDescription = null,
+                            null,
                             tint = ColorPrimary,
                             modifier = Modifier.size(12.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = location, color = ColorTextSecondary, fontSize = 12.sp)
+                        Text(
+                            text = location,
+                            color = ColorTextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
                         text = description,
                         color = ColorTextSecondary,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Join Request Button
                     Button(
-                        onClick = {},
+                        onClick = { },
                         colors = ButtonDefaults.buttonColors(containerColor = ColorPrimary),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        modifier = Modifier.align(Alignment.End)
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.align(Alignment.End),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = stringResource(R.string.join_request_label),
+                            "Join Request",
                             color = Color.Black,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.align(Alignment.CenterVertically)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "↗", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            Icons.AutoMirrored.Rounded.Send,
+                            null,
+                            tint = Color.Black,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .rotate(-30f)
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Stats Row in Black Box Container
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ClubStatBox(stats["Tournaments"] ?: "0", "TOURNAMENTS")
+                ClubStatBox(stats["Members"] ?: "0", "MEMBERS")
+                ClubStatBox(stats["Matches"] ?: "0", "MATCHES")
+                ClubStatBox(stats["Rating"] ?: "0.0", "RATING", isRating = true)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth()
             ) {
-                stats.forEach { (value, labelRes) ->
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
+                tags.take(4).forEach { tag ->
+                    Surface(
+                        color = Color(0xFF1A1F23),
+                        shape = RoundedCornerShape(4.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            val icon = when (labelRes) {
-                                R.string.stat_followers -> Icons.Rounded.Person
-                                R.string.stat_members -> Icons.Rounded.Person
-                                R.string.stat_tournaments -> Icons.Rounded.Star
-                                R.string.stat_rating -> Icons.Rounded.Star
-                                else -> Icons.Rounded.Info
-                            }
-                            Icon(
-                                icon,
-                                contentDescription = null,
-                                tint = ColorPrimary,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = value,
-                                color = ColorTextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
                         Text(
-                            text = stringResource(labelRes),
-                            color = ColorTextSecondary,
+                            text = tag,
+                            color = if (tag == "VERIFIED") ColorVerifiedBlue else ColorTextSecondary,
                             fontSize = 8.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    if (stats.last() != (value to labelRes)) {
-                        Box(modifier = Modifier
-                            .width(1.dp)
-                            .height(24.dp)
-                            .background(ColorDivider))
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Single Selectable Tags in Card Container
-            FlowRow(
-                mainAxisSpacing = 8.dp,
-                crossAxisSpacing = 8.dp
-            ) {
-                tags.forEach { tagRes ->
-                    val isSelected = selectedTag == tagRes
-                    Card(
-                        modifier = Modifier
-                            .clickable {
-                                selectedTag = if (isSelected) null else tagRes
-                            },
-                        shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) ColorPrimary else Color.Transparent
-                        ),
-                        border = if (!isSelected) BorderStroke(1.dp, ColorDivider) else null
-                    ) {
-                        Text(
-                            text = stringResource(tagRes),
-                            color = if (isSelected) Color.Black else ColorTextSecondary,
-                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun RowScope.ClubStatBox(value: String, label: String, isRating: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                if (isRating) {
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(Icons.Rounded.Star, null, tint = Color.White, modifier = Modifier.size(10.dp))
+                }
+            }
+            Text(
+                text = label,
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 7.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
@@ -695,75 +850,30 @@ fun ClubCard(
 fun NearbyClubsFab() {
     Surface(
         onClick = {},
-        shape = CircleShape,
-        color = ColorPrimary,
-        modifier = Modifier.size(90.dp),
-        shadowElevation = 8.dp
+        color = Color.Transparent,
+        modifier = Modifier
+            .size(80.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(
-                Icons.Rounded.LocationOn,
-                contentDescription = null,
-                tint = Color.Black,
-                modifier = Modifier.size(24.dp)
-            )
+          Icon(
+              Icons.Rounded.LocationOn,
+              null,
+              tint = Lime,
+              modifier = Modifier.size(40.dp)
+          )
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "NEARBY\nCLUBS",
-                color = Color.Black,
-                fontSize = 10.sp,
+                color = Lime,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Black,
                 textAlign = TextAlign.Center,
-                lineHeight = 11.sp
+                lineHeight = 10.sp
             )
-        }
-    }
-}
-
-@Composable
-fun FlowRow(
-    mainAxisSpacing: androidx.compose.ui.unit.Dp,
-    crossAxisSpacing: androidx.compose.ui.unit.Dp,
-    content: @Composable () -> Unit
-) {
-    androidx.compose.ui.layout.Layout(content = content) { measurables, constraints ->
-        val placeables = measurables.map { it.measure(constraints) }
-        var rowWidth = 0
-        var rowHeight = 0
-        var totalHeight = 0
-        val rows = mutableListOf<List<androidx.compose.ui.layout.Placeable>>()
-        var currentRow = mutableListOf<androidx.compose.ui.layout.Placeable>()
-
-        placeables.forEach { placeable ->
-            if (rowWidth + placeable.width + mainAxisSpacing.toPx() > constraints.maxWidth) {
-                rows.add(currentRow)
-                totalHeight += rowHeight + crossAxisSpacing.toPx().toInt()
-                rowWidth = 0
-                rowHeight = 0
-                currentRow = mutableListOf()
-            }
-            currentRow.add(placeable)
-            rowWidth += (placeable.width + mainAxisSpacing.toPx()).toInt()
-            rowHeight = maxOf(rowHeight, placeable.height)
-        }
-        rows.add(currentRow)
-        totalHeight += rowHeight
-
-        layout(constraints.maxWidth, totalHeight) {
-            var y = 0
-            rows.forEach { row ->
-                var x = 0
-                var maxHeight = 0
-                row.forEach { placeable ->
-                    placeable.placeRelative(x, y)
-                    x += (placeable.width + mainAxisSpacing.toPx()).toInt()
-                    maxHeight = maxOf(maxHeight, placeable.height)
-                }
-                y += (maxHeight + crossAxisSpacing.toPx()).toInt()
-            }
         }
     }
 }
