@@ -499,9 +499,9 @@ class HomeScreenView @JvmOverloads constructor(
                 
                 // Sleek Capsule Design: Perfectly circular ends
                 background = GradientDrawable().apply {
-                    setColor(Color.argb(240, 10, 16, 28)) // Deep navy translucency
+                    setColor(Color.argb(235, 10, 10, 10)) // Deep alpha black
                     cornerRadius = dp(37).toFloat() // Perfectly semicircular for 74dp height
-                    setStroke(dp(1), Color.argb(40, 255, 255, 255))
+                    setStroke(dp(1), Color.argb(35, 255, 255, 255))
                 }
                 
                 // Enhanced shadow for the taller dock
