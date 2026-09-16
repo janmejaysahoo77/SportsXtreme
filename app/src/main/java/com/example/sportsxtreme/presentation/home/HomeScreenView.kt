@@ -13,8 +13,9 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import com.example.sportsxtreme.presentation.clubs.ClubLandingActivity
 import com.example.sportsxtreme.common.WindowInsetsUtils
-import android.content.Intent
 import android.content.Context
+import android.content.Intent
+import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -1119,7 +1120,15 @@ class HomeScreenView @JvmOverloads constructor(
             addView(TextView(context).apply { text = "MANAGE TOURNAMENT  ⊙"; gravity = Gravity.CENTER; textSize = 10f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.rgb(11, 24, 10))
                 background = roundedBackground(primary, dp(18))
                 isClickable = true
-                setOnClickListener { Toast.makeText(context, "Tournament management will be available soon", Toast.LENGTH_SHORT).show() }
+                isFocusable = true
+                setOnClickListener {
+                    val intent = Intent(context, RegisterTournamentFinalPageActivity::class.java)
+                        .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournament.id)
+                    if (context !is Activity) {
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                }
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(38)))
         }
     }
