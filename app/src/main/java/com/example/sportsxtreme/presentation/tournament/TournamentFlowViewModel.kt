@@ -27,7 +27,13 @@ class TournamentFlowViewModel @Inject constructor(private val repository: Tourna
         val current = _tournament.value ?: return@launch
         val result = repository.updateTournamentDetails(current.id, name, startDate, ground, ballType)
         if (result is Resource.Success) {
-            _tournament.value = current.copy(name = name, startDate = startDate, ground = ground, ballType = ballType)
+            _tournament.value = current.copy(
+                name = name,
+                startDate = startDate,
+                dateToBeAnnounced = startDate.isBlank(),
+                ground = ground,
+                ballType = ballType
+            )
         }
     }
 
