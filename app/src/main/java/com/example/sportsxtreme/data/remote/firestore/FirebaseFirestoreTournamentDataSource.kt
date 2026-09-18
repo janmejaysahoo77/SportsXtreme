@@ -49,6 +49,10 @@ class FirebaseFirestoreTournamentDataSource @Inject constructor(
             mapOf(
                 "name" to name,
                 "startDate" to startDate,
+                // The final-page editor is the source of truth for the start date.
+                // Keep this flag in sync so host lists don't continue displaying
+                // "To be announced" after a date has been entered.
+                "dateToBeAnnounced" to startDate.isBlank(),
                 "ground" to ground,
                 "ballType" to ballType
             ),

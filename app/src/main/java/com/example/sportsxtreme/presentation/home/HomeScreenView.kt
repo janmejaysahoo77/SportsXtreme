@@ -602,7 +602,8 @@ class HomeScreenView @JvmOverloads constructor(
                 MyCricketScreen(
                     onMenuClick = { openDrawer() },
                     onStartMatch = { context.startActivity(Intent(context, StartMatchActivity::class.java)) },
-                    initialTab = if (startInMyCricketTeams) 2 else 0
+                    initialTab = if (startInMyCricketTeams) 2 else 0,
+                    hostTournamentsViewModel = hostTournamentsViewModel
                 )
             }
         }
@@ -653,6 +654,53 @@ class HomeScreenView @JvmOverloads constructor(
                 }
             }
             return super.onInterceptTouchEvent(ev)
+        }
+    }
+
+    /** The Host screen's direct scroll parent handles swipes before child cards can click. */
+    private class HostTabScrollView(context: Context) : ScrollView(context) {
+        var onTabSwipe: ((swipedLeft: Boolean) -> Unit)? = null
+        private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+        private var downX = 0f
+        private var downY = 0f
+        private var isHorizontalSwipe = false
+
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.x
+                    downY = event.y
+                    isHorizontalSwipe = false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (isHorizontalSwipe) return true
+                    val deltaX = event.x - downX
+                    val deltaY = event.y - downY
+                    if (abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)) {
+                        isHorizontalSwipe = true
+                        // Cancel the child that received DOWN so a horizontal drag cannot
+                        // also trigger its click listener when the finger is released.
+                        val cancelEvent = MotionEvent.obtain(event).apply {
+                            action = MotionEvent.ACTION_CANCEL
+                        }
+                        super.dispatchTouchEvent(cancelEvent)
+                        cancelEvent.recycle()
+                        return true
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (isHorizontalSwipe) {
+                        onTabSwipe?.invoke(event.x < downX)
+                        isHorizontalSwipe = false
+                        return true
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    isHorizontalSwipe = false
+                    return true
+                }
+            }
+            return super.dispatchTouchEvent(event)
         }
     }
 
@@ -810,7 +858,8 @@ class HomeScreenView @JvmOverloads constructor(
                 orientation = LinearLayout.VERTICAL
                 addView(hostTopStrip(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)))
 
-                addView(ScrollView(context).apply {
+                lateinit var switchHostTab: (Int) -> Unit
+                val hostScroll = HostTabScrollView(context).apply {
                     clipToPadding = false
                     setPadding(0, 0, 0, dp(22))
 
@@ -862,35 +911,55 @@ class HomeScreenView @JvmOverloads constructor(
                         }
                         addView(hostContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-                        // Your Tournament tab content (empty card)
+                        // Your Tournament content stays in its original layout so Firestore
+                        // updates render exactly as they do in the existing Host list.
                         val yourTournamentContent = yourTournamentCard(context)
                         addView(yourTournamentContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                             leftMargin = dp(12)
                             rightMargin = dp(12)
                             topMargin = dp(18)
                         })
-                        yourTournamentContent.visibility = View.GONE
 
-                        // Tab switching
+                        yourTournamentContent.visibility = View.GONE
+                        var selectedHostTab = 0
+                        switchHostTab = switch@{ targetTab ->
+                            if (targetTab == selectedHostTab) return@switch
+
+                            val showYourTournament = targetTab == 1
+                            val outgoing = if (showYourTournament) hostContent else yourTournamentContent
+                            val incoming = if (showYourTournament) yourTournamentContent else hostContent
+                            val slideDistance = width.toFloat().takeIf { it > 0f }
+                                ?: resources.displayMetrics.widthPixels.toFloat()
+
+                            selectedHostTab = targetTab
+                            hostTabButton.isSelected = !showYourTournament
+                            yourTournamentTabButton.isSelected = showYourTournament
+                            updateHostTabStyle(hostTabButton, !showYourTournament)
+                            updateHostTabStyle(yourTournamentTabButton, showYourTournament)
+
+                            incoming.visibility = View.VISIBLE
+                            incoming.translationX = if (showYourTournament) slideDistance else -slideDistance
+                            incoming.alpha = 0.6f
+                            incoming.animate().translationX(0f).alpha(1f).setDuration(220).start()
+                            outgoing.animate().alpha(0f).setDuration(140).withEndAction {
+                                outgoing.visibility = View.GONE
+                                outgoing.alpha = 1f
+                            }.start()
+                        }
+
+                        // Tab switching by tap.
                         hostTabButton.setOnClickListener {
-                            hostTabButton.isSelected = true
-                            yourTournamentTabButton.isSelected = false
-                            updateHostTabStyle(hostTabButton, true)
-                            updateHostTabStyle(yourTournamentTabButton, false)
-                            hostContent.visibility = View.VISIBLE
-                            yourTournamentContent.visibility = View.GONE
+                            switchHostTab(0)
                         }
                         yourTournamentTabButton.setOnClickListener {
-                            hostTabButton.isSelected = false
-                            yourTournamentTabButton.isSelected = true
-                            updateHostTabStyle(hostTabButton, false)
-                            updateHostTabStyle(yourTournamentTabButton, true)
-                            hostContent.visibility = View.GONE
-                            yourTournamentContent.visibility = View.VISIBLE
+                            switchHostTab(1)
                         }
+
                         addView(View(context), LinearLayout.LayoutParams(1, dp(100)))
                     }, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+                }
+                hostScroll.onTabSwipe = { swipedLeft -> switchHostTab(if (swipedLeft) 1 else 0) }
+                addView(hostScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
             }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         }
     }
@@ -1094,8 +1163,8 @@ class HomeScreenView @JvmOverloads constructor(
             .filter { it.isNotBlank() }.joinToString(" • ")
         val teams = tournament.requirements.numberOfTeams.ifBlank { "Not set" }
         val startDate = when {
-            tournament.dateToBeAnnounced -> "To be announced"
             tournament.startDate.isNotBlank() -> tournament.startDate
+            tournament.dateToBeAnnounced -> "To be announced"
             else -> "Not set"
         }
         return LinearLayout(context).apply {
