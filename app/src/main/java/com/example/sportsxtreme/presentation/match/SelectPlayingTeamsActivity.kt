@@ -104,6 +104,22 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val isTournamentScheduleFlow = intent.getBooleanExtra(EXTRA_TOURNAMENT_SCHEDULE_FLOW, false)
+        if (isTournamentScheduleFlow) {
+            val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
+            setContent {
+                SelectPlayingTeamsScreen(
+                    match = null,
+                    teamA = null,
+                    teamB = null,
+                    onBack = { finish() },
+                    onOpenStartMatchPreview = { _, _ -> },
+                    onSelectTeamA = { openTournamentTeamsTab(tournamentId) },
+                    onSelectTeamB = { openTournamentTeamsTab(tournamentId) }
+                )
+            }
+            return
+        }
         val matchId = intent.getStringExtra(EXTRA_MATCH_ID).orEmpty()
         val teamA = intent.toSelectedTeam(EXTRA_TEAM_A_ID, EXTRA_TEAM_A_NAME)
         val teamB = intent.toSelectedTeam(EXTRA_TEAM_B_ID, EXTRA_TEAM_B_NAME)
@@ -176,6 +192,14 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         )
     }
 
+    private fun openTournamentTeamsTab(tournamentId: String) {
+        startActivity(
+            Intent(this, RegisterTournamentFinalPageActivity::class.java)
+                .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                .putExtra(RegisterTournamentFinalPageActivity.EXTRA_INITIAL_TAB, RegisterTournamentFinalPageActivity.TEAMS_TAB_INDEX)
+        )
+    }
+
     companion object {
         const val EXTRA_MATCH_ID = "match_id"
         const val EXTRA_TEAM_SLOT = "team_slot"
@@ -185,6 +209,7 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         const val EXTRA_TEAM_A_NAME = "team_a_name"
         const val EXTRA_TEAM_B_ID = "team_b_id"
         const val EXTRA_TEAM_B_NAME = "team_b_name"
+        const val EXTRA_TOURNAMENT_SCHEDULE_FLOW = "tournament_schedule_flow"
     }
 }
 

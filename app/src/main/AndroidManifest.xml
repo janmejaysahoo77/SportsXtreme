@@ -150,6 +150,9 @@
             android:name=".presentation.tournament.LeagueMatchSetupActivity"
             android:exported="false" />
         <activity
+            android:name=".presentation.tournament.ScheduleMatchActivity"
+            android:exported="false" />
+        <activity
             android:name=".presentation.tournament.TournamentRequirementsActivity"
             android:exported="false" />
         <activity
