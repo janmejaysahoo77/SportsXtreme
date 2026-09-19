@@ -62,23 +62,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import androidx.compose.ui.graphics.Color as ComposeColor
 
 class ClubLandingActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = Color.rgb(5, 7, 8)
-        window.navigationBarColor = Color.rgb(5, 7, 8)
+        window.statusBarColor = XtremeDarkBlueHex.toInt()
+        window.navigationBarColor = XtremeDarkBlueHex.toInt()
         setContent { ClubLandingScreen(onBack = ::finish) }
     }
 }
 
-private val Lime = ComposeColor(190, 255, 24)
-private val ScreenBlack = ComposeColor(5, 7, 8)
-private val CardBlack = ComposeColor(15, 17, 17)
-private val Muted = ComposeColor(162, 169, 164)
-private val CardBorder = ComposeColor(45, 51, 46)
+private val Lime = XtremeLime
+private val ScreenBlack = XtremeBgBlue
+private val CardBlack = XtremeCardBlue
+private val Muted = XtremeMuted
+private val CardBorder = XtremeCardBorder
 
 @Composable
 private fun ClubLandingScreen(onBack: () -> Unit) {

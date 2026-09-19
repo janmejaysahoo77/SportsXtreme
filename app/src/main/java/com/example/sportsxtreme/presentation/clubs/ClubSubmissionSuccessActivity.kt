@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 
 class ClubSubmissionSuccessActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,7 +75,7 @@ class ClubSubmissionSuccessActivity : ComponentActivity() {
     }
 }
 
-private val ColorBg = Color(5, 7, 8)
+private val ColorBg = XtremeBgBlue
 private val ColorSurface = Color(18, 20, 21)
 private val ColorLime = Color(190, 255, 24)
 private val ColorTextPrimary = Color.White

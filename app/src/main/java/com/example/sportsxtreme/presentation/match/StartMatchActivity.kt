@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.match
 
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -79,8 +80,8 @@ class StartMatchActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        window.statusBarColor = XtremeDarkBlueHex.toInt()
+        window.navigationBarColor = XtremeDarkBlueHex.toInt()
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             LaunchedEffect(Unit) {
@@ -106,12 +107,12 @@ class StartMatchActivity : ComponentActivity() {
     }
 }
 
-private val MatchAccent = Color(0xFFC1FF00)
-private val MatchBg = Color(0xFF010509)
-private val MatchPanel = Color(0xFF07101A)
-private val MatchCard = Color(0xFF0B1320)
-private val MatchStroke = Color(0xFF1F2A3C)
-private val MatchMuted = Color(0xFF8E9C9A)
+private val MatchAccent = XtremeLime
+private val MatchBg = XtremeBgBlue
+private val MatchPanel = XtremeCardBlue
+private val MatchCard = XtremeCardBlue
+private val MatchStroke = XtremeCardBorder
+private val MatchMuted = XtremeMuted
 private val MatchBlue = Color(0xFF00D2FF)
 
 @Composable

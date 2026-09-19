@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.team
 
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -211,9 +212,9 @@ private fun Intent.copyTeamSelectionExtras(): Bundle = Bundle().apply {
 }
 
 private val SquadAccent = Color(0xFFC1FF00)
-private val SquadBg = Color(0xFF020A15)
-private val SquadPanel = Color(0xFF07101A)
-private val SquadCard = Color(0xFF0B1523)
+private val SquadBg = XtremeBgBlue
+private val SquadPanel = XtremeCardBlue
+private val SquadCard = XtremeCardBlue
 private val SquadStroke = Color(0xFF25314A)
 private val SquadMuted = Color(0xFFAAB6C4)
 

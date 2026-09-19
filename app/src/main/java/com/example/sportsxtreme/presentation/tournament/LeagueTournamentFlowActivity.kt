@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.tournament
 
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -88,13 +89,13 @@ class LeagueTournamentFlowActivity : ComponentActivity() {
     companion object { const val EXTRA_TOURNAMENT_ID = "tournament_id" }
 }
 
-private val FlowAccent = Color(0xFFC1FF00)
-private val FlowBg = Color(0xFF010509)
-private val FlowPanel = Color(0xFF07101A)
-private val FlowCard = Color(0xFF0C1524)
-private val FlowCardAlt = Color(0xFF111B2C)
-private val FlowStroke = Color(0xFF28344A)
-private val FlowMuted = Color(0xFF9AA9A6)
+private val FlowAccent = XtremeLime
+private val FlowBg = XtremeBgBlue
+private val FlowPanel = XtremeCardBlue
+private val FlowCard = XtremeCardBlue
+private val FlowCardAlt = XtremeBgBlue
+private val FlowStroke = XtremeCardBorder
+private val FlowMuted = XtremeMuted
 
 @Composable
 private fun LeagueTournamentFlowScreen(onBack: () -> Unit, viewModel: TournamentFlowViewModel, onContinue: () -> Unit) {

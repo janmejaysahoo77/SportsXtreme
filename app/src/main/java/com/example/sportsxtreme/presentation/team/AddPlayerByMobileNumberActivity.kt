@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.team
 
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -62,9 +63,9 @@ class AddPlayerByMobileNumberActivity : ComponentActivity() {
 }
 
 private val MobileAccent = Color(0xFFC1FF00)
-private val MobileBg = Color(0xFF020A15)
-private val MobilePanel = Color(0xFF07101A)
-private val MobileCard = Color(0xFF0B1523)
+private val MobileBg = XtremeBgBlue
+private val MobilePanel = XtremeCardBlue
+private val MobileCard = XtremeCardBlue
 private val MobileMuted = Color(0xFFB7C0C7)
 private val MobileDim = Color(0xFF485061)
 

@@ -58,6 +58,7 @@ import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.domain.model.Tournament
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
@@ -135,12 +136,12 @@ class TournamentRegistrationActivity : ComponentActivity() {
     }
 }
 
-internal val FormAccent = Color(0xFFC1FF00)
-internal val FormBg = Color(0xFF010509)
-internal val FormPanel = Color(0xFF0B111C)
-internal val FormField = Color(0xFF111828)
-internal val FormStroke = Color(0xFF2E3950)
-internal val FormMuted = Color(0xFF8E9C9A)
+internal val FormAccent = XtremeLime
+internal val FormBg = XtremeBgBlue
+internal val FormPanel = XtremeCardBlue
+internal val FormField = XtremeBgBlue
+internal val FormStroke = XtremeCardBorder
+internal val FormMuted = XtremeMuted
 internal val FormCyan = Color(0xFF4DE9FF)
 internal val FormWarm = Color(0xFFFFB84D)
 

@@ -1,6 +1,5 @@
 package com.example.sportsxtreme.presentation.clubs
 
-import android.graphics.Color
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -26,20 +25,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.presentation.ui.theme.*
 
 class ClubMemberPageActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = Color.rgb(3, 9, 18)
-        window.navigationBarColor = Color.rgb(3, 9, 18)
+        window.statusBarColor = XtremeDarkBlueHex.toInt()
+        window.navigationBarColor = XtremeDarkBlueHex.toInt()
         setContent { ClubMembersPage(::finish) }
     }
 }
 
-private val MembersBg = UiColor(3, 9, 18)
-private val MembersPanel = UiColor(10, 21, 36)
-private val MembersLime = UiColor(198, 255, 13)
+private val MembersBg = XtremeBgBlue
+private val MembersPanel = XtremeCardBlue
+private val MembersLime = XtremeLime
 private val MemberMuted = UiColor(167, 178, 193)
 
 private data class ClubMember(val number: String, val name: String, val role: String, val email: String, val phone: String)

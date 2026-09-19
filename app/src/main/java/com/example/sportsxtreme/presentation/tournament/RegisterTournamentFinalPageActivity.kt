@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.presentation.home.HomeScreenView
 import com.example.sportsxtreme.presentation.match.StartMatchActivity
@@ -83,12 +84,12 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
     companion object { const val EXTRA_TOURNAMENT_ID = "tournament_id" }
 }
 
-private val FinalBg = Color(0xFF08111F)
-private val FinalPanel = Color(0xFF121E31)
-private val FinalPanelLight = Color(0xFF1A2940)
-private val FinalAccent = Color(0xFFC1FF00)
-private val FinalMuted = Color(0xFF9AA6BA)
-private val FinalDivider = Color(0xFF24334C)
+private val FinalBg = XtremeBgBlue
+private val FinalPanel = XtremeCardBlue
+private val FinalPanelLight = XtremeCardBlue
+private val FinalAccent = XtremeLime
+private val FinalMuted = XtremeMuted
+private val FinalDivider = XtremeCardBorder
 
 @Composable
 private fun RegisterTournamentFinalPage(tournament: Tournament?, onBack: () -> Unit) {

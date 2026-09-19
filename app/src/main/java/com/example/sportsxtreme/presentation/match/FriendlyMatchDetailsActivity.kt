@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import dagger.hilt.android.AndroidEntryPoint
@@ -142,11 +143,11 @@ class FriendlyMatchDetailsActivity : ComponentActivity() {
     }
 }
 
-private val DetailsAccent = Color(0xFFC1FF00)
-private val DetailsBg = Color(0xFF030A14)
-private val DetailsCard = Color(0xFF0A1422)
-private val DetailsBorder = Color(0xFF17283A)
-private val DetailsMuted = Color(0xFF8D9B9C)
+private val DetailsAccent = XtremeLime
+private val DetailsBg = XtremeBgBlue
+private val DetailsCard = XtremeCardBlue
+private val DetailsBorder = XtremeCardBorder
+private val DetailsMuted = XtremeMuted
 
 @Composable
 private fun FriendlyMatchDetailsScreen(

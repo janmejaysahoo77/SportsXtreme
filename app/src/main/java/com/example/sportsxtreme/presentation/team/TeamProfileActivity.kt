@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.R
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.DocumentSnapshot
@@ -43,8 +44,8 @@ class TeamProfileActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = android.graphics.Color.rgb(2, 10, 20)
-        window.navigationBarColor = android.graphics.Color.rgb(2, 10, 20)
+        window.statusBarColor = XtremeDarkBlueHex.toInt()
+        window.navigationBarColor = XtremeDarkBlueHex.toInt()
         val teamId = intent.getStringExtra(EXTRA_TEAM_ID).orEmpty()
         setContent {
             TeamProfileScreen(
@@ -66,8 +67,8 @@ class TeamProfileActivity : ComponentActivity() {
     }
 }
 
-private val ProfileBackground = Color(0xFF03080E)
-private val ProfileCard = Color(0xFF0B151D)
+private val ProfileBackground = XtremeBgBlue
+private val ProfileCard = XtremeCardBlue
 private val ProfileStroke = Color(0xFF263A48)
 private val ProfileAccent = Color(0xFFC9FF16)
 private val ProfileMuted = Color(0xFF9BAAB4)
