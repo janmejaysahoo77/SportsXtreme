@@ -37,6 +37,32 @@ class FirebaseFirestoreTournamentDataSource @Inject constructor(
         Resource.Error(e.message ?: "Unable to save tournament requirements")
     }
 
+    suspend fun updateTournamentDetails(
+        tournamentId: String,
+        name: String,
+        startDate: String,
+        ground: String,
+        ballType: String
+    ): Resource<Unit> = try {
+        require(tournamentId.isNotBlank()) { "Tournament ID is missing" }
+        firestore.collection("tournaments").document(tournamentId).set(
+            mapOf(
+                "name" to name,
+                "startDate" to startDate,
+                // The final-page editor is the source of truth for the start date.
+                // Keep this flag in sync so host lists don't continue displaying
+                // "To be announced" after a date has been entered.
+                "dateToBeAnnounced" to startDate.isBlank(),
+                "ground" to ground,
+                "ballType" to ballType
+            ),
+            SetOptions.merge()
+        ).await()
+        Resource.Success(Unit)
+    } catch (e: Exception) {
+        Resource.Error(e.message ?: "Unable to save tournament details")
+    }
+
     suspend fun getTournament(tournamentId: String): Resource<Tournament> = try {
         val snapshot = firestore.collection("tournaments").document(tournamentId).get().await()
         val tournament = snapshot.toObject(Tournament::class.java)

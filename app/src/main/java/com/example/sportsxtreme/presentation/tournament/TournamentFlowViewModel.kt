@@ -22,4 +22,25 @@ class TournamentFlowViewModel @Inject constructor(private val repository: Tourna
         val result = repository.getTournament(tournamentId)
         if (result is Resource.Success) _tournament.value = result.data
     }
+
+    fun saveTournamentDetails(name: String, startDate: String, ground: String, ballType: String) = viewModelScope.launch {
+        val current = _tournament.value ?: return@launch
+        val result = repository.updateTournamentDetails(current.id, name, startDate, ground, ballType)
+        if (result is Resource.Success) {
+            _tournament.value = current.copy(
+                name = name,
+                startDate = startDate,
+                dateToBeAnnounced = startDate.isBlank(),
+                ground = ground,
+                ballType = ballType
+            )
+        }
+    }
+
+    fun saveTeamDetails(entryFee: String, numberOfTeams: String) = viewModelScope.launch {
+        val current = _tournament.value ?: return@launch
+        val requirements = current.requirements.copy(entryFee = entryFee, numberOfTeams = numberOfTeams)
+        val result = repository.updateTournamentRequirements(current.id, requirements)
+        if (result is Resource.Success) _tournament.value = current.copy(requirements = requirements)
+    }
 }

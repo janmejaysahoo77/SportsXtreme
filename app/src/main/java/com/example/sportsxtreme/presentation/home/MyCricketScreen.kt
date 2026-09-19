@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -34,6 +35,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +64,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.domain.model.Tournament
+import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
+import com.example.sportsxtreme.presentation.tournament.RegisterTournamentFinalPageActivity
 import com.example.sportsxtreme.presentation.team.TeamProfileActivity
 import com.example.sportsxtreme.presentation.ui.theme.*
 import com.google.firebase.auth.FirebaseAuth
@@ -281,10 +286,22 @@ private val tournaments = listOf(
 fun MyCricketScreen(
     onMenuClick: () -> Unit = {},
     onStartMatch: () -> Unit = {},
-    initialTab: Int = 0
+    initialTab: Int = 0,
+    hostTournamentsViewModel: HostTournamentsViewModel? = null
 ) {
     var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
+    var selectedTournamentSegment by remember { mutableIntStateOf(0) }
     val joinedTeams = rememberJoinedTeams()
+    val context = LocalContext.current
+    val hostedTournamentsState by if (hostTournamentsViewModel != null) {
+        hostTournamentsViewModel.uiState.collectAsState()
+    } else {
+        remember {
+            mutableStateOf<HostTournamentsViewModel.UiState>(
+                HostTournamentsViewModel.UiState.Content(emptyList())
+            )
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -315,11 +332,20 @@ fun MyCricketScreen(
                     item {
                         SegmentPills(
                             listOf("Your", "Participate", "Network"),
-                            active = 0,
-                            activeColor = CricketBlue
+                            active = selectedTournamentSegment,
+                            activeColor = CricketBlue,
+                            onTabClick = { selectedTournamentSegment = it }
                         )
                     }
-                    items(tournaments) { tournament -> TournamentCard(tournament) }
+                    when (selectedTournamentSegment) {
+                        0 -> hostedTournamentsContent(hostedTournamentsState) { tournamentId ->
+                            context.startActivity(
+                                Intent(context, RegisterTournamentFinalPageActivity::class.java)
+                                    .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                            )
+                        }
+                        else -> items(tournaments) { tournament -> TournamentCard(tournament) }
+                    }
                 }
 
                 2 -> {
@@ -361,6 +387,79 @@ fun MyCricketScreen(
             }
         }
 
+    }
+}
+
+private fun LazyListScope.hostedTournamentsContent(
+    state: HostTournamentsViewModel.UiState,
+    onTournamentClick: (String) -> Unit
+) {
+    when (state) {
+        HostTournamentsViewModel.UiState.Loading -> item {
+            TournamentFeedbackCard(
+                title = "Loading your tournaments…",
+                detail = "Fetching tournaments you host."
+            )
+        }
+
+        is HostTournamentsViewModel.UiState.Error -> item {
+            TournamentFeedbackCard(
+                title = "Couldn't load your tournaments",
+                detail = state.message
+            )
+        }
+
+        is HostTournamentsViewModel.UiState.Content -> {
+            if (state.tournaments.isEmpty()) {
+                item {
+                    TournamentFeedbackCard(
+                        title = "No hosted tournaments yet",
+                        detail = "Tournaments you register will appear here."
+                    )
+                }
+            } else {
+                items(state.tournaments, key = { tournament -> tournament.id }) { tournament ->
+                    TournamentCard(
+                        tournament = tournament.toCricketTournament(),
+                        onClick = { onTournamentClick(tournament.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun Tournament.toCricketTournament(): CricketTournament {
+    val visuals = TournamentVisual.entries
+    val displayLocation = city.ifBlank { ground }.ifBlank { "Location to be announced" }
+    val displayDate = when {
+        startDate.isNotBlank() -> startDate
+        dateToBeAnnounced -> "Date to be announced"
+        else -> "Start date to be announced"
+    }
+    return CricketTournament(
+        name = name.ifBlank { "Untitled tournament" },
+        date = displayDate,
+        location = displayLocation.uppercase(),
+        status = "HOSTED",
+        accent = CricketBlue,
+        visual = visuals[(id.hashCode() and Int.MAX_VALUE) % visuals.size]
+    )
+}
+
+@Composable
+private fun TournamentFeedbackCard(title: String, detail: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(CricketCard)
+            .border(1.dp, CricketStroke, RoundedCornerShape(18.dp))
+            .padding(20.dp)
+    ) {
+        Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        Text(detail, color = CricketMuted, fontSize = 12.sp)
     }
 }
 
@@ -1228,11 +1327,15 @@ private fun HostTournamentPrompt() {
 }
 
 @Composable
-private fun TournamentCard(tournament: CricketTournament) {
+private fun TournamentCard(
+    tournament: CricketTournament,
+    onClick: (() -> Unit)? = null
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
+            .clickable(enabled = onClick != null) { onClick?.invoke() }
             .background(CricketCard)
             .border(
                 1.dp,
