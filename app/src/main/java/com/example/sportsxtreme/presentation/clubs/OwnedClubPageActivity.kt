@@ -53,8 +53,8 @@ class OwnedClubPageActivity : ComponentActivity() {
     }
 }
 
-private val OwnedBg = XtremeBgBlue
-private val OwnedCard = XtremeCardBlue
+private val OwnedBg = BlueBackgroundColor
+private val OwnedCard = BlueCardColors
 private val Accent = XtremeLime
 private val OwnedMuted = XtremeMuted
 
@@ -73,7 +73,6 @@ fun OwnedClubScreen(onBack: () -> Unit) {
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Hero Banner Section
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

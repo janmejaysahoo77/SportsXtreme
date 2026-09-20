@@ -100,8 +100,8 @@ class DiscoverClubsActivity : ComponentActivity() {
 }
 
 // Design System Colors
-private val ColorBackground = XtremeBgBlue
-private val ColorSurface = XtremeCardBlue
+private val ColorBackground = BlueBackgroundColor
+private val ColorSurface = BlueCardColors
 private val ColorPrimary = XtremeLime // Neon Lime
 private val ColorTextPrimary = Color.White
 private val ColorTextSecondary = Color(0xFF969DA0)
