@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.match
 
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -184,11 +185,11 @@ class SelectTeamAorBActivity : ComponentActivity() {
     }
 }
 
-private val TeamAAccent = Color(0xFFC1FF00)
-private val TeamABg = Color(0xFF070D18)
-private val TeamAPanel = Color(0xFF090F1C)
-private val TeamACard = Color(0xFF151B28)
-private val TeamAMuted = Color(0xFFAAB3B8)
+private val TeamAAccent = XtremeLime
+private val TeamABg = XtremeBgBlue
+private val TeamAPanel = XtremeCardBlue
+private val TeamACard = XtremeCardBlue
+private val TeamAMuted = XtremeMuted
 
 private data class FriendlyTeamOption(
     val id: String,

@@ -60,6 +60,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.BallType
 import com.example.sportsxtreme.domain.model.MatchFormat
@@ -119,11 +120,11 @@ class FriendlyMatchSetupActivity : ComponentActivity() {
     }
 }
 
-private val FriendlyAccent = Color(0xFFC1FF00)
-private val FriendlyBackground = Color(0xFF020914)
-private val FriendlyCard = Color(0xFF091320)
-private val FriendlyStroke = Color(0xFF1B293A)
-private val FriendlyMuted = Color(0xFF9AA69E)
+private val FriendlyAccent = XtremeLime
+private val FriendlyBackground = XtremeBgBlue
+private val FriendlyCard = XtremeCardBlue
+private val FriendlyStroke = XtremeCardBorder
+private val FriendlyMuted = XtremeMuted
 
 @Composable
 private fun FriendlyMatchSetupScreen(

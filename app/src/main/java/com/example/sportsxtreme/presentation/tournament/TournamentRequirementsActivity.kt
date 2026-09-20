@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.tournament
 
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -160,12 +161,12 @@ private data class TournamentRequirementSummary(
     val ballType: String
 )
 
-private val ReqAccent = Color(0xFFC1FF00)
-private val ReqBg = Color(0xFF010509)
-private val ReqPanel = Color(0xFF0B111C)
-private val ReqField = Color(0xFF111828)
-private val ReqStroke = Color(0xFF2E3950)
-private val ReqMuted = Color(0xFF8E9C9A)
+private val ReqAccent = XtremeLime
+private val ReqBg = XtremeBgBlue
+private val ReqPanel = XtremeCardBlue
+private val ReqField = XtremeBgBlue
+private val ReqStroke = XtremeCardBorder
+private val ReqMuted = XtremeMuted
 private val ReqCyan = Color(0xFF4DE9FF)
 private val ReqGold = Color(0xFFFFB84D)
 

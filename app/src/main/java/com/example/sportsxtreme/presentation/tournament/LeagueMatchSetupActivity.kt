@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.tournament
 
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -76,11 +77,11 @@ class LeagueMatchSetupActivity : ComponentActivity() {
     }
 }
 
-private val SetupAccent = Color(0xFFC1FF00)
-private val SetupBg = Color(0xFF01060D)
-private val SetupPanel = Color(0xFF07101A)
-private val SetupCard = Color(0xFF0A1422)
-private val SetupMuted = Color(0xFF9AA8AD)
+private val SetupAccent = XtremeLime
+private val SetupBg = XtremeBgBlue
+private val SetupPanel = XtremeCardBlue
+private val SetupCard = XtremeCardBlue
+private val SetupMuted = XtremeMuted
 
 @Composable
 private fun LeagueMatchSetupScreen(onBack: () -> Unit, onContinue: () -> Unit) {

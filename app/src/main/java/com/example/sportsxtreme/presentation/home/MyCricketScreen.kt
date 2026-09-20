@@ -68,21 +68,22 @@ import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
 import com.example.sportsxtreme.presentation.tournament.RegisterTournamentFinalPageActivity
 import com.example.sportsxtreme.presentation.team.TeamProfileActivity
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 
-private val CricketAccent = Color(190, 255, 24) // Lime from ClubLanding
-private val CricketBg = Color(5, 7, 8) // ScreenBlack from ClubLanding
-private val CricketPanel = Color(15, 17, 17) // CardBlack from ClubLanding
-private val CricketCard = Color(15, 17, 17)
-private val CricketMuted = Color(162, 169, 164) // Muted from ClubLanding
-private val CricketStroke = Color(45, 51, 46) // CardBorder from ClubLanding
+private val CricketAccent = XtremeLime
+private val CricketBg = XtremeBgBlue
+private val CricketPanel = XtremeCardBlue
+private val CricketCard = XtremeCardBlue
+private val CricketMuted = XtremeMuted
+private val CricketStroke = XtremeCardBorder
 private val CricketBlue = Color(0xFF2ED8FF)
 
-private val ClubCardBlack = Color(15, 17, 17)
-private val ClubCardBorder = Color(45, 51, 46)
-private val ClubMuted = Color(162, 169, 164)
+private val ClubCardBlack = XtremeCardBlue
+private val ClubCardBorder = XtremeCardBorder
+private val ClubMuted = XtremeMuted
 
 private val cricketTabs = listOf("Matches", "Tournaments", "Teams", "Stats", "Highlights")
 

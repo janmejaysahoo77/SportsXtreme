@@ -1,6 +1,5 @@
 package com.example.sportsxtreme.presentation.clubs
 
-import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -27,21 +26,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.presentation.ui.theme.*
 import kotlinx.coroutines.launch
 
 class ClubAnalyticsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = Color.rgb(4, 10, 20)
-        window.navigationBarColor = Color.rgb(4, 10, 20)
+        window.statusBarColor = XtremeDarkBlueHex.toInt()
+        window.navigationBarColor = XtremeDarkBlueHex.toInt()
         setContent { AnalyticsPage(::finish) }
     }
 }
 
-private val AnalyticsBg = UiColor(4, 10, 20)
-private val AnalyticsPanel = UiColor(11, 22, 37)
-private val AnalyticsAccent = UiColor(190, 255, 24)
+private val AnalyticsBg = XtremeBgBlue
+private val AnalyticsPanel = XtremeCardBlue
+private val AnalyticsAccent = XtremeLime
 private val AnalyticsMuted = UiColor(166, 178, 194)
 private val CardBorder = UiColor(45, 51, 46)
 

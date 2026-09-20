@@ -1,5 +1,7 @@
 package com.example.sportsxtreme.presentation.home
 
+import com.example.sportsxtreme.presentation.ui.theme.XtremeBgBlueHex
+import com.example.sportsxtreme.presentation.ui.theme.XtremeCardBlueHex
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
@@ -102,8 +104,8 @@ class HomeScreenView @JvmOverloads constructor(
 
     private val primary = Color.rgb(193, 255, 0)
     private val cyan = Color.rgb(0, 210, 255)
-    private val bg = Color.rgb(1, 5, 9)
-    private val panel = Color.rgb(7, 14, 18)
+    private val bg = XtremeBgBlueHex.toInt()
+    private val panel = XtremeCardBlueHex.toInt()
     private val muted = Color.rgb(130, 145, 142)
     private val navItems = listOf(
         NavItem("Home", NavIconView.Icon.HOME),

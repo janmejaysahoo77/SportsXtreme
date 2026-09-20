@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.match
 
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -226,13 +227,13 @@ private fun Intent.copyTeamSelectionExtras(): Bundle = Bundle().apply {
     putString(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME, getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME))
 }
 
-private val TeamsAccent = Color(0xFFD6EF7B)
-private val TeamsBg = Color(0xFF01060D)
-private val TeamsPanel = Color(0xFF07101A)
-private val TeamsCard = Color(0xFF0A1422)
-private val TeamsStroke = Color(0xFF25324A)
+private val TeamsAccent = XtremeLime
+private val TeamsBg = XtremeBgBlue
+private val TeamsPanel = XtremeCardBlue
+private val TeamsCard = XtremeCardBlue
+private val TeamsStroke = XtremeCardBorder
 private val TeamsBlue = Color(0xFF1D67FF)
-private val TeamsMuted = Color(0xFF93A3AA)
+private val TeamsMuted = XtremeMuted
 
 @Composable
 private fun SelectPlayingTeamsScreen(

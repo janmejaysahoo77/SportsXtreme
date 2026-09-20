@@ -1,5 +1,7 @@
 package com.example.sportsxtreme.presentation.team
 
+import com.example.sportsxtreme.presentation.ui.theme.*
+
 import android.os.Bundle
 import android.content.Intent
 import androidx.activity.ComponentActivity
@@ -51,8 +53,8 @@ class ManagePlayersInsideTeamActivity : ComponentActivity() {
         const val EXTRA_TEAM_ID = "com.example.sportsxtreme.extra.TEAM_ID"
     }
 
-    private val ManageBackground = Color(0xFF020A14)
-    private val ManageCard = Color(0xFF09131F)
+    private val ManageBackground = XtremeBgBlue
+    private val ManageCard = XtremeCardBlue
     private val ManageStroke = Color(0xFF253443)
     private val ManageAccent = Color(0xFFC9FF16)
     private val ManageMuted = Color(0xFFAAB5C0)

@@ -1,6 +1,5 @@
 package com.example.sportsxtreme.presentation.clubs
 
-import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,20 +21,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.presentation.ui.theme.*
 
 class MatchesPlayedByClubActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = Color.rgb(3, 9, 18)
-        window.navigationBarColor = Color.rgb(3, 9, 18)
+        window.statusBarColor = XtremeDarkBlueHex.toInt()
+        window.navigationBarColor = XtremeDarkBlueHex.toInt()
         setContent { ClubMatchesPage(::finish) }
     }
 }
 
-private val MatchBg = UiColor(3, 9, 18)
-private val MatchPanel = UiColor(10, 21, 36)
-private val MatchLime = UiColor(198, 255, 13)
+private val MatchBg = XtremeBgBlue
+private val MatchPanel = XtremeCardBlue
+private val MatchLime = XtremeLime
 private val MatchMuted = UiColor(176, 186, 199)
 private data class LiveMatch(val title: String, val left: String, val leftScore: String, val right: String, val rightScore: String, val viewers: String, val venue: String)
 

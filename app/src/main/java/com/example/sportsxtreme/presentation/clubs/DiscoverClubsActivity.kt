@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.sportsxtreme.presentation.ui.theme.*
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.presentation.profile.Lime
@@ -99,9 +100,9 @@ class DiscoverClubsActivity : ComponentActivity() {
 }
 
 // Design System Colors
-private val ColorBackground = Color(0xFF050708)
-private val ColorSurface = Color(0xFF121619)
-private val ColorPrimary = Color(0xFFBEFF18) // Neon Lime
+private val ColorBackground = XtremeBgBlue
+private val ColorSurface = XtremeCardBlue
+private val ColorPrimary = XtremeLime // Neon Lime
 private val ColorTextPrimary = Color.White
 private val ColorTextSecondary = Color(0xFF969DA0)
 private val ColorDivider = Color(0xFF272B27)
