@@ -65,6 +65,8 @@ import com.example.sportsxtreme.presentation.home.LiveMatchViewModel
 import com.example.sportsxtreme.presentation.media.XtremeMediaActivity
 import com.example.sportsxtreme.presentation.store.ShoppingActivity
 import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
+import com.example.sportsxtreme.presentation.clubs.AddMemberInClubActivity
+import com.example.sportsxtreme.presentation.clubs.MembersScreen
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -90,7 +92,8 @@ class MainActivity : ComponentActivity() {
         PhoneAuth,
         OtpVerification,
         SportSelection,
-        Home
+        Home,
+        Members
     }
 
     private var isCustomSplashReady = false
@@ -149,7 +152,8 @@ class MainActivity : ComponentActivity() {
                     Screen.VerificationComplete,
                     Screen.PhoneAuth,
                     Screen.OtpVerification,
-                    Screen.SportSelection -> showMainScreen()
+                    Screen.SportSelection,
+                    Screen.Members -> showMainScreen()
 
                     Screen.Onboarding,
                     Screen.Splash -> finish()
@@ -334,6 +338,13 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            Screen.Members -> MembersScreen(
+                onBack = { showHomeScreen() },
+                onAddMember = {
+                    startActivity(Intent(this@MainActivity, AddMemberInClubActivity::class.java))
+                }
+            )
+
         }
     }
 
@@ -395,6 +406,12 @@ class MainActivity : ComponentActivity() {
         emailVerificationScreenView = null
         currentScreen = Screen.Home
         requestLocationPermissionAndUpdate()
+    }
+
+    fun showMembersScreen() {
+        homeScreenView = null
+        emailVerificationScreenView = null
+        currentScreen = Screen.Members
     }
 
     fun showXtremeMediaScreen() {

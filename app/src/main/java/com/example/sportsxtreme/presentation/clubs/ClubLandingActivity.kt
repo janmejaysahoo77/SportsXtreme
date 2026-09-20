@@ -76,8 +76,8 @@ class ClubLandingActivity : ComponentActivity() {
 }
 
 private val Lime = XtremeLime
-private val ScreenBlack = XtremeBgBlue
-private val CardBlack = XtremeCardBlue
+private val ScreenBlack = BlueBackgroundColor
+private val CardBlack = BlueCardColors
 private val Muted = XtremeMuted
 private val CardBorder = XtremeCardBorder
 

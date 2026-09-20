@@ -75,8 +75,8 @@ class ClubSubmissionSuccessActivity : ComponentActivity() {
     }
 }
 
-private val ColorBg = XtremeBgBlue
-private val ColorSurface = Color(18, 20, 21)
+private val ColorBg = BlueBackgroundColor
+private val ColorSurface = BlueCardColors
 private val ColorLime = Color(190, 255, 24)
 private val ColorTextPrimary = Color.White
 private val ColorTextSecondary = Color(162, 169, 164)

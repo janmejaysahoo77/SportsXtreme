@@ -66,9 +66,9 @@ class ViewClubPageActivity : ComponentActivity() {
     }
 }
 
-private val ScreenBlack = XtremeBgBlue
-private val DarkBlueCard = XtremeCardBlue
-private val CardBlack = XtremeCardBlue
+private val ScreenBlack = BlueBackgroundColor
+private val DarkBlueCard = BlueCardColors
+private val CardBlack = BlueCardColors
 private val Lime = XtremeLime
 private val Muted = XtremeMuted
 private val CardBorder = XtremeCardBorder

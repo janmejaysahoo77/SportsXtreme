@@ -66,12 +66,12 @@ class MyClubsLandingPageActivity : ComponentActivity() {
     }
 }
 
-private val ScreenBlack = XtremeBgBlue
-private val DarkBlueCard = XtremeCardBlue
-private val CardBlack = XtremeCardBlue
+private val ScreenBlack = BlueBackground
+private val DarkBlueCard = BlueCardBackGround
+private val CardBlack = BlueCardBackGround
 private val Lime = XtremeLime
 private val Muted = XtremeMuted
-private val CardBorder = XtremeCardBorder
+private val CardBorder = BlueCardBackGround
 
 @Composable
 private fun MyClubsScreen(onBack: () -> Unit) {
@@ -251,7 +251,7 @@ private fun MyClubsJoinedClubsContent() {
         name = "Warriors Cricket Club",
         location = "Cuttack, Odisha",
         role = "Player",
-        bannerRes = R.drawable.bar,
+        bannerRes = R.drawable.cricket_choosesports,
         isBranded = true,
         showBadge = true,
         onClick = {
@@ -278,20 +278,13 @@ private fun SectionHeader(title: String, showCreate: Boolean) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color(34, 59, 35)),
-            contentAlignment = Alignment.Center
-        ) {
+
             Image(
                 painter = painterResource(R.drawable.bar),
                 contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                colorFilter = ColorFilter.tint(Lime)
+                modifier = Modifier.size(45.dp),
             )
-        }
+
         Text(
             text = title,
             color = Color.White,
@@ -330,6 +323,11 @@ private fun ClubItemCard(
     showBadge: Boolean = false,
     onClick: () -> Unit = {}
 ) {
+    val colorStops = listOf(
+        BlueCardBackGround.copy(alpha = 0.5f),
+        BlueCardBackGround.copy(alpha = 0.2f),
+        BlueCardBackGround.copy(alpha = 0.5f)
+    )
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -344,12 +342,26 @@ private fun ClubItemCard(
                     .fillMaxWidth()
                     .height(130.dp)
             ) {
-                Image(
-                    painter = painterResource(bannerRes),
-                    contentDescription = null,
+                Box(
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
+                    contentAlignment = Alignment.Center
+                ){
+                    Image(
+                        painter = painterResource(bannerRes),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                    // Black overlay
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                brush = Brush.verticalGradient(colorStops)
+                            )
+                    )
+
+                }
                 
                 // Gradient Overlay
                 Box(
