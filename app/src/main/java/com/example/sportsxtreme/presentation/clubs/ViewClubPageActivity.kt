@@ -237,7 +237,7 @@ private fun ViewClubOwnedClubsContent() {
         bannerRes = R.drawable.club_stadium,
         isBranded = false,
         onClick = {
-            context.startActivity(Intent(context, OwnedClubPageActivity::class.java))
+            context.startActivity(Intent(context, VictoryClubActivity::class.java))
         }
     )
 }
@@ -267,7 +267,7 @@ private fun ViewClubJoinedClubsContent() {
         isBranded = false,
         showBadge = true,
         onClick = {
-            context.startActivity(Intent(context, OwnedClubPageActivity::class.java))
+            context.startActivity(Intent(context, VictoryClubActivity::class.java))
         }
     )
 }

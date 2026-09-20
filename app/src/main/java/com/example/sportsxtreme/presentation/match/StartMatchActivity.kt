@@ -1,7 +1,6 @@
 package com.example.sportsxtreme.presentation.match
 
 import com.example.sportsxtreme.R
-import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -80,8 +79,10 @@ class StartMatchActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = XtremeDarkBlueHex.toInt()
-        window.navigationBarColor = XtremeDarkBlueHex.toInt()
+        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val isScheduleFlow = intent.getBooleanExtra(EXTRA_SCHEDULE_FLOW, false)
+        val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             LaunchedEffect(Unit) {
@@ -100,26 +101,39 @@ class StartMatchActivity : ComponentActivity() {
             }
             StartMatchScreen(
                 onBack = { finish() },
-                onContinue = { selectedType -> viewModel.continueWith(selectedType) },
-                isLoading = uiState.isLoading
+                onContinue = { selectedType ->
+                    if (isScheduleFlow) {
+                        startActivity(
+                            Intent(this@StartMatchActivity, LeagueMatchSetupActivity::class.java)
+                                .putExtra("tournament_id", tournamentId)
+                        )
+                    } else {
+                        viewModel.continueWith(selectedType)
+                    }
+                },
+                isLoading = uiState.isLoading,
+                isScheduleFlow = isScheduleFlow
             )
         }
     }
+
+    companion object { const val EXTRA_SCHEDULE_FLOW = "schedule_flow" }
 }
 
-private val MatchAccent = XtremeLime
-private val MatchBg = XtremeBgBlue
-private val MatchPanel = XtremeCardBlue
-private val MatchCard = XtremeCardBlue
-private val MatchStroke = XtremeCardBorder
-private val MatchMuted = XtremeMuted
+private val MatchAccent = Color(0xFFC1FF00)
+private val MatchBg = Color(0xFF010509)
+private val MatchPanel = Color(0xFF07101A)
+private val MatchCard = Color(0xFF0B1320)
+private val MatchStroke = Color(0xFF1F2A3C)
+private val MatchMuted = Color(0xFF8E9C9A)
 private val MatchBlue = Color(0xFF00D2FF)
 
 @Composable
 private fun StartMatchScreen(
     onBack: () -> Unit,
     onContinue: (MatchType) -> Unit,
-    isLoading: Boolean
+    isLoading: Boolean,
+    isScheduleFlow: Boolean
 ) {
     var selectedType by remember { mutableIntStateOf(0) }
     var selectedTournament by remember { mutableIntStateOf(0) }
@@ -153,8 +167,8 @@ private fun StartMatchScreen(
                 PremiumMetricRow()
                 SectionTitle("MATCH FORMAT")
                 MatchTypeCard("Tournament Match", "Part of a tournament or league competition.", MatchIcon.BAT, selectedType == 0) { selectedType = 0 }
-                MatchTypeCard("Series Match", "Create a multi-match series between teams.", MatchIcon.BAT, selectedType == 1) { selectedType = 1 }
-                MatchTypeCard("Friendly Match", "Casual, Practice & Quick Setup", MatchIcon.HANDSHAKE, selectedType == 2) { selectedType = 2 }
+                MatchTypeCard("Series Match", "Create a multi-match series between teams.", MatchIcon.BAT, selectedType == 1, enabled = !isScheduleFlow) { selectedType = 1 }
+                MatchTypeCard("Friendly Match", "Casual, Practice & Quick Setup", MatchIcon.HANDSHAKE, selectedType == 2, enabled = !isScheduleFlow) { selectedType = 2 }
                 if (selectedType != 2) {
                     SectionTitle("SELECT TOURNAMENT", "SEE ALL")
                     TournamentCard(
@@ -347,24 +361,24 @@ private fun PremiumMetric(number: String, label: String, color: Color, modifier:
 }
 
 @Composable
-private fun MatchTypeCard(title: String, subtitle: String, icon: MatchIcon, selected: Boolean, onClick: () -> Unit) {
+private fun MatchTypeCard(title: String, subtitle: String, icon: MatchIcon, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(96.dp)
             .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) Brush.horizontalGradient(listOf(Color(0xFF1D3510), Color(0xFF0B1623))) else Brush.horizontalGradient(listOf(Color(0xFF0B1420), Color(0xFF09111D))))
-            .border(if (selected) 2.dp else 1.dp, if (selected) MatchAccent else Color(0xFF23334A), RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
+            .background(if (!enabled) Brush.horizontalGradient(listOf(Color(0xFF05080C), Color(0xFF070A0F))) else if (selected) Brush.horizontalGradient(listOf(Color(0xFF1D3510), Color(0xFF0B1623))) else Brush.horizontalGradient(listOf(Color(0xFF0B1420), Color(0xFF09111D))))
+            .border(if (selected && enabled) 2.dp else 1.dp, if (selected && enabled) MatchAccent else Color(0xFF18202B), RoundedCornerShape(14.dp))
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconTile(icon, selected)
+        IconTile(icon, selected && enabled)
         Column(modifier = Modifier.padding(start = 13.dp).weight(1f)) {
-            Text(title, color = if (selected) MatchAccent else Color(0xFFE7EFEC), fontSize = 18.sp, fontWeight = FontWeight.Black, maxLines = 1)
-            Text(subtitle, color = MatchMuted, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+            Text(title, color = if (!enabled) Color(0xFF48515C) else if (selected) MatchAccent else Color(0xFFE7EFEC), fontSize = 18.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Text(subtitle, color = if (enabled) MatchMuted else Color(0xFF3E4650), fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
         }
-        SelectionDot(selected)
+        SelectionDot(selected && enabled)
     }
 }
 

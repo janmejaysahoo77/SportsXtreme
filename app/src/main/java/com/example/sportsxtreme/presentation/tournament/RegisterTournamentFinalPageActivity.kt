@@ -86,10 +86,12 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID).orEmpty()
+        val initialTab = intent.getIntExtra(EXTRA_INITIAL_TAB, 0).coerceIn(0, 4)
         viewModel.load(tournamentId)
         setContent {
             RegisterTournamentFinalPage(
                 tournament = viewModel.tournament.collectAsState().value,
+                initialTab = initialTab,
                 onBack = { finish() },
                 onSaveTournamentDetails = viewModel::saveTournamentDetails,
                 onSaveTeamDetails = viewModel::saveTeamDetails
@@ -97,7 +99,11 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
         }
     }
 
-    companion object { const val EXTRA_TOURNAMENT_ID = "tournament_id" }
+    companion object {
+        const val EXTRA_TOURNAMENT_ID = "tournament_id"
+        const val EXTRA_INITIAL_TAB = "initial_tab"
+        const val TEAMS_TAB_INDEX = 1
+    }
 }
 
 private val FinalBg = XtremeBgBlue
@@ -110,11 +116,12 @@ private val FinalDivider = XtremeCardBorder
 @Composable
 private fun RegisterTournamentFinalPage(
     tournament: Tournament?,
+    initialTab: Int,
     onBack: () -> Unit,
     onSaveTournamentDetails: (String, String, String, String) -> Unit,
     onSaveTeamDetails: (String, String) -> Unit
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by remember { mutableIntStateOf(initialTab) }
     val tabs = listOf("Overview", "Teams", "Matches", "Points", "Leaderboard")
     Column(Modifier.fillMaxSize().background(FinalBg)) {
         FinalTopBar(onBack)
@@ -615,7 +622,13 @@ private fun MatchesTab(tournament: Tournament?) {
         }
         MatchActions(
             modifier = Modifier,
-            onSchedule = { context.startActivity(Intent(context, StartMatchActivity::class.java)) },
+            onSchedule = {
+                context.startActivity(
+                    Intent(context, StartMatchActivity::class.java)
+                        .putExtra(StartMatchActivity.EXTRA_SCHEDULE_FLOW, true)
+                        .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournament?.id)
+                )
+            },
             onStart = { context.startActivity(Intent(context, StartMatchActivity::class.java)) }
         )
     }

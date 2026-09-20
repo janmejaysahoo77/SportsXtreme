@@ -63,6 +63,9 @@
             android:name=".presentation.clubs.OwnedClubPageActivity"
             android:exported="false" />
         <activity
+            android:name=".presentation.clubs.VictoryClubActivity"
+            android:exported="false" />
+        <activity
             android:name=".presentation.clubs.ClubMemberPageActivity"
             android:exported="false" />
         <activity
@@ -148,6 +151,9 @@
             android:exported="false" />
         <activity
             android:name=".presentation.tournament.LeagueMatchSetupActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.tournament.ScheduleMatchActivity"
             android:exported="false" />
         <activity
             android:name=".presentation.tournament.TournamentRequirementsActivity"
