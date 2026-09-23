@@ -1,4 +1,4 @@
-package com.example.sportsxtreme.presentation.tournament
+ package com.example.sportsxtreme.presentation.tournament
 
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.presentation.ui.theme.*

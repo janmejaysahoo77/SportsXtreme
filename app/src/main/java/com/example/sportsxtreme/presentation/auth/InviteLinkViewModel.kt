@@ -26,6 +26,9 @@ class InviteLinkViewModel @Inject constructor(
     )
     val pendingTeamInviteToken: StateFlow<String?> = _pendingTeamInviteToken.asStateFlow()
 
+    private val _pendingTournamentInviteToken = MutableStateFlow<String?>(savedStateHandle[PENDING_TOURNAMENT_INVITE_TOKEN])
+    val pendingTournamentInviteToken: StateFlow<String?> = _pendingTournamentInviteToken.asStateFlow()
+
     fun receiveInviteToken(token: String) {
         savedStateHandle[PENDING_INVITE_TOKEN] = token
         _pendingInviteToken.value = token
@@ -50,8 +53,21 @@ class InviteLinkViewModel @Inject constructor(
         }
     }
 
+    fun receiveTournamentInviteToken(token: String) {
+        savedStateHandle[PENDING_TOURNAMENT_INVITE_TOKEN] = token
+        _pendingTournamentInviteToken.value = token
+    }
+
+    fun consumeTournamentInviteToken(token: String) {
+        if (_pendingTournamentInviteToken.value == token) {
+            savedStateHandle[PENDING_TOURNAMENT_INVITE_TOKEN] = null
+            _pendingTournamentInviteToken.value = null
+        }
+    }
+
     private companion object {
         const val PENDING_INVITE_TOKEN = "pending_invite_token"
         const val PENDING_TEAM_INVITE_TOKEN = "pending_team_invite_token"
+        const val PENDING_TOURNAMENT_INVITE_TOKEN = "pending_tournament_invite_token"
     }
 }

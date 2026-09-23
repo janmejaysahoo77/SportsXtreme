@@ -9,7 +9,9 @@ import com.example.sportsxtreme.presentation.auth.*
 import com.example.sportsxtreme.presentation.scoring.*
 import com.example.sportsxtreme.presentation.match.*
 import com.example.sportsxtreme.presentation.media.*
-import com.example.sportsxtreme.presentation.home.*
+import com.example.sportsxtreme.presentation.home.CommunityScreen
+import com.example.sportsxtreme.presentation.home.LeaderboardScreen
+import com.example.sportsxtreme.presentation.home.MyCricketScreen
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
@@ -861,6 +863,7 @@ class HomeScreenView @JvmOverloads constructor(
                 addView(hostTopStrip(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)))
 
                 lateinit var switchHostTab: (Int) -> Unit
+                var selectedHostTab = 0
                 val hostScroll = HostTabScrollView(context).apply {
                     clipToPadding = false
                     setPadding(0, 0, 0, dp(22))
@@ -874,10 +877,11 @@ class HomeScreenView @JvmOverloads constructor(
                             rightMargin = dp(12)
                         })
 
-                        // Tab row: "Host" | "Your Tournament"
+                        // Tab row: "Host" | "Your Tournament" | "Quick Scoring"
                         val hostTabButton = TextView(context)
                         val yourTournamentTabButton = TextView(context)
-                        addView(hostTabRow(context, hostTabButton, yourTournamentTabButton), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        val quickScoringTabButton = TextView(context)
+                        addView(hostTabRow(context, hostTabButton, yourTournamentTabButton, quickScoringTabButton), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                             leftMargin = dp(12)
                             rightMargin = dp(12)
                             topMargin = dp(12)
@@ -923,24 +927,44 @@ class HomeScreenView @JvmOverloads constructor(
                         })
 
                         yourTournamentContent.visibility = View.GONE
-                        var selectedHostTab = 0
+                        val quickScoringContent = LinearLayout(context).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(dp(12), 0, dp(12), 0)
+                            addView(hostArenaCard(
+                                context = context,
+                                icon = HostIconView.Icon.BAT,
+                                title = "Quick Scoring",
+                                subtitle = "START SCORING IN MINUTES",
+                                features = listOf("BALL-BY-BALL", "LIVE UPDATES", "AUTO-SYNC", "MATCH STATS"),
+                                buttonLabel = "START QUICK SCORING",
+                                onClick = {
+                                    context.startActivity(Intent(context, StartMatchActivity::class.java))
+                                }
+                            ), blockParams(top = 18))
+                        }
+                        addView(quickScoringContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                        quickScoringContent.visibility = View.GONE
+
                         switchHostTab = switch@{ targetTab ->
                             if (targetTab == selectedHostTab) return@switch
 
-                            val showYourTournament = targetTab == 1
-                            val outgoing = if (showYourTournament) hostContent else yourTournamentContent
-                            val incoming = if (showYourTournament) yourTournamentContent else hostContent
+                            val tabContents = listOf(hostContent, yourTournamentContent, quickScoringContent)
+                            val tabButtons = listOf(hostTabButton, yourTournamentTabButton, quickScoringTabButton)
+                            val outgoing = tabContents[selectedHostTab]
+                            val incoming = tabContents[targetTab]
                             val slideDistance = width.toFloat().takeIf { it > 0f }
                                 ?: resources.displayMetrics.widthPixels.toFloat()
+                            val moveForward = targetTab > selectedHostTab
 
                             selectedHostTab = targetTab
-                            hostTabButton.isSelected = !showYourTournament
-                            yourTournamentTabButton.isSelected = showYourTournament
-                            updateHostTabStyle(hostTabButton, !showYourTournament)
-                            updateHostTabStyle(yourTournamentTabButton, showYourTournament)
+                            tabButtons.forEachIndexed { index, tab ->
+                                val isActive = index == targetTab
+                                tab.isSelected = isActive
+                                updateHostTabStyle(tab, isActive)
+                            }
 
                             incoming.visibility = View.VISIBLE
-                            incoming.translationX = if (showYourTournament) slideDistance else -slideDistance
+                            incoming.translationX = if (moveForward) slideDistance else -slideDistance
                             incoming.alpha = 0.6f
                             incoming.animate().translationX(0f).alpha(1f).setDuration(220).start()
                             outgoing.animate().alpha(0f).setDuration(140).withEndAction {
@@ -956,17 +980,27 @@ class HomeScreenView @JvmOverloads constructor(
                         yourTournamentTabButton.setOnClickListener {
                             switchHostTab(1)
                         }
+                        quickScoringTabButton.setOnClickListener {
+                            switchHostTab(2)
+                        }
 
                         addView(View(context), LinearLayout.LayoutParams(1, dp(100)))
                     }, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                 }
-                hostScroll.onTabSwipe = { swipedLeft -> switchHostTab(if (swipedLeft) 1 else 0) }
+                hostScroll.onTabSwipe = { swipedLeft ->
+                    switchHostTab((selectedHostTab + if (swipedLeft) 1 else -1).coerceIn(0, 2))
+                }
                 addView(hostScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
             }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         }
     }
 
-    private fun hostTabRow(context: Context, hostTab: TextView, yourTournamentTab: TextView): View {
+    private fun hostTabRow(
+        context: Context,
+        hostTab: TextView,
+        yourTournamentTab: TextView,
+        quickScoringTab: TextView
+    ): View {
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -998,6 +1032,19 @@ class HomeScreenView @JvmOverloads constructor(
                 updateHostTabStyle(this, false)
             }
             addView(yourTournamentTab, LinearLayout.LayoutParams(0, dp(36), 1f).apply {
+                leftMargin = dp(4)
+            })
+
+            quickScoringTab.apply {
+                text = "Quick Scoring"
+                gravity = Gravity.CENTER
+                textSize = 10f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                includeFontPadding = false
+                isSelected = false
+                updateHostTabStyle(this, false)
+            }
+            addView(quickScoringTab, LinearLayout.LayoutParams(0, dp(36), 1f).apply {
                 leftMargin = dp(4)
             })
         }

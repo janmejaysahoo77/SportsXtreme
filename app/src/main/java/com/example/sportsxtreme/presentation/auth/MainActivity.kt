@@ -67,6 +67,7 @@ import com.example.sportsxtreme.presentation.store.ShoppingActivity
 import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
 import com.example.sportsxtreme.presentation.clubs.AddMemberInClubActivity
 import com.example.sportsxtreme.presentation.clubs.MembersScreen
+import com.example.sportsxtreme.presentation.tournament.TournamentTeamInviteActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -194,6 +195,7 @@ class MainActivity : ComponentActivity() {
     private fun SportsXtremeApp() {
         val pendingInviteToken by inviteLinkViewModel.pendingInviteToken.collectAsState()
         val pendingTeamInviteToken by inviteLinkViewModel.pendingTeamInviteToken.collectAsState()
+        val pendingTournamentInviteToken by inviteLinkViewModel.pendingTournamentInviteToken.collectAsState()
         val authState by authViewModel.state.collectAsState()
         LaunchedEffect(pendingInviteToken) {
             pendingInviteToken?.let { token ->
@@ -246,6 +248,13 @@ class MainActivity : ComponentActivity() {
                     // Invalid, expired, revoked, and used links must not replay.
                     inviteLinkViewModel.consumeTeamInviteToken(token)
                 }
+            }
+        }
+        LaunchedEffect(pendingTournamentInviteToken, authState.authenticatedUser?.id) {
+            val token = pendingTournamentInviteToken
+            if (token != null && authState.authenticatedUser != null) {
+                inviteLinkViewModel.consumeTournamentInviteToken(token)
+                startActivity(Intent(this@MainActivity, TournamentTeamInviteActivity::class.java).putExtra(TournamentTeamInviteActivity.EXTRA_TOKEN, token))
             }
         }
         when (currentScreen) {
@@ -442,7 +451,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun receiveIncomingInviteToken(intent: Intent?) {
-        extractTeamInviteToken(intent)?.let(inviteLinkViewModel::receiveTeamInviteToken)
+        extractTournamentInviteToken(intent)?.let(inviteLinkViewModel::receiveTournamentInviteToken)
+            ?: extractTeamInviteToken(intent)?.let(inviteLinkViewModel::receiveTeamInviteToken)
             ?: extractInviteToken(intent)?.let(inviteLinkViewModel::receiveInviteToken)
     }
 
@@ -470,6 +480,12 @@ class MainActivity : ComponentActivity() {
         return uri.getQueryParameter(TEAM_INVITE_QUERY_PARAMETER)
             ?.trim()
             ?.takeIf { it.matches(TEAM_INVITE_TOKEN_PATTERN) }
+    }
+
+    private fun extractTournamentInviteToken(intent: Intent?): String? {
+        val uri = intent?.data ?: return null
+        if (intent.action != Intent.ACTION_VIEW || uri.scheme != INVITE_SCHEME || uri.host != INVITE_HOST || uri.path != TOURNAMENT_INVITE_PATH) return null
+        return uri.getQueryParameter(TEAM_INVITE_QUERY_PARAMETER)?.trim()?.takeIf { it.matches(TEAM_INVITE_TOKEN_PATTERN) }
     }
 
     private fun handleIncomingAuthLink(intent: Intent?): Boolean {
@@ -614,6 +630,7 @@ class MainActivity : ComponentActivity() {
         private const val INVITE_PATH = "/join"
         private const val INVITE_QUERY_PARAMETER = "invite"
         private const val TEAM_INVITE_PATH = "/team-invite"
+        private const val TOURNAMENT_INVITE_PATH = "/tournament-invite"
         private const val TEAM_INVITE_QUERY_PARAMETER = "token"
         private val TEAM_INVITE_TOKEN_PATTERN = Regex("^[A-Za-z0-9_-]{43}$")
         private const val LOCATION_FETCH_TIMEOUT_MS = 12000L
