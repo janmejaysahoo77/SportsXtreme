@@ -92,14 +92,17 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ---------- Tournaments: public read, authenticated write ----------
+    // ---------- Tournaments: organisers manage tournament details; team entries are callable-only ----------
     match /tournaments/{tournamentId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow create: if isSignedIn() && request.resource.data.hostUid == request.auth.uid;
+      allow update, delete: if isSignedIn()
+        && resource.data.hostUid == request.auth.uid
+        && request.resource.data.hostUid == resource.data.hostUid;
     }
     match /tournaments/{tournamentId}/{document=**} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow write: if false;
     }
 
     // ---------- Teams: membership and role changes are callable-only ----------

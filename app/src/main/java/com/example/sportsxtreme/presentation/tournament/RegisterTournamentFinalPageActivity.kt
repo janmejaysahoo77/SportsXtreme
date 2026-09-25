@@ -4,6 +4,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -39,6 +40,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -71,6 +73,7 @@ import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.presentation.home.HomeScreenView
 import com.example.sportsxtreme.presentation.match.StartMatchActivity
+import com.google.firebase.functions.FirebaseFunctions
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -162,7 +165,7 @@ private fun RegisterTournamentFinalPage(
                 Box(modifier = Modifier.weight(1f)) {
                     when (selectedTab) {
                         0 -> AboutTab(tournament, onSaveTournamentDetails, onSaveTeamDetails)
-                        1 -> TeamsTab()
+                        1 -> TeamsTab(tournament)
                         2 -> MatchesTab(tournament)
                         3 -> PointsTab()
                         else -> LeaderboardTab()
@@ -682,7 +685,49 @@ private fun MatchActions(modifier: Modifier, onSchedule: () -> Unit, onStart: ()
 }
 
 @Composable
-private fun TeamsTab() {
+private fun TeamsTab(tournament: Tournament?) {
+    val context = LocalContext.current
+    var isCreatingInvite by remember { mutableStateOf(false) }
+    var joinedTeams by remember(tournament?.id) { mutableStateOf(emptyList<TournamentJoinedTeam>()) }
+    DisposableEffect(tournament?.id) {
+        val tournamentId = tournament?.id.orEmpty()
+        if (tournamentId.isBlank()) return@DisposableEffect onDispose { }
+        val registration = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            .collection("tournaments").document(tournamentId).collection("teams")
+            .addSnapshotListener { snapshots, _ ->
+                joinedTeams = snapshots?.documents.orEmpty().map { document ->
+                    TournamentJoinedTeam(
+                        id = document.id,
+                        name = document.getString("teamName")?.trim().orEmpty().ifBlank { "Team" },
+                        captainUserId = document.getString("captainUserId").orEmpty()
+                    )
+                }.sortedBy { it.name.lowercase() }
+            }
+        onDispose { registration.remove() }
+    }
+    fun shareInvite() {
+        val tournamentId = tournament?.id.orEmpty()
+        if (tournamentId.isBlank()) {
+            Toast.makeText(context, "Tournament is still loading", Toast.LENGTH_SHORT).show()
+            return
+        }
+        isCreatingInvite = true
+        FirebaseFunctions.getInstance().getHttpsCallable("createTournamentInvite")
+            .call(mapOf("tournamentId" to tournamentId))
+            .addOnSuccessListener { result ->
+                isCreatingInvite = false
+                val data = result.data as? Map<*, *> ?: return@addOnSuccessListener
+                val url = data["invitationUrl"] as? String ?: return@addOnSuccessListener
+                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, "Register your team for ${tournament?.name ?: "this tournament"}: $url")
+                }, "Share tournament invitation"))
+            }
+            .addOnFailureListener { error ->
+                isCreatingInvite = false
+                Toast.makeText(context, error.message ?: "Unable to create invitation", Toast.LENGTH_LONG).show()
+            }
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -693,14 +738,23 @@ private fun TeamsTab() {
                 Text("Build your lineup before fixtures begin", color = FinalMuted, fontSize = 12.sp)
             }
             Box(Modifier.clip(RoundedCornerShape(20.dp)).background(FinalAccent.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
-                Text("0 TEAMS", color = FinalAccent, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text("${joinedTeams.size} TEAMS", color = FinalAccent, fontSize = 11.sp, fontWeight = FontWeight.Black)
             }
         }
         Spacer(Modifier.height(18.dp))
         Box(Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp)).background(FinalPanel), contentAlignment = Alignment.CenterStart) {
             Text("⌕   Search teams", color = FinalMuted, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
         }
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(16.dp))
+        if (joinedTeams.isNotEmpty()) {
+            Text("REGISTERED TEAMS", color = FinalMuted, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            joinedTeams.forEachIndexed { index, team ->
+                TournamentTeamCard(team, index + 1)
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+        Spacer(Modifier.height(12.dp))
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(FinalPanel).padding(horizontal = 20.dp, vertical = 26.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.size(84.dp).clip(CircleShape).background(FinalAccent.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
@@ -711,13 +765,32 @@ private fun TeamsTab() {
                 Spacer(Modifier.height(9.dp))
                 Text("Share one link and let captains submit their\nteams and player details directly.", color = FinalMuted, fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(24.dp))
-                FinalActionButton("SHARE INVITE LINK", filled = true)
+                FinalActionButton(if (isCreatingInvite) "CREATING LINK…" else "SHARE INVITE LINK", filled = true, enabled = !isCreatingInvite, onClick = ::shareInvite)
                 Text("OR", color = Color(0xFF65718A), fontSize = 11.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(vertical = 17.dp))
                 FinalActionButton("ADD A TEAM MANUALLY", filled = false)
             }
         }
         Spacer(Modifier.height(20.dp))
         Text("You can edit teams and players anytime before\npublishing the tournament.", color = FinalMuted, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 17.sp)
+    }
+}
+
+private data class TournamentJoinedTeam(val id: String, val name: String, val captainUserId: String)
+
+@Composable
+private fun TournamentTeamCard(team: TournamentJoinedTeam, position: Int) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(FinalPanel).border(1.dp, FinalDivider, RoundedCornerShape(15.dp)).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(FinalAccent.copy(alpha = .13f)), contentAlignment = Alignment.Center) {
+            Text(position.toString().padStart(2, '0'), color = FinalAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+        }
+        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+            Text(team.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("REGISTERED TEAM", color = FinalAccent, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 3.dp))
+        }
+        Text("✓", color = FinalAccent, fontSize = 18.sp, fontWeight = FontWeight.Black)
     }
 }
 
@@ -972,8 +1045,8 @@ private fun PointTableRow(team: String, played: String, won: String, points: Str
 }
 
 @Composable
-private fun FinalActionButton(label: String, filled: Boolean, modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(14.dp)).background(if (filled) FinalAccent else FinalPanelLight).border(if (filled) 0.dp else 1.dp, FinalAccent.copy(alpha = .55f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+private fun FinalActionButton(label: String, filled: Boolean, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit = {}) {
+    Box(modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(14.dp)).background(if (filled) FinalAccent else FinalPanelLight).border(if (filled) 0.dp else 1.dp, FinalAccent.copy(alpha = .55f), RoundedCornerShape(14.dp)).clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
         Text(label, color = Color(0xFF101604).takeIf { filled } ?: FinalAccent, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
     }
 }

@@ -7,7 +7,9 @@ initializeApp();
 
 const db = getFirestore();
 const INVITE_URL_PREFIX = "https://sportsxtreme-95fbb.web.app/team-invite?token=";
+const TOURNAMENT_INVITE_URL_PREFIX = "https://sportsxtreme-95fbb.web.app/tournament-invite?token=";
 const TEAM_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const TOURNAMENT_INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_TEAM_MEMBERS = 18;
 const ROLES = Object.freeze({ ADMIN: "ADMIN", CAPTAIN: "CAPTAIN", VICE_CAPTAIN: "VICE_CAPTAIN" });
 
@@ -125,6 +127,77 @@ exports.joinTeamInvite = onCall(async (request) => {
     console.error("joinTeamInvite failed", error);
     throw new HttpsError("internal", "Unable to join team. Please try again.");
   }
+});
+
+/** Creates a reusable invitation that lets a captain register one of their teams. */
+exports.createTournamentInvite = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before creating an invitation.");
+  const tournamentId = requireTeamId(request.data?.tournamentId);
+  const tournament = await db.collection("tournaments").doc(tournamentId).get();
+  if (!tournament.exists) throw new HttpsError("not-found", "Tournament not found.");
+  if (tournament.get("hostUid") !== request.auth.uid) {
+    throw new HttpsError("permission-denied", "Only the tournament organiser can invite teams.");
+  }
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const token = crypto.randomBytes(32).toString("base64url");
+    const inviteRef = db.collection("tournamentInvites").doc(crypto.createHash("sha256").update(token, "utf8").digest("hex"));
+    try {
+      await db.runTransaction(async (transaction) => {
+        if ((await transaction.get(inviteRef)).exists) throw new Error("TOKEN_COLLISION");
+        transaction.create(inviteRef, {
+          tournamentId,
+          organiserId: request.auth.uid,
+          status: "OPEN",
+          createdAt: FieldValue.serverTimestamp(),
+          expiresAt: new Date(Date.now() + TOURNAMENT_INVITE_TTL_MS)
+        });
+      });
+      return {
+        invitationUrl: `${TOURNAMENT_INVITE_URL_PREFIX}${encodeURIComponent(token)}`,
+        tournamentName: String(tournament.get("name") || "Tournament")
+      };
+    } catch (error) {
+      if (error?.message !== "TOKEN_COLLISION") throw error;
+    }
+  }
+  throw new HttpsError("internal", "Unable to create a unique invitation. Please try again.");
+});
+
+/** Registers a captain's team in a tournament. Membership and duplicate checks are transactional. */
+exports.joinTournamentInvite = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before joining a tournament.");
+  const token = typeof request.data?.token === "string" ? request.data.token.trim() : "";
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError("invalid-argument", "Invalid invitation link.");
+  const teamId = requireTeamId(request.data?.teamId);
+  const inviteRef = db.collection("tournamentInvites").doc(crypto.createHash("sha256").update(token, "utf8").digest("hex"));
+  return db.runTransaction(async (transaction) => {
+    const invite = await transaction.get(inviteRef);
+    if (!invite.exists || invite.get("status") !== "OPEN") throw new HttpsError("failed-precondition", "This invitation is no longer available.");
+    const expiresAt = invite.get("expiresAt");
+    if (expiresAt && expiresAt.toDate() <= new Date()) throw new HttpsError("deadline-exceeded", "This invitation has expired.");
+    const tournamentId = requireTeamId(invite.get("tournamentId"));
+    const tournamentRef = db.collection("tournaments").doc(tournamentId);
+    const tournament = await transaction.get(tournamentRef);
+    if (!tournament.exists) throw new HttpsError("not-found", "Tournament not found.");
+    const { ref: teamRef, members } = await teamInTransaction(transaction, teamId);
+    if (!isManager(findMember(members, request.auth.uid))) {
+      throw new HttpsError("permission-denied", "Only a team captain or admin can register a team.");
+    }
+    const entryRef = tournamentRef.collection("teams").doc(teamId);
+    const existingEntry = await transaction.get(entryRef);
+    if (!existingEntry.exists) {
+      const team = await transaction.get(teamRef);
+      const maxTeams = Number.parseInt(String(tournament.get("requirements")?.numberOfTeams || ""), 10);
+      const teamIds = Array.isArray(tournament.get("teamIds")) ? tournament.get("teamIds") : [];
+      if (Number.isFinite(maxTeams) && maxTeams > 0 && teamIds.length >= maxTeams) {
+        throw new HttpsError("failed-precondition", "This tournament has reached its team limit.");
+      }
+      const teamName = String(team.get("teamName") || team.get("name") || "Team").trim() || "Team";
+      transaction.create(entryRef, { teamId, teamName, captainUserId: request.auth.uid, joinedAt: FieldValue.serverTimestamp() });
+      transaction.update(tournamentRef, { teamIds: FieldValue.arrayUnion(teamId), updatedAtEpochMs: Date.now() });
+    }
+    return { tournamentId, tournamentName: String(tournament.get("name") || "Tournament"), alreadyJoined: existingEntry.exists };
+  });
 });
 
 exports.updateTeamMemberRole = onCall(async (request) => {
