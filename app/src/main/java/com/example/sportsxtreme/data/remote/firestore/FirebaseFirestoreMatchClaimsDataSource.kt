@@ -14,6 +14,13 @@ data class RemoteMatchClaims(val teamA: MatchSlotClaim? = null, val teamB: Match
 class FirebaseFirestoreMatchClaimsDataSource @Inject constructor(private val firestore: FirebaseFirestore) {
     fun observe(matchId: String): Flow<RemoteMatchClaims> = callbackFlow {
         trySend(RemoteMatchClaims())
+        // Some pre-match and tournament flows do not have a persisted match ID
+        // yet. Firestore document paths require a non-empty ID, so keep the
+        // claims stream empty until there is a real match document to observe.
+        if (matchId.isBlank()) {
+            awaitClose { }
+            return@callbackFlow
+        }
         val registration = firestore.collection("matches").document(matchId).addSnapshotListener { snapshot, _ ->
             val claim: (String) -> MatchSlotClaim? = { field ->
                 @Suppress("UNCHECKED_CAST") val map = snapshot?.get(field) as? Map<String, Any?>

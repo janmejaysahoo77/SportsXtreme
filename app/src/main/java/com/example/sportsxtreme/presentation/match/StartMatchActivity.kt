@@ -64,10 +64,20 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.domain.model.MatchType
+import com.example.sportsxtreme.domain.model.MatchTeam
+import com.example.sportsxtreme.domain.model.SportType
+import com.example.sportsxtreme.domain.model.TeamSide
+import com.example.sportsxtreme.domain.repository.CreateMatchRequest
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
+import com.example.sportsxtreme.common.Resource
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import android.widget.Toast
+import androidx.lifecycle.lifecycleScope
+import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class StartMatchActivity : ComponentActivity() {
@@ -83,6 +93,49 @@ class StartMatchActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val isScheduleFlow = intent.getBooleanExtra(EXTRA_SCHEDULE_FLOW, false)
         val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
+        val restoredMatchId = savedInstanceState?.getString(EXTRA_SCHEDULE_MATCH_ID)
+            ?: intent.getStringExtra(EXTRA_SCHEDULE_MATCH_ID)
+        val scheduleMatchCreation: Deferred<Resource<com.example.sportsxtreme.domain.model.Match>>? =
+            if (isScheduleFlow && tournamentId.isNotBlank() && restoredMatchId.isNullOrBlank()) {
+                lifecycleScope.async {
+                    val now = System.currentTimeMillis()
+                    val suffix = now.toString()
+                    matchUseCases.createMatch(
+                        CreateMatchRequest(
+                            matchType = MatchType.TOURNAMENT,
+                            sport = SportType.CRICKET,
+                            organiserId = FirebaseAuth.getInstance().currentUser?.uid ?: "local-organiser",
+                            title = "Schedule Match",
+                            teamA = MatchTeam("scheduled-team-a-$suffix", "Team A", "A", TeamSide.TEAM_A),
+                            teamB = MatchTeam("scheduled-team-b-$suffix", "Team B", "B", TeamSide.TEAM_B),
+                            tournamentId = tournamentId.takeIf { it.isNotBlank() },
+                            createdAtEpochMs = now
+                        )
+                    )
+                }
+            } else null
+        var isOpeningScheduleSetup = false
+        var scheduleMatchId = restoredMatchId
+        if (isScheduleFlow && tournamentId.isBlank()) {
+            Toast.makeText(this, "Tournament details are unavailable", Toast.LENGTH_LONG).show()
+        }
+        if (isScheduleFlow && scheduleMatchCreation != null) {
+            lifecycleScope.launch {
+                when (val result = scheduleMatchCreation.await()) {
+                    is Resource.Success -> {
+                        scheduleMatchId = result.data?.id
+                        scheduleMatchId?.let { intent.putExtra(EXTRA_SCHEDULE_MATCH_ID, it) }
+                    }
+                    is Resource.Error -> Toast.makeText(
+                        this@StartMatchActivity,
+                        result.message ?: "Unable to create scheduled match",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    is Resource.Loading -> Unit
+                }
+            }
+        }
+        val resolvedInitialMatchId = scheduleMatchId
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             LaunchedEffect(Unit) {
@@ -103,10 +156,28 @@ class StartMatchActivity : ComponentActivity() {
                 onBack = { finish() },
                 onContinue = { selectedType ->
                     if (isScheduleFlow) {
-                        startActivity(
-                            Intent(this@StartMatchActivity, LeagueMatchSetupActivity::class.java)
-                                .putExtra("tournament_id", tournamentId)
-                        )
+                        if (!isOpeningScheduleSetup) {
+                            isOpeningScheduleSetup = true
+                            lifecycleScope.launch {
+                                val matchId = resolvedInitialMatchId ?: when (val result = scheduleMatchCreation?.await()) {
+                                    is Resource.Success -> result.data?.id
+                                    is Resource.Error -> {
+                                        Toast.makeText(this@StartMatchActivity, result.message ?: "Unable to create scheduled match", Toast.LENGTH_LONG).show()
+                                        null
+                                    }
+                                    is Resource.Loading, null -> null
+                                }
+                                if (matchId.isNullOrBlank()) {
+                                    isOpeningScheduleSetup = false
+                                    return@launch
+                                }
+                                startActivity(
+                                    Intent(this@StartMatchActivity, LeagueMatchSetupActivity::class.java)
+                                        .putExtra("tournament_id", tournamentId)
+                                        .putExtra(EXTRA_SCHEDULE_MATCH_ID, matchId)
+                                )
+                            }
+                        }
                     } else {
                         viewModel.continueWith(selectedType)
                     }
@@ -117,7 +188,15 @@ class StartMatchActivity : ComponentActivity() {
         }
     }
 
-    companion object { const val EXTRA_SCHEDULE_FLOW = "schedule_flow" }
+    override fun onSaveInstanceState(outState: Bundle) {
+        intent.getStringExtra(EXTRA_SCHEDULE_MATCH_ID)?.let { outState.putString(EXTRA_SCHEDULE_MATCH_ID, it) }
+        super.onSaveInstanceState(outState)
+    }
+
+    companion object {
+        const val EXTRA_SCHEDULE_FLOW = "schedule_flow"
+        const val EXTRA_SCHEDULE_MATCH_ID = "schedule_match_id"
+    }
 }
 
 private val MatchAccent = Color(0xFFC1FF00)

@@ -21,6 +21,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -89,6 +90,8 @@ import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.TeamSide
 import com.example.sportsxtreme.domain.model.CreatedMatchInvite
 import com.google.zxing.BarcodeFormat
@@ -107,16 +110,66 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val isTournamentScheduleFlow = intent.getBooleanExtra(EXTRA_TOURNAMENT_SCHEDULE_FLOW, false)
         if (isTournamentScheduleFlow) {
-            val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
+            val tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID).orEmpty()
+            val matchId = intent.getStringExtra(EXTRA_MATCH_ID).orEmpty()
+            var teamA by mutableStateOf(intent.toSelectedTeam(EXTRA_TEAM_A_ID, EXTRA_TEAM_A_NAME))
+            var teamB by mutableStateOf(intent.toSelectedTeam(EXTRA_TEAM_B_ID, EXTRA_TEAM_B_NAME))
+            val teamPickerLauncher = registerForActivityResult(
+                ActivityResultContracts.StartActivityForResult()
+            ) { result ->
+                if (result.resultCode != RESULT_OK) return@registerForActivityResult
+                val data = result.data ?: return@registerForActivityResult
+                val id = data.getStringExtra(EXTRA_SELECTED_TEAM_ID).orEmpty()
+                val name = data.getStringExtra(EXTRA_SELECTED_TEAM_NAME).orEmpty()
+                if (id.isBlank() || name.isBlank()) return@registerForActivityResult
+                val slot = data.getStringExtra(EXTRA_TEAM_SLOT)
+                val otherTeam = if (slot == "A") teamB else teamA
+                if (otherTeam?.id == id) {
+                    Toast.makeText(this, "Choose a different team for each side", Toast.LENGTH_SHORT).show()
+                    return@registerForActivityResult
+                }
+                val selected = SelectedTeam(id, name)
+                if (slot == "A") teamA = selected else teamB = selected
+                val selectedA = if (slot == "A") selected else teamA
+                val selectedB = if (slot == "B") selected else teamB
+                if (selectedA != null && selectedB != null) {
+                    lifecycleScope.launch {
+                        if (matchId.isNotBlank()) {
+                            when (val result = matchUseCases.updateMatchTeams(matchId, selectedA.id, selectedB.id)) {
+                                is Resource.Error -> {
+                                    Toast.makeText(
+                                        this@SelectPlayingTeamsActivity,
+                                        result.message ?: "Unable to save scheduled teams",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    return@launch
+                                }
+                                is Resource.Success -> Unit
+                                is Resource.Loading -> return@launch
+                            }
+                        }
+                        startActivity(
+                            Intent(this@SelectPlayingTeamsActivity, ScheduleMatchActivity::class.java)
+                                .putExtra(ScheduleMatchActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                                .putExtra(ScheduleMatchActivity.EXTRA_MATCH_ID, matchId)
+                                .putExtra(EXTRA_TEAM_A_ID, selectedA.id)
+                                .putExtra(EXTRA_TEAM_A_NAME, selectedA.name)
+                                .putExtra(EXTRA_TEAM_B_ID, selectedB.id)
+                                .putExtra(EXTRA_TEAM_B_NAME, selectedB.name)
+                        )
+                    }
+                }
+            }
             setContent {
                 SelectPlayingTeamsScreen(
                     match = null,
-                    teamA = null,
-                    teamB = null,
+                    teamA = teamA,
+                    teamB = teamB,
+                    isTournamentScheduleFlow = true,
                     onBack = { finish() },
                     onOpenStartMatchPreview = { _, _ -> },
-                    onSelectTeamA = { openTournamentTeamsTab(tournamentId) },
-                    onSelectTeamB = { openTournamentTeamsTab(tournamentId) }
+                    onSelectTeamA = { openRegisteredTeams(tournamentId, "A", teamA, teamB, teamPickerLauncher) },
+                    onSelectTeamB = { openRegisteredTeams(tournamentId, "B", teamA, teamB, teamPickerLauncher) }
                 )
             }
             return
@@ -156,6 +209,7 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                 match = uiState.match,
                 teamA = uiState.selectedTeamA,
                 teamB = uiState.selectedTeamB,
+                isTournamentScheduleFlow = false,
                 onBack = { finish() },
                 onOpenStartMatchPreview = { selectedTeamA, selectedTeamB ->
                     viewModel.updateMatchTeams(
@@ -193,12 +247,24 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         )
     }
 
-    private fun openTournamentTeamsTab(tournamentId: String) {
-        startActivity(
-            Intent(this, RegisterTournamentFinalPageActivity::class.java)
-                .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournamentId)
-                .putExtra(RegisterTournamentFinalPageActivity.EXTRA_INITIAL_TAB, RegisterTournamentFinalPageActivity.TEAMS_TAB_INDEX)
-        )
+    private fun openRegisteredTeams(
+        tournamentId: String,
+        slot: String,
+        teamA: SelectedTeam?,
+        teamB: SelectedTeam?,
+        launcher: androidx.activity.result.ActivityResultLauncher<Intent>
+    ) {
+        if (tournamentId.isBlank()) {
+            Toast.makeText(this, "Tournament details are unavailable. Reopen Schedule Match.", Toast.LENGTH_LONG).show()
+            return
+        }
+        launcher.launch(Intent(this, RegisteredTeamsOfATournament::class.java)
+            .putExtra(EXTRA_TOURNAMENT_ID, tournamentId)
+            .putExtra(EXTRA_TEAM_SLOT, slot)
+            .putExtra(EXTRA_TEAM_A_ID, teamA?.id)
+            .putExtra(EXTRA_TEAM_A_NAME, teamA?.name)
+            .putExtra(EXTRA_TEAM_B_ID, teamB?.id)
+            .putExtra(EXTRA_TEAM_B_NAME, teamB?.name))
     }
 
     companion object {
@@ -211,6 +277,7 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         const val EXTRA_TEAM_B_ID = "team_b_id"
         const val EXTRA_TEAM_B_NAME = "team_b_name"
         const val EXTRA_TOURNAMENT_SCHEDULE_FLOW = "tournament_schedule_flow"
+        const val EXTRA_TOURNAMENT_ID = "tournament_id"
     }
 }
 
@@ -240,6 +307,7 @@ private fun SelectPlayingTeamsScreen(
     match: Match?,
     teamA: SelectedTeam?,
     teamB: SelectedTeam?,
+    isTournamentScheduleFlow: Boolean,
     onBack: () -> Unit,
     onOpenStartMatchPreview: (SelectedTeam, SelectedTeam) -> Unit,
     onSelectTeamA: () -> Unit,
@@ -287,7 +355,7 @@ private fun SelectPlayingTeamsScreen(
                 .padding(horizontal = 8.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            TeamsInfoCard(match)
+            TeamsInfoCard(match, isTournamentScheduleFlow)
             Spacer(Modifier.height(34.dp))
             AnimatedContent(
                 targetState = bothTeamsSelected,
@@ -307,16 +375,18 @@ private fun SelectPlayingTeamsScreen(
                     }
                 }
             }
-            StartMatchFadeAnimationWillOpen(
-                visible = showStartMatchFade,
-                onStartMatch = {
-                    val selectedA = displayedTeamA
-                    val selectedB = displayedTeamB
-                    if (selectedA != null && selectedB != null) {
-                        onOpenStartMatchPreview(selectedA, selectedB)
+            if (!isTournamentScheduleFlow) {
+                StartMatchFadeAnimationWillOpen(
+                    visible = showStartMatchFade,
+                    onStartMatch = {
+                        val selectedA = displayedTeamA
+                        val selectedB = displayedTeamB
+                        if (selectedA != null && selectedB != null) {
+                            onOpenStartMatchPreview(selectedA, selectedB)
+                        }
                     }
-                }
-            )
+                )
+            }
             MatchPreviewCard(teamA = displayedTeamA, teamB = displayedTeamB, modifier = Modifier.padding(top = 39.dp))
             Spacer(Modifier.height(100.dp))
         }
@@ -348,7 +418,7 @@ private fun TeamsTopBar(onBack: () -> Unit) {
 }
 
 @Composable
-private fun TeamsInfoCard(match: Match?) {
+private fun TeamsInfoCard(match: Match?, isTournamentScheduleFlow: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -372,7 +442,7 @@ private fun TeamsInfoCard(match: Match?) {
             }
         }
         Text(
-            match?.let {
+            if (isTournamentScheduleFlow) "Schedule Match" else match?.let {
                 "${it.title} • ${it.status.name.replace('_', ' ')}\n${it.teamA.name} vs ${it.teamB.name}"
             } ?: "Loading match…",
             color = Color(0xFFD3E0E6),
@@ -399,7 +469,12 @@ private fun TeamSlot(team: SelectedTeam?, emptyLabel: String, onClick: () -> Uni
             contentAlignment = Alignment.Center
         ) {
             if (team == null) {
-                Text("+", color = TeamsAccent, fontSize = 38.sp, fontWeight = FontWeight.Light)
+                Box(
+                    Modifier.fillMaxSize().clickable(onClick = onClick),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("+", color = TeamsAccent, fontSize = 38.sp, fontWeight = FontWeight.Light)
+                }
             } else {
                 TemporaryTeamLogo(team = team, modifier = Modifier.size(68.dp))
             }
