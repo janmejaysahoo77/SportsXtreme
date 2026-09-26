@@ -135,6 +135,9 @@
             android:name=".presentation.match.SelectPlayingTeamsActivity"
             android:exported="false" />
         <activity
+            android:name=".presentation.match.RegisteredTeamsOfATournament"
+            android:exported="false" />
+        <activity
             android:name=".presentation.match.StartMatchActivity"
             android:exported="false" />
         <activity

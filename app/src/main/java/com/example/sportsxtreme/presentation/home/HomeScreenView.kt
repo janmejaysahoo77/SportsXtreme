@@ -2168,12 +2168,19 @@ class HomeScreenView @JvmOverloads constructor(
         target: String = "156",
         rrr: String = "8.42",
         win: String = "NSC 61%",
-        note: String = "VCR chose to bowl - Powerplay complete"
+        note: String = "VCR chose to bowl - Powerplay complete",
+        statusTag: String = "LIVE",
+        statusColor: Int = Color.rgb(255, 38, 54),
+        scheduledDate: String? = null,
+        scheduledTime: String? = null,
+        scheduledVenue: String? = null,
+        canOpenScorecard: Boolean = true
     ): View {
         return FrameLayout(context).apply {
-            isClickable = true
-            isFocusable = true
+            isClickable = canOpenScorecard
+            isFocusable = canOpenScorecard
             setOnClickListener {
+                if (!canOpenScorecard) return@setOnClickListener
                 context.startActivity(Intent(context, ScorecardActivity::class.java).apply {
                     putExtra(ScorecardActivity.EXTRA_LEAGUE, league)
                     putExtra(ScorecardActivity.EXTRA_ROUND, round)
@@ -2224,7 +2231,7 @@ class HomeScreenView @JvmOverloads constructor(
                         })
                     }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
-                    addView(LiveBadgeView(context), LinearLayout.LayoutParams(dp(58), dp(28)))
+                    addView(LiveBadgeView(context, statusTag, statusColor), LinearLayout.LayoutParams(dp(84), dp(28)))
                 })
 
                 addView(LinearLayout(context).apply {
@@ -2254,11 +2261,14 @@ class HomeScreenView @JvmOverloads constructor(
 
                 addView(LinearLayout(context).apply {
                     gravity = Gravity.CENTER
-                    addView(scoreStatChip(context, "TARGET", target))
-                    addView(scoreStatChip(context, "RRR", rrr), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)).apply {
+                    val firstLabel = if (scheduledDate != null) "DATE" else "TARGET"
+                    val secondLabel = if (scheduledTime != null) "TIME" else "RRR"
+                    val thirdLabel = if (scheduledVenue != null) "VENUE" else "WIN"
+                    addView(scoreStatChip(context, firstLabel, scheduledDate ?: target))
+                    addView(scoreStatChip(context, secondLabel, scheduledTime ?: rrr), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)).apply {
                         leftMargin = dp(8)
                     })
-                    addView(scoreStatChip(context, "WIN", win), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)).apply {
+                    addView(scoreStatChip(context, thirdLabel, scheduledVenue ?: win), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)).apply {
                         leftMargin = dp(8)
                     })
                 }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(30)).apply {
@@ -3411,19 +3421,23 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 
-    private class LiveBadgeView(context: Context) : View(context) {
+    private class LiveBadgeView(
+        context: Context,
+        private val label: String = "LIVE",
+        private val badgeColor: Int = Color.rgb(255, 38, 54)
+    ) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private var visible = true
         private var animator: android.animation.ValueAnimator? = null
 
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()
-            startBlink()
+            if (label == "LIVE") startBlink()
         }
 
         override fun onWindowVisibilityChanged(visibility: Int) {
             super.onWindowVisibilityChanged(visibility)
-            if (visibility == VISIBLE) {
+            if (visibility == VISIBLE && label == "LIVE") {
                 startBlink()
             } else {
                 stopBlink()
@@ -3463,11 +3477,11 @@ class HomeScreenView @JvmOverloads constructor(
             paint.typeface = Typeface.DEFAULT_BOLD
             paint.textSize = 10f * resources.displayMetrics.scaledDensity
             paint.textAlign = Paint.Align.RIGHT
-            paint.color = if (visible) Color.rgb(255, 38, 54) else Color.TRANSPARENT
+            paint.color = if (visible || label != "LIVE") badgeColor else Color.TRANSPARENT
             paint.style = Paint.Style.FILL
-            canvas.drawCircle(h * 0.24f, h * 0.5f, 3.4f * resources.displayMetrics.density, paint)
+            if (label == "LIVE") canvas.drawCircle(h * 0.24f, h * 0.5f, 3.4f * resources.displayMetrics.density, paint)
             val baseline = h * 0.5f - (paint.descent() + paint.ascent()) * 0.5f
-            canvas.drawText("LIVE", w, baseline, paint)
+            canvas.drawText(label, w, baseline, paint)
         }
     }
 

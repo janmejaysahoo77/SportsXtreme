@@ -68,10 +68,19 @@ class LeagueMatchSetupActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
+        val matchId = intent.getStringExtra(StartMatchActivity.EXTRA_SCHEDULE_MATCH_ID).orEmpty()
         setContent {
             LeagueMatchSetupScreen(
                 onBack = { finish() },
-                onContinue = { startActivity(Intent(this, SelectPlayingTeamsActivity::class.java)) }
+                onContinue = {
+                    startActivity(
+                        Intent(this, SelectPlayingTeamsActivity::class.java)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_SCHEDULE_FLOW, true)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                    )
+                }
             )
         }
     }

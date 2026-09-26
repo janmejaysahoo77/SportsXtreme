@@ -90,11 +90,13 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID).orEmpty()
         val initialTab = intent.getIntExtra(EXTRA_INITIAL_TAB, 0).coerceIn(0, 4)
+        val initialMatchTab = intent.getIntExtra(EXTRA_INITIAL_MATCH_TAB, 0).coerceIn(0, 2)
         viewModel.load(tournamentId)
         setContent {
             RegisterTournamentFinalPage(
                 tournament = viewModel.tournament.collectAsState().value,
                 initialTab = initialTab,
+                initialMatchTab = initialMatchTab,
                 onBack = { finish() },
                 onSaveTournamentDetails = viewModel::saveTournamentDetails,
                 onSaveTeamDetails = viewModel::saveTeamDetails
@@ -105,6 +107,7 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
     companion object {
         const val EXTRA_TOURNAMENT_ID = "tournament_id"
         const val EXTRA_INITIAL_TAB = "initial_tab"
+        const val EXTRA_INITIAL_MATCH_TAB = "initial_match_tab"
         const val TEAMS_TAB_INDEX = 1
     }
 }
@@ -120,6 +123,7 @@ private val FinalDivider = XtremeCardBorder
 private fun RegisterTournamentFinalPage(
     tournament: Tournament?,
     initialTab: Int,
+    initialMatchTab: Int,
     onBack: () -> Unit,
     onSaveTournamentDetails: (String, String, String, String) -> Unit,
     onSaveTeamDetails: (String, String) -> Unit
@@ -166,7 +170,7 @@ private fun RegisterTournamentFinalPage(
                     when (selectedTab) {
                         0 -> AboutTab(tournament, onSaveTournamentDetails, onSaveTeamDetails)
                         1 -> TeamsTab(tournament)
-                        2 -> MatchesTab(tournament)
+                        2 -> MatchesTab(tournament, initialMatchTab)
                         3 -> PointsTab()
                         else -> LeaderboardTab()
                     }
@@ -590,12 +594,63 @@ private fun AboutDetail(label: String, value: String) {
 }
 
 @Composable
-private fun MatchesTab(tournament: Tournament?) {
+private fun MatchesTab(tournament: Tournament?, initialMatchTab: Int) {
     val context = LocalContext.current
     val homeCardFactory = remember(context) { HomeScreenView(context) }
     val tournamentName = tournament?.name?.ifBlank { "Tournament" } ?: "Tournament"
-    var selectedMatchTab by remember { mutableIntStateOf(0) }
+    var selectedMatchTab by remember(tournament?.id) { mutableIntStateOf(initialMatchTab.coerceIn(0, 2)) }
     val matchTabs = listOf("Live", "Upcoming", "Completed")
+    var upcomingMatches by remember(tournament?.id) { mutableStateOf(emptyList<ScheduledTournamentMatch>()) }
+    var isLoadingUpcoming by remember(tournament?.id) { mutableStateOf(true) }
+    var upcomingError by remember(tournament?.id) { mutableStateOf<String?>(null) }
+    DisposableEffect(tournament?.id) {
+        val tournamentId = tournament?.id.orEmpty()
+        if (tournamentId.isBlank()) {
+            isLoadingUpcoming = false
+            return@DisposableEffect onDispose { }
+        }
+        val registration = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            .collection("matches")
+            .whereEqualTo("tournamentId", tournamentId)
+            .addSnapshotListener { snapshots, error ->
+                isLoadingUpcoming = false
+                if (error != null) {
+                    upcomingError = error.message ?: "Unable to load upcoming matches"
+                    upcomingMatches = emptyList()
+                } else {
+                    upcomingError = null
+                    upcomingMatches = snapshots?.documents.orEmpty()
+                        .filter { document ->
+                            document.getString("scheduleStatus") == "SCHEDULED" &&
+                                document.getString("status") !in setOf("LIVE", "IN_PROGRESS", "COMPLETED", "ABANDONED")
+                        }
+                        .map { document ->
+                            val teamA = document.getString("teamAName")
+                                ?: (document.get("teamA") as? Map<*, *>)?.get("name") as? String
+                                ?: "Team A"
+                            val teamB = document.getString("teamBName")
+                                ?: (document.get("teamB") as? Map<*, *>)?.get("name") as? String
+                                ?: "Team B"
+                            val dateMillis = (document.get("matchDateEpochMs") as? Number)?.toLong() ?: 0L
+                            ScheduledTournamentMatch(
+                                id = document.id,
+                                tournamentName = document.getString("tournamentName").orEmpty().ifBlank { tournamentName },
+                                round = document.getString("roundName").orEmpty().ifBlank { tournament?.requirements?.tournamentFormat.orEmpty().ifBlank { "Tournament fixture" } },
+                                teamA = teamA,
+                                teamB = teamB,
+                                date = if (dateMillis > 0L) java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(dateMillis)) else "Date not set",
+                                time = document.getString("matchTime").orEmpty().ifBlank { "Time not set" },
+                                venue = document.getString("venue").orEmpty().ifBlank { "Venue not set" }
+                            )
+                        }
+                        .sortedBy { match ->
+                            snapshots?.documents?.firstOrNull { it.id == match.id }
+                                ?.getLong("matchDateEpochMs") ?: Long.MAX_VALUE
+                        }
+                }
+            }
+        onDispose { registration.remove() }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -608,8 +663,14 @@ private fun MatchesTab(tournament: Tournament?) {
                 Text("Matches", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
                 Text("Manage every tournament fixture", color = FinalMuted, fontSize = 12.sp)
             }
-            Box(Modifier.clip(RoundedCornerShape(16.dp)).background(FinalAccent.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
-                Text("2 LIVE", color = FinalAccent, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            val matchCountColor = if (selectedMatchTab == 1) Color(0xFFFFC107) else FinalAccent
+            val matchCountLabel = when (selectedMatchTab) {
+                1 -> "${upcomingMatches.size} UPCOMING"
+                2 -> "COMPLETED"
+                else -> "2 LIVE"
+            }
+            Box(Modifier.clip(RoundedCornerShape(16.dp)).background(matchCountColor.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
+                Text(matchCountLabel, color = matchCountColor, fontSize = 10.sp, fontWeight = FontWeight.Black)
             }
         }
         MatchStatusTabs(matchTabs, selectedMatchTab) { selectedMatchTab = it }
@@ -621,7 +682,14 @@ private fun MatchesTab(tournament: Tournament?) {
                 .padding(top = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            MatchStatusContent(selectedMatchTab, tournamentName, homeCardFactory)
+            MatchStatusContent(
+                selectedTab = selectedMatchTab,
+                tournamentName = tournamentName,
+                homeCardFactory = homeCardFactory,
+                upcomingMatches = upcomingMatches,
+                isLoadingUpcoming = isLoadingUpcoming,
+                upcomingError = upcomingError
+            )
         }
         MatchActions(
             modifier = Modifier,
@@ -654,15 +722,71 @@ private fun MatchStatusTabs(tabs: List<String>, selectedTab: Int, onTabSelected:
     }
 }
 
+private data class ScheduledTournamentMatch(
+    val id: String,
+    val tournamentName: String,
+    val round: String,
+    val teamA: String,
+    val teamB: String,
+    val date: String,
+    val time: String,
+    val venue: String
+)
+
 @Composable
-private fun MatchStatusContent(selectedTab: Int, tournamentName: String, homeCardFactory: HomeScreenView) {
+private fun MatchStatusContent(
+    selectedTab: Int,
+    tournamentName: String,
+    homeCardFactory: HomeScreenView,
+    upcomingMatches: List<ScheduledTournamentMatch>,
+    isLoadingUpcoming: Boolean,
+    upcomingError: String?
+) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (selectedTab == 0) {
             AndroidView(factory = { homeCardFactory.createHeroScoreCard(it, tournamentName.uppercase(), "Match 01") }, modifier = Modifier.fillMaxWidth().height(272.dp))
             AndroidView(factory = { homeCardFactory.createHeroScoreCard(it, tournamentName.uppercase(), "Match 02", "BBS", "96/2", "11.3 OV", "KDP", "94/7", "15.0 OV", "148", "7.86", "BBS 68%", "BBS need 52 from 51 balls") }, modifier = Modifier.fillMaxWidth().height(272.dp))
+        } else if (selectedTab == 1 && upcomingMatches.isNotEmpty()) {
+            upcomingMatches.forEach { match ->
+                AndroidView(
+                    factory = { context ->
+                        homeCardFactory.createHeroScoreCard(
+                            context = context,
+                            league = match.tournamentName.uppercase(),
+                            round = match.round,
+                            leftName = match.teamA,
+                            leftScore = "—",
+                            leftOvers = "TEAM A",
+                            rightName = match.teamB,
+                            rightScore = "—",
+                            rightOvers = "TEAM B",
+                            target = match.date,
+                            rrr = match.time,
+                            win = match.venue.take(12).uppercase(),
+                            note = "Venue: ${match.venue}",
+                            statusTag = "UPCOMING",
+                            statusColor = android.graphics.Color.rgb(255, 193, 7),
+                            scheduledDate = match.date,
+                            scheduledTime = match.time,
+                            scheduledVenue = match.venue.take(12).uppercase(),
+                            canOpenScorecard = false
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth().height(272.dp)
+                )
+            }
         } else {
-            val title = if (selectedTab == 1) "No upcoming matches" else "No completed matches"
-            val message = if (selectedTab == 1) "Schedule a match to add it here." else "Finished scorecards will appear here."
+            val title = when {
+                selectedTab == 1 && isLoadingUpcoming -> "Loading upcoming matches…"
+                selectedTab == 1 && upcomingError != null -> "Couldn't load upcoming matches"
+                selectedTab == 1 -> "No upcoming matches"
+                else -> "No completed matches"
+            }
+            val message = when {
+                selectedTab == 1 && upcomingError != null -> upcomingError
+                selectedTab == 1 -> "Scheduled tournament fixtures will appear here."
+                else -> "Finished scorecards will appear here."
+            }
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(FinalPanel).border(1.dp, FinalDivider, RoundedCornerShape(16.dp)).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(7.dp))
