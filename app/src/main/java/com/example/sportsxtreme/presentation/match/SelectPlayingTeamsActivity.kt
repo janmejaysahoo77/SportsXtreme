@@ -94,6 +94,8 @@ import kotlinx.coroutines.launch
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.TeamSide
 import com.example.sportsxtreme.domain.model.CreatedMatchInvite
+import com.example.sportsxtreme.domain.repository.TournamentRepository
+import com.example.sportsxtreme.domain.model.Tournament
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -102,6 +104,7 @@ import android.graphics.Bitmap
 @AndroidEntryPoint
 class SelectPlayingTeamsActivity : ComponentActivity() {
     @Inject lateinit var matchUseCases: MatchUseCases
+    @Inject lateinit var tournamentRepository: TournamentRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -111,7 +114,17 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         val isTournamentScheduleFlow = intent.getBooleanExtra(EXTRA_TOURNAMENT_SCHEDULE_FLOW, false)
         if (isTournamentScheduleFlow) {
             val tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID).orEmpty()
+            val selectedStage = intent.getStringExtra(EXTRA_SELECTED_STAGE).orEmpty()
+            val tournamentName = mutableStateOf<String?>(null)
             val matchId = intent.getStringExtra(EXTRA_MATCH_ID).orEmpty()
+            if (selectedStage.isNotBlank() && tournamentId.isNotBlank()) {
+                lifecycleScope.launch {
+                    when (val result = tournamentRepository.getTournament(tournamentId)) {
+                        is Resource.Success -> tournamentName.value = result.data?.name?.takeIf { it.isNotBlank() }
+                        is Resource.Error, is Resource.Loading -> Unit
+                    }
+                }
+            }
             var teamA by mutableStateOf(intent.toSelectedTeam(EXTRA_TEAM_A_ID, EXTRA_TEAM_A_NAME))
             var teamB by mutableStateOf(intent.toSelectedTeam(EXTRA_TEAM_B_ID, EXTRA_TEAM_B_NAME))
             val teamPickerLauncher = registerForActivityResult(
@@ -149,14 +162,12 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                             }
                         }
                         startActivity(
-                            Intent(this@SelectPlayingTeamsActivity, ScheduleMatchActivity::class.java)
-                                .putExtra(ScheduleMatchActivity.EXTRA_TOURNAMENT_ID, tournamentId)
-                                .putExtra(ScheduleMatchActivity.EXTRA_MATCH_ID, matchId)
-                                .putExtra(EXTRA_TEAM_A_ID, selectedA.id)
-                                .putExtra(EXTRA_TEAM_A_NAME, selectedA.name)
-                                .putExtra(EXTRA_TEAM_B_ID, selectedB.id)
-                                .putExtra(EXTRA_TEAM_B_NAME, selectedB.name)
+                            Intent(this@SelectPlayingTeamsActivity, StartMatchPreviewActivity::class.java)
+                                .putExtra(EXTRA_MATCH_ID, matchId)
+                                .putExtra(StartMatchPreviewActivity.EXTRA_TOURNAMENT_NAME, tournamentName.value.orEmpty())
+                                .putExtra(StartMatchPreviewActivity.EXTRA_SELECTED_STAGE, selectedStage)
                         )
+                        finish()
                     }
                 }
             }
@@ -166,6 +177,8 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                     teamA = teamA,
                     teamB = teamB,
                     isTournamentScheduleFlow = true,
+                    tournamentName = tournamentName.value,
+                    selectedStage = selectedStage,
                     onBack = { finish() },
                     onOpenStartMatchPreview = { _, _ -> },
                     onSelectTeamA = { openRegisteredTeams(tournamentId, "A", teamA, teamB, teamPickerLauncher) },
@@ -278,6 +291,7 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         const val EXTRA_TEAM_B_NAME = "team_b_name"
         const val EXTRA_TOURNAMENT_SCHEDULE_FLOW = "tournament_schedule_flow"
         const val EXTRA_TOURNAMENT_ID = "tournament_id"
+        const val EXTRA_SELECTED_STAGE = "selected_stage"
     }
 }
 
@@ -308,6 +322,8 @@ private fun SelectPlayingTeamsScreen(
     teamA: SelectedTeam?,
     teamB: SelectedTeam?,
     isTournamentScheduleFlow: Boolean,
+    tournamentName: String? = null,
+    selectedStage: String = "",
     onBack: () -> Unit,
     onOpenStartMatchPreview: (SelectedTeam, SelectedTeam) -> Unit,
     onSelectTeamA: () -> Unit,
@@ -355,7 +371,7 @@ private fun SelectPlayingTeamsScreen(
                 .padding(horizontal = 8.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            TeamsInfoCard(match, isTournamentScheduleFlow)
+            TeamsInfoCard(match, isTournamentScheduleFlow, tournamentName, selectedStage)
             Spacer(Modifier.height(34.dp))
             AnimatedContent(
                 targetState = bothTeamsSelected,
@@ -418,7 +434,7 @@ private fun TeamsTopBar(onBack: () -> Unit) {
 }
 
 @Composable
-private fun TeamsInfoCard(match: Match?, isTournamentScheduleFlow: Boolean) {
+private fun TeamsInfoCard(match: Match?, isTournamentScheduleFlow: Boolean, tournamentName: String?, selectedStage: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -441,16 +457,37 @@ private fun TeamsInfoCard(match: Match?, isTournamentScheduleFlow: Boolean) {
                 drawCircle(Color.White, radius = size.minDimension * 0.08f)
             }
         }
-        Text(
-            if (isTournamentScheduleFlow) "Schedule Match" else match?.let {
-                "${it.title} • ${it.status.name.replace('_', ' ')}\n${it.teamA.name} vs ${it.teamB.name}"
-            } ?: "Loading match…",
-            color = Color(0xFFD3E0E6),
-            fontSize = 8.5.sp,
-            lineHeight = 11.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 13.dp).weight(1f)
-        )
+        if (isTournamentScheduleFlow && selectedStage.isNotBlank()) {
+            Column(Modifier.padding(start = 13.dp).weight(1f)) {
+                Text(
+                    tournamentName ?: "Loading tournament…",
+                    color = Color(0xFFD3E0E6),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    selectedStage,
+                    color = TeamsAccent,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 3.dp),
+                    maxLines = 1
+                )
+            }
+        } else {
+            Text(
+                if (isTournamentScheduleFlow) "Schedule Match" else match?.let {
+                    "${it.title} • ${it.status.name.replace('_', ' ')}\n${it.teamA.name} vs ${it.teamB.name}"
+                } ?: "Loading match…",
+                color = Color(0xFFD3E0E6),
+                fontSize = 8.5.sp,
+                lineHeight = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 13.dp).weight(1f)
+            )
+        }
     }
 }
 

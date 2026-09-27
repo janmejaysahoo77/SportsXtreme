@@ -69,6 +69,7 @@ import com.example.sportsxtreme.domain.model.SportType
 import com.example.sportsxtreme.domain.model.TeamSide
 import com.example.sportsxtreme.domain.repository.CreateMatchRequest
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
+import com.example.sportsxtreme.domain.repository.TournamentRepository
 import com.example.sportsxtreme.common.Resource
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -82,6 +83,7 @@ import kotlinx.coroutines.launch
 @AndroidEntryPoint
 class StartMatchActivity : ComponentActivity() {
     @Inject lateinit var matchUseCases: MatchUseCases
+    @Inject lateinit var tournamentRepository: TournamentRepository
     private val viewModel: StartMatchViewModel by viewModels {
         StartMatchViewModel.factory(matchUseCases)
     }
@@ -92,11 +94,23 @@ class StartMatchActivity : ComponentActivity() {
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val isScheduleFlow = intent.getBooleanExtra(EXTRA_SCHEDULE_FLOW, false)
+        val tournamentOnlyFlow = intent.getBooleanExtra(EXTRA_TOURNAMENT_ONLY_FLOW, false)
+        val isTournamentSetupFlow = isScheduleFlow || tournamentOnlyFlow
         val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
+        val tournamentName = androidx.compose.runtime.mutableStateOf<String?>(null)
+        if (tournamentOnlyFlow && tournamentId.isNotBlank()) {
+            lifecycleScope.launch {
+                when (val result = tournamentRepository.getTournament(tournamentId)) {
+                    is Resource.Success -> tournamentName.value = result.data?.name?.takeIf { it.isNotBlank() }
+                    is Resource.Error -> Unit
+                    is Resource.Loading -> Unit
+                }
+            }
+        }
         val restoredMatchId = savedInstanceState?.getString(EXTRA_SCHEDULE_MATCH_ID)
             ?: intent.getStringExtra(EXTRA_SCHEDULE_MATCH_ID)
         val scheduleMatchCreation: Deferred<Resource<com.example.sportsxtreme.domain.model.Match>>? =
-            if (isScheduleFlow && tournamentId.isNotBlank() && restoredMatchId.isNullOrBlank()) {
+            if (isTournamentSetupFlow && tournamentId.isNotBlank() && restoredMatchId.isNullOrBlank()) {
                 lifecycleScope.async {
                     val now = System.currentTimeMillis()
                     val suffix = now.toString()
@@ -116,10 +130,10 @@ class StartMatchActivity : ComponentActivity() {
             } else null
         var isOpeningScheduleSetup = false
         var scheduleMatchId = restoredMatchId
-        if (isScheduleFlow && tournamentId.isBlank()) {
+        if (isTournamentSetupFlow && tournamentId.isBlank()) {
             Toast.makeText(this, "Tournament details are unavailable", Toast.LENGTH_LONG).show()
         }
-        if (isScheduleFlow && scheduleMatchCreation != null) {
+        if (isTournamentSetupFlow && scheduleMatchCreation != null) {
             lifecycleScope.launch {
                 when (val result = scheduleMatchCreation.await()) {
                     is Resource.Success -> {
@@ -155,7 +169,7 @@ class StartMatchActivity : ComponentActivity() {
             StartMatchScreen(
                 onBack = { finish() },
                 onContinue = { selectedType ->
-                    if (isScheduleFlow) {
+                    if (isTournamentSetupFlow) {
                         if (!isOpeningScheduleSetup) {
                             isOpeningScheduleSetup = true
                             lifecycleScope.launch {
@@ -183,7 +197,9 @@ class StartMatchActivity : ComponentActivity() {
                     }
                 },
                 isLoading = uiState.isLoading,
-                isScheduleFlow = isScheduleFlow
+                isScheduleFlow = isScheduleFlow || tournamentOnlyFlow,
+                tournamentOnlyFlow = tournamentOnlyFlow,
+                tournamentName = tournamentName.value
             )
         }
     }
@@ -195,6 +211,7 @@ class StartMatchActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_SCHEDULE_FLOW = "schedule_flow"
+        const val EXTRA_TOURNAMENT_ONLY_FLOW = "tournament_only_flow"
         const val EXTRA_SCHEDULE_MATCH_ID = "schedule_match_id"
     }
 }
@@ -212,7 +229,9 @@ private fun StartMatchScreen(
     onBack: () -> Unit,
     onContinue: (MatchType) -> Unit,
     isLoading: Boolean,
-    isScheduleFlow: Boolean
+    isScheduleFlow: Boolean,
+    tournamentOnlyFlow: Boolean,
+    tournamentName: String?
 ) {
     var selectedType by remember { mutableIntStateOf(0) }
     var selectedTournament by remember { mutableIntStateOf(0) }
@@ -245,23 +264,35 @@ private fun StartMatchScreen(
                 MatchHeroCard()
                 PremiumMetricRow()
                 SectionTitle("MATCH FORMAT")
-                MatchTypeCard("Tournament Match", "Part of a tournament or league competition.", MatchIcon.BAT, selectedType == 0) { selectedType = 0 }
+                MatchTypeCard("Tournament Match", "Part of a tournament or league competition.", MatchIcon.BAT, selectedType == 0 || isScheduleFlow) { selectedType = 0 }
                 MatchTypeCard("Series Match", "Create a multi-match series between teams.", MatchIcon.BAT, selectedType == 1, enabled = !isScheduleFlow) { selectedType = 1 }
                 MatchTypeCard("Friendly Match", "Casual, Practice & Quick Setup", MatchIcon.HANDSHAKE, selectedType == 2, enabled = !isScheduleFlow) { selectedType = 2 }
                 if (selectedType != 2) {
-                    SectionTitle("SELECT TOURNAMENT", "SEE ALL")
-                    TournamentCard(
-                        title = "Dubai Premier League",
-                        subtitle = "ACTIVE SEASON 2024",
-                        imageRes = R.drawable.ground,
-                        selected = selectedTournament == 0
-                    ) { selectedTournament = 0 }
-                    TournamentCard(
-                        title = "KPL Knockout",
-                        subtitle = "REGISTRATION OPEN",
-                        imageRes = null,
-                        selected = selectedTournament == 1
-                    ) { selectedTournament = 1 }
+                    if (tournamentOnlyFlow) {
+                        if (!tournamentName.isNullOrBlank()) {
+                            SectionTitle("TOURNAMENT")
+                            TournamentCard(
+                                title = tournamentName,
+                                subtitle = "SELECTED TOURNAMENT",
+                                imageRes = null,
+                                selected = true
+                            ) { }
+                        }
+                    } else {
+                        SectionTitle("SELECT TOURNAMENT", "SEE ALL")
+                        TournamentCard(
+                            title = "Dubai Premier League",
+                            subtitle = "ACTIVE SEASON 2024",
+                            imageRes = R.drawable.ground,
+                            selected = selectedTournament == 0
+                        ) { selectedTournament = 0 }
+                        TournamentCard(
+                            title = "KPL Knockout",
+                            subtitle = "REGISTRATION OPEN",
+                            imageRes = null,
+                            selected = selectedTournament == 1
+                        ) { selectedTournament = 1 }
+                    }
                     SectionTitle("SELECT TOURNAMENT STAGE")
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         StageCard(

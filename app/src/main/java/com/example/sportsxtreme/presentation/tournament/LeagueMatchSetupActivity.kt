@@ -14,8 +14,10 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
 import android.content.Intent
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -36,8 +38,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,8 +63,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.domain.repository.TournamentRepository
+import com.example.sportsxtreme.domain.model.Tournament
+import com.example.sportsxtreme.common.Resource
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class LeagueMatchSetupActivity : ComponentActivity() {
+    @Inject lateinit var tournamentRepository: TournamentRepository
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
@@ -70,15 +82,60 @@ class LeagueMatchSetupActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
         val matchId = intent.getStringExtra(StartMatchActivity.EXTRA_SCHEDULE_MATCH_ID).orEmpty()
+        val tournamentState = mutableStateOf<Tournament?>(null)
+        val selectedStage = mutableStateOf("League Stage")
+        val isSavingStage = mutableStateOf(false)
+        val stageSaveError = mutableStateOf<String?>(null)
+        lifecycleScope.launch {
+            when (val result = tournamentRepository.getTournament(tournamentId)) {
+                is Resource.Success -> tournamentState.value = result.data
+                is Resource.Error, is Resource.Loading -> Unit
+            }
+        }
         setContent {
+            val tournament = tournamentState.value
+            val stage = selectedStage.value
+            val saving = isSavingStage.value
+            val saveError = stageSaveError.value
             LeagueMatchSetupScreen(
+                tournament = tournament,
+                selectedStage = stage,
+                isSavingStage = saving,
+                stageSaveError = saveError,
                 onBack = { finish() },
+                onStageSelected = { selected ->
+                    selectedStage.value = selected
+                    if (matchId.isNotBlank()) {
+                        lifecycleScope.launch {
+                            isSavingStage.value = true
+                            stageSaveError.value = null
+                            val saveResult = runCatching {
+                                FirebaseFirestore.getInstance().collection("matches").document(matchId)
+                                    .update(
+                                        mapOf(
+                                            "roundName" to selected,
+                                            "selectedStage" to selected,
+                                            "tournamentName" to tournament?.name.orEmpty(),
+                                            "tournamentLocation" to (tournament?.city?.ifBlank { tournament.requirements.location }.orEmpty()),
+                                            "tournamentTeamCount" to tournament?.requirements?.numberOfTeams.orEmpty()
+                                        )
+                                    ).await()
+                            }
+                            if (saveResult.isFailure) {
+                                stageSaveError.value = "Could not save stage. Please try again."
+                                Toast.makeText(this@LeagueMatchSetupActivity, "Could not save selected stage", Toast.LENGTH_SHORT).show()
+                            }
+                            isSavingStage.value = false
+                        }
+                    }
+                },
                 onContinue = {
                     startActivity(
                         Intent(this, SelectPlayingTeamsActivity::class.java)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_SCHEDULE_FLOW, true)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_STAGE, stage)
                     )
                 }
             )
@@ -93,12 +150,19 @@ private val SetupCard = XtremeCardBlue
 private val SetupMuted = XtremeMuted
 
 @Composable
-private fun LeagueMatchSetupScreen(onBack: () -> Unit, onContinue: () -> Unit) {
-    var selectedStage by remember { mutableIntStateOf(0) }
+private fun LeagueMatchSetupScreen(
+    tournament: Tournament?,
+    selectedStage: String,
+    isSavingStage: Boolean,
+    stageSaveError: String?,
+    onBack: () -> Unit,
+    onStageSelected: (String) -> Unit,
+    onContinue: () -> Unit
+) {
     val stages = listOf(
-        SetupStage("League Stage", "SELECTED", SetupGlyph.LEAGUE, R.drawable.tournamentlogo, true),
-        SetupStage("Semi Final", "AVAILABLE ROUND", SetupGlyph.FLAME, R.drawable.otherball, false),
-        SetupStage("Final", "AVAILABLE ROUND", SetupGlyph.TROPHY, R.drawable.finalicon, false)
+        SetupStage("League Stage", if (selectedStage == "League Stage") "SELECTED" else "AVAILABLE ROUND", SetupGlyph.LEAGUE, R.drawable.tournamentlogo, true),
+        SetupStage("Semi Final", if (selectedStage == "Semi Final") "SELECTED" else "AVAILABLE ROUND", SetupGlyph.FLAME, R.drawable.otherball, true),
+        SetupStage("Final", if (selectedStage == "Final") "SELECTED" else "AVAILABLE ROUND", SetupGlyph.TROPHY, R.drawable.finalicon, true)
     )
 
     Column(
@@ -125,19 +189,23 @@ private fun LeagueMatchSetupScreen(onBack: () -> Unit, onContinue: () -> Unit) {
                 lineHeight = 17.sp,
                 fontWeight = FontWeight.Medium
             )
-            SetupTournamentCard()
+            SetupTournamentCard(tournament)
             SetupSectionTitle("TOURNAMENT PROGRESSION")
-            SetupProgressionCard()
+            SetupProgressionCard(selectedStage)
             SetupSectionTitle("SELECT STAGE")
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                stages.forEachIndexed { index, stage ->
+                stages.forEach { stage ->
                     StageSelectCard(
                         stage = stage,
-                        selected = selectedStage == index,
-                        onClick = { selectedStage = index }
+                        selected = selectedStage == stage.title,
+                        onClick = { onStageSelected(stage.title) }
                     )
                 }
             }
+            if (isSavingStage) {
+                Text("Saving selected stage…", color = SetupAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+            stageSaveError?.let { Text(it, color = Color(0xFFFF8B8B), fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             SetupInfoCard()
             Spacer(Modifier.height(72.dp))
         }
@@ -148,7 +216,7 @@ private fun LeagueMatchSetupScreen(onBack: () -> Unit, onContinue: () -> Unit) {
             .padding(horizontal = 8.dp, vertical = 18.dp),
         contentAlignment = Alignment.BottomCenter
     ) {
-        SetupContinueButton(onContinue)
+        SetupContinueButton(onContinue, enabled = !isSavingStage && stageSaveError == null)
     }
 }
 
@@ -177,7 +245,11 @@ private fun SetupTopBar(onBack: () -> Unit) {
 }
 
 @Composable
-private fun SetupTournamentCard() {
+private fun SetupTournamentCard(tournament: Tournament?) {
+    val location = tournament?.city?.takeIf { it.isNotBlank() }
+        ?: tournament?.requirements?.location?.takeIf { it.isNotBlank() }
+        ?: "Location not set"
+    val teamCount = tournament?.requirements?.numberOfTeams?.takeIf { it.isNotBlank() } ?: "—"
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -213,7 +285,7 @@ private fun SetupTournamentCard() {
                 .background(SetupAccent)
         )
         Column(modifier = Modifier.padding(start = 15.dp).weight(1f)) {
-            Text("Dubai Premier League", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Text(tournament?.name?.ifBlank { "Tournament" } ?: "Loading tournament…", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Box(
                 modifier = Modifier
                     .padding(top = 8.dp)
@@ -225,13 +297,13 @@ private fun SetupTournamentCard() {
             }
             Row(modifier = Modifier.padding(top = 32.dp), verticalAlignment = Alignment.CenterVertically) {
                 SetupGlyphIcon(SetupGlyph.PIN, Modifier.size(19.dp), SetupAccent)
-                Text("Dubai", color = Color.White, fontSize = 16.5.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 8.dp))
+                Text(location, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 SetupGlyphIcon(SetupGlyph.TEAMS, Modifier.padding(start = 22.dp).size(19.dp), SetupAccent)
-                Text("8 Teams", color = Color.White, fontSize = 16.5.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 7.dp))
+                Text("$teamCount Teams", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 7.dp), maxLines = 1)
             }
             Row(modifier = Modifier.padding(top = 23.dp), verticalAlignment = Alignment.CenterVertically) {
                 SetupGlyphIcon(SetupGlyph.TROPHY, Modifier.size(18.dp), SetupAccent)
-                Text("Championship", color = Color.White, fontSize = 16.5.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 8.dp))
+                Text(tournament?.requirements?.tournamentFormat?.ifBlank { "Tournament" } ?: "Tournament", color = Color.White, fontSize = 16.5.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 8.dp))
             }
         }
         Box(
@@ -265,7 +337,7 @@ private fun SetupSectionTitle(text: String) {
 }
 
 @Composable
-private fun SetupProgressionCard() {
+private fun SetupProgressionCard(selectedStage: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -285,11 +357,11 @@ private fun SetupProgressionCard() {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        ProgressionNode("LEAGUE STAGE", R.drawable.tournamentlogo, true)
+        ProgressionNode("LEAGUE STAGE", R.drawable.tournamentlogo, selectedStage == "League Stage")
         ProgressionConnector()
-        ProgressionNode("SEMI FINAL", R.drawable.otherball, false)
+        ProgressionNode("SEMI FINAL", R.drawable.otherball, selectedStage == "Semi Final")
         ProgressionConnector()
-        ProgressionNode("FINAL", R.drawable.finalicon, false)
+        ProgressionNode("FINAL", R.drawable.finalicon, selectedStage == "Final")
     }
 }
 
@@ -420,7 +492,7 @@ private fun SetupInfoCard() {
 }
 
 @Composable
-private fun SetupContinueButton(onClick: () -> Unit) {
+private fun SetupContinueButton(onClick: () -> Unit, enabled: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -428,7 +500,7 @@ private fun SetupContinueButton(onClick: () -> Unit) {
             .shadow(22.dp, RoundedCornerShape(12.dp), clip = false)
             .clip(RoundedCornerShape(12.dp))
             .background(SetupAccent)
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -443,7 +515,7 @@ private fun SetupContinueButton(onClick: () -> Unit) {
             drawCircle(Color(0xFF111604), radius = size.minDimension * 0.43f, style = Stroke(width = 1.5.dp.toPx()))
             drawPath(path, Color(0xFF111604))
         }
-        Text("CONTINUE", color = Color(0xFF111604), fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 10.dp))
+        Text("CONTINUE", color = if (enabled) Color(0xFF111604) else Color(0xFF536040), fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 10.dp))
     }
 }
 
