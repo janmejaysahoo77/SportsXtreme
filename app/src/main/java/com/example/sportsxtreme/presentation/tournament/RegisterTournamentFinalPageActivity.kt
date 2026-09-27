@@ -6,8 +6,10 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -24,20 +26,23 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -59,11 +64,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -73,6 +82,8 @@ import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.presentation.home.HomeScreenView
 import com.example.sportsxtreme.presentation.match.StartMatchActivity
+import com.example.sportsxtreme.presentation.match.RegisteredTeamsOfATournament
+import com.example.sportsxtreme.presentation.match.SelectPlayingTeamsActivity
 import com.google.firebase.functions.FirebaseFunctions
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
@@ -129,6 +140,8 @@ private fun RegisterTournamentFinalPage(
     onSaveTeamDetails: (String, String) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(initialTab) }
+    var pointsGroupName by remember { mutableStateOf<String?>(null) }
+    var pointsGroupTeams by remember { mutableStateOf<List<PointsGroupTeam>>(emptyList()) }
     val tabs = listOf("Overview", "Teams", "Matches", "Points", "Leaderboard")
     Column(Modifier.fillMaxSize().background(FinalBg)) {
         FinalTopBar(onBack)
@@ -171,7 +184,13 @@ private fun RegisterTournamentFinalPage(
                         0 -> AboutTab(tournament, onSaveTournamentDetails, onSaveTeamDetails)
                         1 -> TeamsTab(tournament)
                         2 -> MatchesTab(tournament, initialMatchTab)
-                        3 -> PointsTab()
+                        3 -> PointsTab(
+                            tournamentId = tournament?.id.orEmpty(),
+                            groupName = pointsGroupName,
+                            teams = pointsGroupTeams,
+                            onGroupNameChange = { pointsGroupName = it },
+                            onTeamsChange = { pointsGroupTeams = it }
+                        )
                         else -> LeaderboardTab()
                     }
                 }
@@ -700,7 +719,13 @@ private fun MatchesTab(tournament: Tournament?, initialMatchTab: Int) {
                         .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournament?.id)
                 )
             },
-            onStart = { context.startActivity(Intent(context, StartMatchActivity::class.java)) }
+            onStart = {
+                context.startActivity(
+                    Intent(context, StartMatchActivity::class.java)
+                        .putExtra(StartMatchActivity.EXTRA_TOURNAMENT_ONLY_FLOW, true)
+                        .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournament?.id)
+                )
+            }
         )
     }
 }
@@ -918,24 +943,65 @@ private fun TournamentTeamCard(team: TournamentJoinedTeam, position: Int) {
     }
 }
 
+private data class PointsGroupTeam(val id: String, val name: String)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PointsTab() {
-    var groupName by remember { mutableStateOf<String?>(null) }
+private fun PointsTab(
+    tournamentId: String,
+    groupName: String?,
+    teams: List<PointsGroupTeam>,
+    onGroupNameChange: (String?) -> Unit,
+    onTeamsChange: (List<PointsGroupTeam>) -> Unit
+) {
     var draftGroupName by remember { mutableStateOf("") }
     var showCreateGroupSheet by remember { mutableStateOf(false) }
     var showNameSuggestions by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
+    val registeredTeamPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val selectedId = result.data?.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID).orEmpty()
+            val selectedName = result.data?.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME).orEmpty()
+            if (selectedId.isNotBlank()) {
+                val selectedTeams = teams
+                if (selectedTeams.none { it.id == selectedId }) {
+                    onTeamsChange(selectedTeams + PointsGroupTeam(selectedId, selectedName.ifBlank { "Team" }))
+                }
+            }
+        }
+    }
 
-    if (groupName != null) {
-        GroupPointsTab(
-            groupName = groupName.orEmpty(),
-            onDeleteGroup = { groupName = null }
-        )
-    } else {
-        NoGroupsPointsTab(onCreateGroup = {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 12.dp)
+    ) {
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            if (groupName != null) {
+                GroupPointsTab(
+                    groupName = groupName.orEmpty(),
+                    teams = teams,
+                    onAddTeam = {
+                        if (tournamentId.isNotBlank()) {
+                            registeredTeamPicker.launch(
+                                Intent(context, RegisteredTeamsOfATournament::class.java)
+                                    .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                            )
+                        } else {
+                            Toast.makeText(context, "Tournament is still loading", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onDeleteGroup = { onGroupNameChange(null); onTeamsChange(emptyList()) }
+                )
+            } else {
+                NoGroupsPointsTab()
+            }
+        }
+        CreateGroupButton {
             draftGroupName = ""
             showCreateGroupSheet = true
-        })
+        }
     }
 
     if (showCreateGroupSheet) {
@@ -943,37 +1009,77 @@ private fun PointsTab() {
             onDismissRequest = { showCreateGroupSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = FinalPanel,
-            contentColor = Color.White
+            contentColor = Color.White,
+            scrimColor = Color.Black.copy(alpha = 0.68f),
+            tonalElevation = 0.dp
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 22.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text("Create new group", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
                 Text("Name the group for its teams and points table.", color = FinalMuted, fontSize = 13.sp)
-                ExposedDropdownMenuBox(
-                    expanded = showNameSuggestions,
-                    onExpandedChange = { showNameSuggestions = !showNameSuggestions }
-                ) {
-                    OutlinedTextField(
-                        value = draftGroupName,
-                        onValueChange = { if (it.length <= 30) draftGroupName = it },
-                        modifier = Modifier.fillMaxWidth().menuAnchor(),
-                        label = { Text("Group name") },
-                        placeholder = { Text("Enter a name or select GROUP A") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showNameSuggestions) },
-                        singleLine = true
-                    )
+                Box(Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = draftGroupName,
+                            onValueChange = { if (it.length <= 30) draftGroupName = it },
+                            modifier = Modifier
+                                .weight(1f)
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused) keyboardController?.show()
+                                },
+                            label = { Text("Group name") },
+                            placeholder = { Text("Enter a name or select GROUP A") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedContainerColor = FinalBg,
+                                unfocusedContainerColor = FinalBg,
+                                disabledContainerColor = FinalBg,
+                                cursorColor = FinalAccent,
+                                focusedBorderColor = FinalAccent,
+                                unfocusedBorderColor = FinalMuted.copy(alpha = 0.75f),
+                                focusedLabelColor = FinalAccent,
+                                unfocusedLabelColor = FinalMuted,
+                                focusedPlaceholderColor = FinalMuted,
+                                unfocusedPlaceholderColor = FinalMuted
+                            )
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showNameSuggestions = !showNameSuggestions },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(if (showNameSuggestions) "▴" else "▾", color = FinalMuted, fontSize = 18.sp)
+                        }
+                    }
                     DropdownMenu(
                         expanded = showNameSuggestions,
-                        onDismissRequest = { showNameSuggestions = false }
+                        onDismissRequest = { showNameSuggestions = false },
+                        modifier = Modifier.background(FinalPanel)
                     ) {
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text("GROUP A") },
                             onClick = {
                                 draftGroupName = "GROUP A"
                                 showNameSuggestions = false
-                            }
+                            },
+                            colors = androidx.compose.material3.MenuDefaults.itemColors(
+                                textColor = Color.White
+                            )
                         )
                     }
                 }
@@ -987,24 +1093,24 @@ private fun PointsTab() {
                     Box(
                         Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(9.dp)).background(FinalAccent)
                             .clickable {
-                                groupName = draftGroupName.trim().ifBlank { "GROUP A" }
+                                onGroupNameChange(draftGroupName.trim().ifBlank { "GROUP A" })
                                 showCreateGroupSheet = false
                             },
                         contentAlignment = Alignment.Center
                     ) { Text("OK", color = FinalBg, fontSize = 12.sp, fontWeight = FontWeight.Black) }
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(8.dp))
             }
         }
     }
 }
 
 @Composable
-private fun NoGroupsPointsTab(onCreateGroup: () -> Unit) {
+private fun NoGroupsPointsTab() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 3.dp, vertical = 12.dp),
+            .padding(horizontal = 3.dp),
         contentAlignment = Alignment.TopCenter
     ) {
         Column(
@@ -1050,30 +1156,34 @@ private fun NoGroupsPointsTab(onCreateGroup: () -> Unit) {
                 lineHeight = 19.sp,
                 textAlign = TextAlign.Center
             )
-            Spacer(Modifier.height(28.dp))
+        }
+    }
+}
+
+@Composable
+private fun CreateGroupButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .height(50.dp)
+            .shadow(12.dp, RoundedCornerShape(7.dp), clip = false)
+            .clip(RoundedCornerShape(7.dp))
+            .background(FinalAccent)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-                    .shadow(12.dp, RoundedCornerShape(7.dp), clip = false)
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(FinalAccent)
-                    .clickable(onClick = onCreateGroup),
+                    .size(19.dp)
+                    .border(1.5.dp, FinalBg, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(19.dp)
-                            .border(1.5.dp, FinalBg, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("+", color = FinalBg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Text("CREATE NEW GROUP", color = FinalBg, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                }
+                Text("+", color = FinalBg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
+            Spacer(Modifier.width(12.dp))
+            Text("CREATE NEW GROUP", color = FinalBg, fontSize = 12.sp, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -1081,37 +1191,92 @@ private fun NoGroupsPointsTab(onCreateGroup: () -> Unit) {
 @Composable
 private fun GroupPointsTab(
     groupName: String,
+    teams: List<PointsGroupTeam>,
+    onAddTeam: () -> Unit,
     onDeleteGroup: () -> Unit
 ) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier = Modifier.fillMaxSize().padding(horizontal = 3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
-                modifier = Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(10.dp))
-                    .background(FinalBg).border(1.dp, FinalDivider, RoundedCornerShape(10.dp)).padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(10.dp))
+                .background(FinalBg).border(1.dp, FinalDivider, RoundedCornerShape(10.dp)).padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(groupName.uppercase(), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+            GroupAction("♙", "Add Team", onAddTeam)
+            GroupAction("▣", "Remove", onDeleteGroup)
+        }
+        if (teams.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    WicketGlyph(Modifier.size(184.dp))
+                    Spacer(Modifier.height(24.dp))
+                    Text("This group has no teams", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(10.dp))
+                    Text("Add registered teams to\ngenerate the points table.", color = FinalMuted, fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(20.dp))
+                    Box(
+                        Modifier.height(40.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .border(1.dp, FinalAccent.copy(alpha = .7f), RoundedCornerShape(7.dp))
+                            .clickable(onClick = onAddTeam)
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("♙+", color = FinalAccent, fontSize = 17.sp)
+                            Spacer(Modifier.width(9.dp))
+                            Text("Add Team", color = FinalAccent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        } else {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp))
+                    .background(FinalBg).border(1.dp, FinalDivider, RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp))
+                    .padding(horizontal = 12.dp, vertical = 13.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(groupName.uppercase(), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
-                DeleteGlyph(Modifier.size(22.dp).clickable(onClick = onDeleteGroup))
+                Text("TEAM", color = FinalAccent, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+                listOf("M", "W", "L", "P", "NRR").forEach { title ->
+                    Text(title, color = FinalAccent, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(if (title == "NRR") 42.dp else 30.dp), textAlign = TextAlign.Center)
+                }
             }
-        Spacer(Modifier.height(58.dp))
-        WicketGlyph(Modifier.size(184.dp))
-        Spacer(Modifier.height(32.dp))
-        Text("This group has no teams", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(10.dp))
-        Text("Create teams in this group to\ngenerate the points table.", color = FinalMuted, fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(20.dp))
-        Box(
-            Modifier.height(40.dp).clip(RoundedCornerShape(7.dp)).border(1.dp, FinalAccent.copy(alpha = .7f), RoundedCornerShape(7.dp)).padding(horizontal = 16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("♙+", color = FinalAccent, fontSize = 17.sp)
-                Spacer(Modifier.width(9.dp))
-                Text("Add Team", color = FinalAccent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            LazyColumn(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
+                    .background(FinalBg).border(1.dp, FinalDivider, RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
+            ) {
+                items(teams, key = { it.id }) { team ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(30.dp).clip(CircleShape).background(FinalAccent.copy(alpha = .18f)), contentAlignment = Alignment.Center) {
+                                Text(team.name.take(1).uppercase(), color = FinalAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                            }
+                            Text(team.name.uppercase(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 10.dp))
+                        }
+                        listOf("0", "0", "0", "0", "0.00").forEachIndexed { index, value ->
+                            Text(value, color = if (index == 3) Color.White else FinalMuted, fontSize = 11.sp, fontWeight = if (index == 3) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.width(if (index == 4) 42.dp else 30.dp), textAlign = TextAlign.Center)
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun GroupAction(icon: String, label: String, onClick: () -> Unit) {
+    Column(
+        Modifier.clip(RoundedCornerShape(7.dp)).clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(icon, color = FinalAccent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = Color.White, fontSize = 7.sp, maxLines = 1)
     }
 }
 
