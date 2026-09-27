@@ -82,6 +82,8 @@ class StartMatchPreviewActivity : ComponentActivity() {
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
+        val tournamentName = intent.getStringExtra(EXTRA_TOURNAMENT_NAME).orEmpty()
+        val selectedStage = intent.getStringExtra(EXTRA_SELECTED_STAGE).orEmpty()
         val viewModel: StartMatchPreviewViewModel by viewModels {
             StartMatchPreviewViewModel.factory(matchId, matchUseCases)
         }
@@ -89,6 +91,8 @@ class StartMatchPreviewActivity : ComponentActivity() {
             val uiState by viewModel.uiState.collectAsState()
             StartMatchPreviewScreen(
                 match = uiState.match,
+                tournamentName = tournamentName,
+                selectedStage = selectedStage,
                 onBack = { finish() },
                 onContinue = {
                     startActivity(
@@ -98,6 +102,11 @@ class StartMatchPreviewActivity : ComponentActivity() {
                 }
             )
         }
+    }
+
+    companion object {
+        const val EXTRA_TOURNAMENT_NAME = "preview_tournament_name"
+        const val EXTRA_SELECTED_STAGE = "preview_selected_stage"
     }
 }
 
@@ -118,6 +127,8 @@ private data class PreviewSelectedTeam(
 @Composable
 private fun StartMatchPreviewScreen(
     match: Match?,
+    tournamentName: String,
+    selectedStage: String,
     onBack: () -> Unit,
     onContinue: () -> Unit
 ) {
@@ -142,10 +153,14 @@ private fun StartMatchPreviewScreen(
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 MatchHeroCard(
-                    title = match?.title.orEmpty(),
+                    title = tournamentName.takeIf { selectedStage.isNotBlank() && it.isNotBlank() }
+                        ?: match?.title.orEmpty(),
                     teamA = teamA,
                     teamB = teamB
                 )
+                if (selectedStage.isNotBlank()) {
+                    TournamentStageSummary(tournamentName, selectedStage)
+                }
                 MatchInformation(match = match)
                 MatchVenue(match = match)
                 BallTypeSection(match = match)
@@ -176,6 +191,24 @@ private fun StartMatchPreviewScreen(
                 Text("  ->", color = Color(0xFF111604), fontSize = 16.sp, fontWeight = FontWeight.Black)
             }
         }
+    }
+}
+
+@Composable
+private fun TournamentStageSummary(tournamentName: String, selectedStage: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(PreviewCard)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("TOURNAMENT MATCH", color = PreviewMuted, fontSize = 9.sp, fontWeight = FontWeight.Black)
+            Text(tournamentName.ifBlank { "Tournament" }, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(selectedStage, color = PreviewAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
     }
 }
 
