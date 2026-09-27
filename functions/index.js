@@ -163,6 +163,29 @@ exports.createTournamentInvite = onCall(async (request) => {
   throw new HttpsError("internal", "Unable to create a unique invitation. Please try again.");
 });
 
+/** Deletes a tournament and its nested entries after verifying the organiser. */
+exports.deleteTournament = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before deleting a tournament.");
+  const tournamentId = requireTeamId(request.data?.tournamentId);
+  const tournamentRef = db.collection("tournaments").doc(tournamentId);
+  const tournament = await tournamentRef.get();
+  if (!tournament.exists) throw new HttpsError("not-found", "Tournament not found.");
+  if (tournament.get("hostUid") !== request.auth.uid) {
+    throw new HttpsError("permission-denied", "Only the tournament organiser can delete it.");
+  }
+
+  const invites = await db.collection("tournamentInvites").where("tournamentId", "==", tournamentId).get();
+  const batches = [];
+  for (let index = 0; index < invites.docs.length; index += 500) {
+    const batch = db.batch();
+    invites.docs.slice(index, index + 500).forEach((invite) => batch.delete(invite.ref));
+    batches.push(batch.commit());
+  }
+  await Promise.all(batches);
+  await db.recursiveDelete(tournamentRef);
+  return { tournamentId };
+});
+
 /** Registers a captain's team in a tournament. Membership and duplicate checks are transactional. */
 exports.joinTournamentInvite = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before joining a tournament.");
