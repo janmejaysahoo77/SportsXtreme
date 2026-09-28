@@ -38,6 +38,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.ViewFlipper
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.core.view.GravityCompat
 import kotlin.math.max
@@ -45,7 +46,11 @@ import kotlin.math.max
 class HomeScreenView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-    private val topMode: TopMode = TopMode.SPORTS
+    private val topMode: TopMode = TopMode.SPORTS,
+    initialSelectedIndex: Int = 0,
+    private val showBottomNav: Boolean = true,
+    private val showTopModeSelector: Boolean = true,
+    private val onSelectedTabChanged: (Int) -> Unit = {}
 ) : FrameLayout(context, attrs) {
 
     enum class TopMode { SPORTS, MEDIA, CART }
@@ -78,9 +83,9 @@ class HomeScreenView @JvmOverloads constructor(
         NavItem("Community", NavIconView.Icon.USERS),
         NavItem("Leaderboard", NavIconView.Icon.TROPHY)
     )
-    private var selectedIndex = 0
+    private var selectedIndex = initialSelectedIndex.coerceIn(navItems.indices)
     private lateinit var contentHolder: FrameLayout
-    private lateinit var navRow: LinearLayout
+    private var navRow: LinearLayout? = null
     private val cachedTabs = mutableMapOf<Int, View>()
     private lateinit var drawerLayout: DrawerLayout
 
@@ -475,28 +480,31 @@ class HomeScreenView @JvmOverloads constructor(
             contentHolder = FrameLayout(context)
             addView(contentHolder, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
 
-            navRow = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                clipChildren = false
-                clipToPadding = false
-                setPadding(dp(8), dp(8), dp(8), dp(6))
-                background = GradientDrawable().apply {
-                    setColor(Color.rgb(5, 9, 15))
-                    setStroke(dp(1), Color.argb(60, 255, 255, 255))
+            if (showBottomNav) {
+                navRow = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+                    clipChildren = false
+                    clipToPadding = false
+                    setPadding(dp(8), dp(8), dp(8), dp(6))
+                    background = GradientDrawable().apply {
+                        setColor(Color.rgb(5, 9, 15))
+                        setStroke(dp(1), Color.argb(60, 255, 255, 255))
+                    }
                 }
-            }
-            addView(navRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(72)))
+                addView(navRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(72)))
 
-            buildNav()
-            showTab(0)
+                buildNav()
+            }
+            showTab(selectedIndex, notifyChange = false)
         }
     }
 
     private fun buildNav() {
-        navRow.removeAllViews()
+        val row = navRow ?: return
+        row.removeAllViews()
         navItems.forEachIndexed { index, item ->
-            navRow.addView(navCell(item, index), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+            row.addView(navCell(item, index), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
         }
     }
 
@@ -612,28 +620,46 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 
-    private fun showTab(index: Int) {
-        selectedIndex = index
+    fun selectTab(index: Int) {
+        showTab(index.coerceIn(navItems.indices), notifyChange = false)
+    }
+
+    private fun showTab(index: Int, notifyChange: Boolean = true) {
+        val safeIndex = index.coerceIn(navItems.indices)
+        selectedIndex = safeIndex
+        if (notifyChange) {
+            onSelectedTabChanged(safeIndex)
+        }
         buildNav()
         contentHolder.removeAllViews()
-        val view = cachedTabs.getOrPut(index) {
-            when (index) {
+        val view = cachedTabs.getOrPut(safeIndex) {
+            when (safeIndex) {
                 0 -> createHomeContent(context)
                 2 -> createHostContent(context)
                 3 -> createCommunityContent(context)
                 4 -> createLeaderboardContent(context)
-                else -> createComingSoon(context, navItems[index])
+                else -> createComingSoon(context, navItems[safeIndex])
             }
         }
         contentHolder.addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     private fun createCommunityContent(context: Context): View {
-        return createComingSoon(context, navItems[3])
+        return ComposeView(context).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent {
+                CommunityScreen(onMenuClick = { openDrawer() })
+            }
+        }
     }
 
     private fun createLeaderboardContent(context: Context): View {
-        return createComingSoon(context, navItems[4])
+        return ComposeView(context).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent {
+                LeaderboardScreen(onMenuClick = { openDrawer() })
+            }
+        }
     }
 
     fun refreshAfterResume() {
@@ -1276,6 +1302,15 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun topBar(context: Context): View {
+        if (!showTopModeSelector) {
+            return ComposeView(context).apply {
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+                setContent {
+                    SportsHomeActionTopBar(onMenuClick = { openDrawer() })
+                }
+            }
+        }
+
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
 
@@ -1395,6 +1430,15 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun locationRow(context: Context): View {
+        if (!showTopModeSelector) {
+            return ComposeView(context).apply {
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+                setContent {
+                    SportsHomeLocationRow()
+                }
+            }
+        }
+
         return LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
             isClickable = true
@@ -1596,6 +1640,15 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun scoreCardsSection(context: Context): View {
+        if (!showTopModeSelector) {
+            return ComposeView(context).apply {
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+                setContent {
+                    SportsHomeScoreCardsSection()
+                }
+            }
+        }
+
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             addView(LinearLayout(context).apply {
@@ -1864,6 +1917,15 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun proPassCardsSection(context: Context): View {
+        if (!showTopModeSelector) {
+            return ComposeView(context).apply {
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+                setContent {
+                    SportsHomeProPassSection()
+                }
+            }
+        }
+
         val red = Color.rgb(255, 62, 70)
         val purple = Color.rgb(156, 82, 255)
         val gold = Color.rgb(255, 215, 0)

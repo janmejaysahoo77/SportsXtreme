@@ -92,12 +92,8 @@ class MainActivity : ComponentActivity() {
                 }
             )
 
-            Screen.Home -> AndroidView(
-                factory = { context ->
-                    HomeScreenView(context).also {
-                        homeScreenView = it
-                    }
-                }
+            Screen.Home -> HomeScreenRoute(
+                onHomeViewReady = { homeScreenView = it }
             )
 
         }
