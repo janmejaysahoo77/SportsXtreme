@@ -81,15 +81,18 @@ class LeagueMatchSetupActivity : ComponentActivity() {
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
+        val fallbackTournamentName = intent.getStringExtra(EXTRA_TOURNAMENT_NAME).orEmpty()
         val matchId = intent.getStringExtra(StartMatchActivity.EXTRA_SCHEDULE_MATCH_ID).orEmpty()
         val tournamentState = mutableStateOf<Tournament?>(null)
         val selectedStage = mutableStateOf("League Stage")
         val isSavingStage = mutableStateOf(false)
         val stageSaveError = mutableStateOf<String?>(null)
-        lifecycleScope.launch {
-            when (val result = tournamentRepository.getTournament(tournamentId)) {
-                is Resource.Success -> tournamentState.value = result.data
-                is Resource.Error, is Resource.Loading -> Unit
+        if (tournamentId.isNotBlank()) {
+            lifecycleScope.launch {
+                when (val result = tournamentRepository.getTournament(tournamentId)) {
+                    is Resource.Success -> tournamentState.value = result.data
+                    is Resource.Error, is Resource.Loading -> Unit
+                }
             }
         }
         setContent {
@@ -99,6 +102,7 @@ class LeagueMatchSetupActivity : ComponentActivity() {
             val saveError = stageSaveError.value
             LeagueMatchSetupScreen(
                 tournament = tournament,
+                fallbackTournamentName = fallbackTournamentName,
                 selectedStage = stage,
                 isSavingStage = saving,
                 stageSaveError = saveError,
@@ -141,6 +145,10 @@ class LeagueMatchSetupActivity : ComponentActivity() {
             )
         }
     }
+
+    companion object {
+        const val EXTRA_TOURNAMENT_NAME = "tournament_name"
+    }
 }
 
 private val SetupAccent = XtremeLime
@@ -152,6 +160,7 @@ private val SetupMuted = XtremeMuted
 @Composable
 private fun LeagueMatchSetupScreen(
     tournament: Tournament?,
+    fallbackTournamentName: String,
     selectedStage: String,
     isSavingStage: Boolean,
     stageSaveError: String?,
@@ -189,7 +198,7 @@ private fun LeagueMatchSetupScreen(
                 lineHeight = 17.sp,
                 fontWeight = FontWeight.Medium
             )
-            SetupTournamentCard(tournament)
+            SetupTournamentCard(tournament, fallbackTournamentName)
             SetupSectionTitle("TOURNAMENT PROGRESSION")
             SetupProgressionCard(selectedStage)
             SetupSectionTitle("SELECT STAGE")
@@ -245,7 +254,7 @@ private fun SetupTopBar(onBack: () -> Unit) {
 }
 
 @Composable
-private fun SetupTournamentCard(tournament: Tournament?) {
+private fun SetupTournamentCard(tournament: Tournament?, fallbackTournamentName: String) {
     val location = tournament?.city?.takeIf { it.isNotBlank() }
         ?: tournament?.requirements?.location?.takeIf { it.isNotBlank() }
         ?: "Location not set"
@@ -285,7 +294,7 @@ private fun SetupTournamentCard(tournament: Tournament?) {
                 .background(SetupAccent)
         )
         Column(modifier = Modifier.padding(start = 15.dp).weight(1f)) {
-            Text(tournament?.name?.ifBlank { "Tournament" } ?: "Loading tournament…", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(tournament?.name?.ifBlank { "Tournament" } ?: fallbackTournamentName.ifBlank { "Loading tournament…" }, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Box(
                 modifier = Modifier
                     .padding(top = 8.dp)
