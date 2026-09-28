@@ -23,4 +23,7 @@ interface SyncQueueDao {
 
     @Query("DELETE FROM sync_queue WHERE entityType = :entityType AND entityId = :entityId")
     suspend fun deleteByEntity(entityType: String, entityId: String)
+
+    @Query("DELETE FROM sync_queue WHERE matchId = :matchId")
+    suspend fun deleteForMatch(matchId: String)
 }

@@ -15,6 +15,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.activity.OnBackPressedCallback
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -65,26 +67,48 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import dagger.hilt.android.AndroidEntryPoint
+import com.example.sportsxtreme.data.sync.PausedScoringExpiryScheduler
+import com.example.sportsxtreme.domain.repository.MatchRepository
+import javax.inject.Inject
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainScoringActivity : ComponentActivity() {
     private val scoringViewModel: ScoringViewModel by viewModels()
+    @Inject lateinit var matchRepository: MatchRepository
+    @Inject lateinit var expiryScheduler: PausedScoringExpiryScheduler
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = pauseScoringAndFinish()
+        })
         setContent {
             val uiState by scoringViewModel.uiState.collectAsState()
             MainScoringScreen(
                 uiState = uiState,
-                onBack = { finish() },
+                onBack = ::pauseScoringAndFinish,
                 onRun = scoringViewModel::recordRuns,
                 onExtra = scoringViewModel::recordExtra,
                 onWicket = scoringViewModel::recordWicket,
                 onUndo = scoringViewModel::undoLastBall
             )
+        }
+    }
+
+    private fun pauseScoringAndFinish() {
+        val matchId = intent.getStringExtra(com.example.sportsxtreme.presentation.match.SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
+        if (matchId.isBlank()) {
+            finish()
+            return
+        }
+        lifecycleScope.launch {
+            val pausedAt = matchRepository.pauseScoring(matchId)
+            if (pausedAt != null) expiryScheduler.schedule(matchId, pausedAt)
+            finish()
         }
     }
 

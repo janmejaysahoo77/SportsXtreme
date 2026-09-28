@@ -43,4 +43,7 @@ interface BallEventDao {
     @Query("SELECT * FROM ball_events WHERE matchId = :matchId AND inningsId = :inningsId ORDER BY sequenceNumber")
     fun observeBallEvents(matchId: String, inningsId: String): Flow<List<BallEventEntity>>
 
+    @Query("DELETE FROM ball_events WHERE matchId = :matchId")
+    suspend fun deleteForMatch(matchId: String)
+
 }

@@ -19,6 +19,9 @@ interface BattingDao {
     @Query("DELETE FROM batting_scorecards WHERE matchId = :matchId AND inningsId = :inningsId")
     suspend fun deleteForInnings(matchId: String, inningsId: String)
 
+    @Query("DELETE FROM batting_scorecards WHERE matchId = :matchId")
+    suspend fun deleteForMatch(matchId: String)
+
     @Query("SELECT * FROM batting_scorecards WHERE matchId = :matchId AND inningsId = :inningsId ORDER BY status = 'NOT_BATTED', runs DESC, balls ASC")
     fun observeScorecard(matchId: String, inningsId: String): Flow<List<BattingEntity>>
 }

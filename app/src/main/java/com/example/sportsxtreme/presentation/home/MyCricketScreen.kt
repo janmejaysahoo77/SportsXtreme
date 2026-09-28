@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.home
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -30,9 +31,14 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -64,6 +70,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
 import com.example.sportsxtreme.presentation.tournament.RegisterTournamentFinalPageActivity
@@ -102,7 +109,15 @@ private data class CricketMatch(
     val potm: String? = null,
     val live: Boolean = false,
     val liveSoon: Boolean = false,
-    val accent: Color = CricketAccent
+    val accent: Color = CricketAccent,
+    val dateEpochMs: Long = 0L
+)
+
+private data class PlayerMatchesState(
+    val loading: Boolean = true,
+    val matches: List<CricketMatch> = emptyList(),
+    val hostedMatches: List<CricketMatch> = emptyList(),
+    val error: String? = null
 )
 
 private data class CricketTeam(
@@ -148,6 +163,139 @@ private fun rememberJoinedTeams(): List<CricketTeam> {
         }
     }
     return teams
+}
+
+@Composable
+private fun rememberPlayerMatches(userId: String?, playerTeamIds: Set<String>): PlayerMatchesState {
+    var state by remember(userId) { mutableStateOf(PlayerMatchesState()) }
+    DisposableEffect(userId, playerTeamIds) {
+        if (userId.isNullOrBlank()) {
+            state = PlayerMatchesState(loading = false)
+            return@DisposableEffect onDispose { }
+        }
+
+        state = PlayerMatchesState()
+        val registration = FirebaseFirestore.getInstance().collection("matches")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    state = PlayerMatchesState(loading = false, error = error.message)
+                } else {
+                    val documents = snapshot?.documents.orEmpty()
+                    val matches = documents
+                        .filter { document -> document.isPlayerMatch(userId, playerTeamIds) }
+                        .mapNotNull { document -> document.toPlayerCricketMatch() }
+                        .sortedWith(compareBy<CricketMatch> { it.status == "Finished" }.thenBy { it.dateEpochMs })
+                    val hostedMatches = documents
+                        .filter { document -> document.isHostedBy(userId) }
+                        .mapNotNull { document -> document.toPlayerCricketMatch() }
+                        .sortedWith(compareBy<CricketMatch> { it.status == "Finished" }.thenBy { it.dateEpochMs })
+                    state = PlayerMatchesState(
+                        loading = false,
+                        matches = matches,
+                        hostedMatches = hostedMatches
+                    )
+                }
+            }
+        onDispose { registration.remove() }
+    }
+    return state
+}
+
+private fun DocumentSnapshot.isHostedBy(userId: String): Boolean =
+    getString("ownerId") == userId ||
+        getString("ownerUserId") == userId ||
+        getString("organiserId") == userId ||
+        getString("organizerId") == userId
+
+private fun DocumentSnapshot.isPlayerMatch(userId: String, playerTeamIds: Set<String>): Boolean {
+    val teamA = get("teamA") as? Map<*, *>
+    val teamB = get("teamB") as? Map<*, *>
+    val involvedTeamIds = setOfNotNull(
+        teamA?.get("teamId") as? String,
+        teamB?.get("teamId") as? String,
+        getString("teamAId"),
+        getString("teamBId")
+    )
+    val playingXI = get("playingXI") as? Map<*, *>
+    val lineupIncludesUser = playingXI?.values.orEmpty().any { xi ->
+        val playerIds = (xi as? Map<*, *>)?.get("playerIds") as? List<*>
+        userId in playerIds.orEmpty().filterIsInstance<String>()
+    }
+    val claimedByUser = (get("teamAClaim") as? Map<*, *>)?.get("userId") == userId ||
+        (get("teamBClaim") as? Map<*, *>)?.get("userId") == userId
+    return involvedTeamIds.any { it in playerTeamIds } || lineupIncludesUser || claimedByUser
+}
+
+private fun DocumentSnapshot.toPlayerCricketMatch(): CricketMatch? {
+    val teamA = get("teamA") as? Map<*, *>
+    val teamB = get("teamB") as? Map<*, *>
+    val liveScore = get("liveScore") as? Map<*, *>
+    val teamAName = getString("teamAName") ?: teamA?.get("name") as? String ?: "Team A"
+    val teamBName = getString("teamBName") ?: teamB?.get("name") as? String ?: "Team B"
+    val statusValue = (liveScore?.get("status") as? String)
+        ?: getString("status")
+        ?: getString("scheduleStatus")
+        ?: "SCHEDULED"
+    val finished = statusValue.equals("COMPLETED", true) || statusValue.equals("FINISHED", true)
+    val live = statusValue.equals("LIVE", true) ||
+        statusValue.equals("IN_PROGRESS", true) ||
+        statusValue.equals("INNINGS_BREAK", true)
+    val liveScoreText = liveScore?.let { score ->
+        val runs = (score["score"] as? Number)?.toInt() ?: return@let null
+        val wickets = (score["wickets"] as? Number)?.toInt() ?: 0
+        val overs = score["overs"] as? String ?: "0.0"
+        "$runs/$wickets ($overs)"
+    }
+    val battingTeamId = liveScore?.get("battingTeamId") as? String
+    val teamAId = teamA?.get("teamId") as? String ?: getString("teamAId")
+    val leftScore = liveScoreText.takeIf { battingTeamId != null && battingTeamId == teamAId }
+    val teamBId = teamB?.get("teamId") as? String ?: getString("teamBId")
+    val innings = get("innings") as? List<*>
+    fun inningsScore(teamId: String?): String? = innings.orEmpty()
+        .mapNotNull { it as? Map<*, *> }
+        .lastOrNull { it["battingTeamId"] == teamId }
+        ?.let { entry ->
+            val runs = (entry["score"] as? Number)?.toInt() ?: return@let null
+            val wickets = (entry["wickets"] as? Number)?.toInt() ?: 0
+            val balls = (entry["legalBalls"] as? Number)?.toInt() ?: 0
+            "$runs/$wickets (${balls / 6}.${balls % 6})"
+        }
+    val finalLeftScore = leftScore ?: inningsScore(teamAId)
+    val rightScore = liveScoreText.takeIf { battingTeamId != null && battingTeamId == teamBId }
+        ?: inningsScore(teamBId)
+    val dateMillis = (get("matchDateEpochMs") as? Number)?.toLong() ?: 0L
+    val dateLabel = if (dateMillis > 0L) {
+        java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault())
+            .format(java.util.Date(dateMillis))
+    } else "Date not set"
+    val time = getString("matchTime").orEmpty()
+    val tournamentName = getString("tournamentName").orEmpty()
+    val matchFormat = getString("format").orEmpty().ifBlank { getString("matchType").orEmpty() }
+    val status = when {
+        live -> "Live"
+        finished -> "Finished"
+        else -> "Upcoming"
+    }
+    return CricketMatch(
+        type = when {
+            tournamentName.isNotBlank() || getString("tournamentId") != null ->
+                tournamentName.ifBlank { "TOURNAMENT MATCH" }.uppercase()
+            matchFormat.isNotBlank() -> matchFormat.replace('_', ' ').uppercase()
+            else -> "CRICKET MATCH"
+        },
+        title = getString("title")?.takeIf { it.isNotBlank() } ?: "$teamAName vs $teamBName",
+        status = status,
+        left = teamAName,
+        leftScore = finalLeftScore,
+        right = teamBName,
+        rightScore = rightScore,
+        scoreCenter = if (live) liveScoreText ?: "LIVE" else "VS",
+        meta = listOf(dateLabel, time).filter { it.isNotBlank() }.joinToString(" • "),
+        location = getString("venue")?.takeIf { it.isNotBlank() },
+        live = live,
+        accent = if (live) Color(0xFFFF5C65) else CricketBlue,
+        dateEpochMs = dateMillis
+    )
 }
 
 private fun DocumentSnapshot.belongsTo(userId: String): Boolean {
@@ -290,9 +438,15 @@ fun MyCricketScreen(
     hostTournamentsViewModel: HostTournamentsViewModel? = null
 ) {
     var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
+    var selectedMatchesTab by remember { mutableIntStateOf(0) }
     var selectedTournamentSegment by remember { mutableIntStateOf(0) }
+    var tournamentPendingDeletion by remember { mutableStateOf<Tournament?>(null) }
     val joinedTeams = rememberJoinedTeams()
     val context = LocalContext.current
+    val playerMatchesState = rememberPlayerMatches(
+        FirebaseAuth.getInstance().currentUser?.uid,
+        joinedTeams.mapTo(linkedSetOf()) { it.id }
+    )
     val hostedTournamentsState by if (hostTournamentsViewModel != null) {
         hostTournamentsViewModel.uiState.collectAsState()
     } else {
@@ -323,8 +477,46 @@ fun MyCricketScreen(
             when (selectedTab) {
                 0 -> {
                     item { StartMatchPrompt(onStartMatch) }
-                    item { SegmentPills(listOf("You", "Playing", "Network", "All"), active = 0) }
-                    items(sampleMatches) { match -> MatchCard(match) }
+                    item {
+                        SegmentPills(
+                            listOf("Player", "Host"),
+                            active = selectedMatchesTab,
+                            onTabClick = { selectedMatchesTab = it }
+                        )
+                    }
+                    val matchesToShow = if (selectedMatchesTab == 0) {
+                        playerMatchesState.matches
+                    } else {
+                        playerMatchesState.hostedMatches
+                    }
+                    val emptyTitle = if (selectedMatchesTab == 0) {
+                        "No player matches yet"
+                    } else {
+                        "No hosted matches yet"
+                    }
+                    val emptyDetail = if (selectedMatchesTab == 0) {
+                        "Matches involving your teams will appear here."
+                    } else {
+                        "Matches you host will appear here."
+                    }
+                    when {
+                        playerMatchesState.loading -> item {
+                            TournamentFeedbackCard(
+                                title = "Loading your matches…",
+                                detail = "Fetching matches from your account."
+                            )
+                        }
+                        playerMatchesState.error != null -> item {
+                            TournamentFeedbackCard(
+                                title = "Couldn't load your matches",
+                                detail = playerMatchesState.error ?: "Please try again."
+                            )
+                        }
+                        matchesToShow.isEmpty() -> item {
+                            TournamentFeedbackCard(title = emptyTitle, detail = emptyDetail)
+                        }
+                        else -> items(matchesToShow) { match -> MatchCard(match) }
+                    }
                 }
 
                 1 -> {
@@ -338,12 +530,16 @@ fun MyCricketScreen(
                         )
                     }
                     when (selectedTournamentSegment) {
-                        0 -> hostedTournamentsContent(hostedTournamentsState) { tournamentId ->
-                            context.startActivity(
-                                Intent(context, RegisterTournamentFinalPageActivity::class.java)
-                                    .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournamentId)
-                            )
-                        }
+                        0 -> hostedTournamentsContent(
+                            state = hostedTournamentsState,
+                            onTournamentClick = { tournamentId ->
+                                context.startActivity(
+                                    Intent(context, RegisterTournamentFinalPageActivity::class.java)
+                                        .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                                )
+                            },
+                            onDeleteClick = { tournament -> tournamentPendingDeletion = tournament }
+                        )
                         else -> items(tournaments) { tournament -> TournamentCard(tournament) }
                     }
                 }
@@ -387,12 +583,45 @@ fun MyCricketScreen(
             }
         }
 
+        tournamentPendingDeletion?.let { tournament ->
+            AlertDialog(
+                onDismissRequest = { tournamentPendingDeletion = null },
+                title = { Text("Delete tournament?") },
+                text = { Text("${tournament.name} and its associated data will be deleted.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val viewModel = hostTournamentsViewModel
+                        if (viewModel == null) {
+                            Toast.makeText(context, "Unable to delete tournament", Toast.LENGTH_SHORT).show()
+                        } else {
+                            viewModel.deleteTournament(tournament.id) { result ->
+                                when (result) {
+                                    is Resource.Success -> Toast.makeText(context, "Tournament deleted", Toast.LENGTH_SHORT).show()
+                                    is Resource.Error -> Toast.makeText(
+                                        context,
+                                        result.message ?: "Unable to delete tournament",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    is Resource.Loading -> Unit
+                                }
+                            }
+                        }
+                        tournamentPendingDeletion = null
+                    }) { Text("Delete") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { tournamentPendingDeletion = null }) { Text("Cancel") }
+                }
+            )
+        }
+
     }
 }
 
 private fun LazyListScope.hostedTournamentsContent(
     state: HostTournamentsViewModel.UiState,
-    onTournamentClick: (String) -> Unit
+    onTournamentClick: (String) -> Unit,
+    onDeleteClick: (Tournament) -> Unit
 ) {
     when (state) {
         HostTournamentsViewModel.UiState.Loading -> item {
@@ -421,7 +650,8 @@ private fun LazyListScope.hostedTournamentsContent(
                 items(state.tournaments, key = { tournament -> tournament.id }) { tournament ->
                     TournamentCard(
                         tournament = tournament.toCricketTournament(),
-                        onClick = { onTournamentClick(tournament.id) }
+                        onClick = { onTournamentClick(tournament.id) },
+                        onDelete = { onDeleteClick(tournament) }
                     )
                 }
             }
@@ -678,13 +908,17 @@ private fun MatchCard(match: CricketMatch) {
             }
             Spacer(Modifier.height(20.dp))
 
-            when (match.status) {
-                "Upcoming" -> UpcomingMatchLayout(match)
-                "LIVE SOON" -> LiveSoonMatchLayout(match)
-                "Finished" -> FinishedMatchLayout(match)
-                "Scheduled" -> ScheduledMatchLayout(match)
-                "Result" -> ResultMatchLayout(match)
-                else -> UpcomingMatchLayout(match)
+            if (match.live) {
+                LiveMatchLayout(match)
+            } else {
+                when (match.status) {
+                    "Upcoming" -> UpcomingMatchLayout(match)
+                    "LIVE SOON" -> LiveSoonMatchLayout(match)
+                    "Finished" -> FinishedMatchLayout(match)
+                    "Scheduled" -> ScheduledMatchLayout(match)
+                    "Result" -> ResultMatchLayout(match)
+                    else -> UpcomingMatchLayout(match)
+                }
             }
 
             match.location?.let {
@@ -728,6 +962,15 @@ private fun MatchCard(match: CricketMatch) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun LiveMatchLayout(match: CricketMatch) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ScoreRow(match.left, match.leftScore ?: "Yet to bat")
+        ScoreRow(match.right, match.rightScore ?: "Yet to bat")
+        Text("LIVE", color = Color(0xFFFF5C65), fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -1329,8 +1572,10 @@ private fun HostTournamentPrompt() {
 @Composable
 private fun TournamentCard(
     tournament: CricketTournament,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null
 ) {
+    var menuExpanded by remember(tournament.name) { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1369,6 +1614,34 @@ private fun TournamentCard(
                     .align(Alignment.TopEnd)
                     .padding(12.dp)
             )
+
+            if (onDelete != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 48.dp, end = 8.dp)
+                ) {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Tournament options",
+                            tint = Color.White
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Delete tournament") },
+                            onClick = {
+                                menuExpanded = false
+                                onDelete()
+                            }
+                        )
+                    }
+                }
+            }
 
             Text(
                 tournament.name,

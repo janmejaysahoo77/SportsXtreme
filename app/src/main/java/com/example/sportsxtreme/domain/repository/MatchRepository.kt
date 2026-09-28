@@ -45,6 +45,11 @@ interface MatchRepository {
     suspend fun finishMatch(matchId: String): Resource<Match>
     fun observeMatch(matchId: String): Flow<Resource<Match>>
     fun observeActiveMatch(): Flow<Resource<Match>>
+    fun observeLatestScoringMatch(): Flow<Resource<Match>>
+    suspend fun pauseScoring(matchId: String): Long?
+    suspend fun resumeScoring(matchId: String): Boolean
+    suspend fun expirePausedScoringMatch(matchId: String, pausedAtEpochMs: Long): Boolean
+    suspend fun deleteMatch(matchId: String): Resource<Unit>
     fun observeMatchState(matchId: String): Flow<Resource<MatchState>>
 }
 
