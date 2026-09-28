@@ -148,7 +148,17 @@
             android:exported="false" />
         <activity
             android:name=".presentation.tournament.RegisterTournamentFinalPageActivity"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="sportsxtreme-95fbb.web.app"
+                    android:path="/tournament" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".presentation.tournament.LeagueTournamentFlowActivity"
             android:exported="false" />

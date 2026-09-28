@@ -38,8 +38,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -99,7 +101,9 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        val tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID).orEmpty()
+        val tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID)
+            ?.takeIf { it.isNotBlank() }
+            ?: intent.data?.getQueryParameter("id").orEmpty()
         val initialTab = intent.getIntExtra(EXTRA_INITIAL_TAB, 0).coerceIn(0, 4)
         val initialMatchTab = intent.getIntExtra(EXTRA_INITIAL_MATCH_TAB, 0).coerceIn(0, 2)
         viewModel.load(tournamentId)
@@ -110,7 +114,20 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
                 initialMatchTab = initialMatchTab,
                 onBack = { finish() },
                 onSaveTournamentDetails = viewModel::saveTournamentDetails,
-                onSaveTeamDetails = viewModel::saveTeamDetails
+                onSaveTeamDetails = viewModel::saveTeamDetails,
+                onDeleteTournament = {
+                    viewModel.deleteTournament { result ->
+                        when (result) {
+                            is com.example.sportsxtreme.common.Resource.Success -> {
+                                Toast.makeText(this, "Tournament deleted", Toast.LENGTH_SHORT).show()
+                                finish()
+                            }
+                            is com.example.sportsxtreme.common.Resource.Error ->
+                                Toast.makeText(this, result.message ?: "Unable to delete tournament", Toast.LENGTH_LONG).show()
+                            else -> Unit
+                        }
+                    }
+                }
             )
         }
     }
@@ -137,14 +154,15 @@ private fun RegisterTournamentFinalPage(
     initialMatchTab: Int,
     onBack: () -> Unit,
     onSaveTournamentDetails: (String, String, String, String) -> Unit,
-    onSaveTeamDetails: (String, String) -> Unit
+    onSaveTeamDetails: (String, String) -> Unit,
+    onDeleteTournament: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(initialTab) }
     var pointsGroupName by remember { mutableStateOf<String?>(null) }
     var pointsGroupTeams by remember { mutableStateOf<List<PointsGroupTeam>>(emptyList()) }
     val tabs = listOf("Overview", "Teams", "Matches", "Points", "Leaderboard")
     Column(Modifier.fillMaxSize().background(FinalBg)) {
-        FinalTopBar(onBack)
+        FinalTopBar(onBack, onDeleteTournament)
         FinalTournamentHeader(tournament)
         FinalTournamentTabs(tabs, selectedTab) { selectedTab = it }
         Box(
@@ -255,7 +273,9 @@ private fun FinalTournamentTabs(
 }
 
 @Composable
-private fun FinalTopBar(onBack: () -> Unit) {
+private fun FinalTopBar(onBack: () -> Unit, onDeleteTournament: () -> Unit) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(FinalPanelLight).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
             BackGlyph(Modifier.size(21.dp))
@@ -268,7 +288,33 @@ private fun FinalTopBar(onBack: () -> Unit) {
         Spacer(Modifier.weight(1f))
         Box(Modifier.size(40.dp).clip(CircleShape).background(FinalPanelLight), contentAlignment = Alignment.Center) {
             Text("⋮", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Box(Modifier.matchParentSize().clickable { menuExpanded = true })
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenuItem(
+                    text = { Text("Delete Tournament", color = Color(0xFFB3261E)) },
+                    onClick = {
+                        menuExpanded = false
+                        confirmDelete = true
+                    }
+                )
+            }
         }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete tournament?") },
+            text = { Text("This will permanently delete this tournament and its registered team entries.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    confirmDelete = false
+                    onDeleteTournament()
+                }) { Text("Delete", color = Color(0xFFB3261E)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -293,11 +339,21 @@ private fun FinalTournamentHeader(tournament: Tournament?) {
                 .clip(RoundedCornerShape(10.dp))
                 .background(FinalAccent)
                 .clickable {
-                    val shareText = "Join $tournamentName${tournamentDate.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()}"
-                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TEXT, shareText)
-                    }, "Share tournament"))
+                    val tournamentId = tournament?.id.orEmpty()
+                    if (tournamentId.isBlank()) {
+                        Toast.makeText(context, "Tournament is still loading", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val tournamentUrl = Uri.parse(context.getString(R.string.tournament_share_base_url))
+                            .buildUpon()
+                            .appendQueryParameter("id", tournamentId)
+                            .build()
+                            .toString()
+                        val shareText = "View $tournamentName${tournamentDate.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()}\n$tournamentUrl"
+                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, shareText)
+                        }, "Share tournament"))
+                    }
                 }
                 .padding(horizontal = 13.dp, vertical = 9.dp),
             contentAlignment = Alignment.Center

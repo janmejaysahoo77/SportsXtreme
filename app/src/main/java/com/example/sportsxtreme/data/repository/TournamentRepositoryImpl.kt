@@ -29,6 +29,8 @@ class TournamentRepositoryImpl @Inject constructor(
 
     override suspend fun getTournament(tournamentId: String): Resource<Tournament> = dataSource.getTournament(tournamentId)
 
+    override suspend fun deleteTournament(tournamentId: String): Resource<Unit> = dataSource.deleteTournament(tournamentId)
+
     override fun observeHostTournaments(hostUid: String): Flow<Resource<List<Tournament>>> =
         dataSource.observeHostTournaments(hostUid)
 }

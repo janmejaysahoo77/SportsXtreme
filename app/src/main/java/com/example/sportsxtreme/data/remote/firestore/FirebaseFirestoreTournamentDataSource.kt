@@ -5,6 +5,7 @@ import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.domain.model.TournamentRequirements
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.functions.FirebaseFunctions
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -12,7 +13,8 @@ import kotlinx.coroutines.flow.callbackFlow
 import javax.inject.Inject
 
 class FirebaseFirestoreTournamentDataSource @Inject constructor(
-    private val firestore: FirebaseFirestore
+    private val firestore: FirebaseFirestore,
+    private val functions: FirebaseFunctions
 ) {
     suspend fun createTournament(tournament: Tournament): Resource<Tournament> {
         return try {
@@ -71,6 +73,15 @@ class FirebaseFirestoreTournamentDataSource @Inject constructor(
         Resource.Success(tournament)
     } catch (e: Exception) {
         Resource.Error(e.message ?: "Unable to load tournament")
+    }
+
+    suspend fun deleteTournament(tournamentId: String): Resource<Unit> = try {
+        require(tournamentId.isNotBlank()) { "Tournament ID is missing" }
+        functions.getHttpsCallable("deleteTournament")
+            .call(mapOf("tournamentId" to tournamentId)).await()
+        Resource.Success(Unit)
+    } catch (e: Exception) {
+        Resource.Error(e.message ?: "Unable to delete tournament")
     }
 
     fun observeHostTournaments(hostUid: String): Flow<Resource<List<Tournament>>> = callbackFlow {
