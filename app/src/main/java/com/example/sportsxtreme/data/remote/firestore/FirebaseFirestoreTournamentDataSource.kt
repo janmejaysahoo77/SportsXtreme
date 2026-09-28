@@ -17,7 +17,10 @@ class FirebaseFirestoreTournamentDataSource @Inject constructor(
     suspend fun createTournament(tournament: Tournament): Resource<Tournament> {
         return try {
             val docRef = firestore.collection("tournaments").document()
-            val tournamentWithId = tournament.copy(id = docRef.id)
+            val tournamentWithId = tournament.copy(
+                id = docRef.id,
+                createdAtEpochMs = System.currentTimeMillis()
+            )
             docRef.set(tournamentWithId).await()
             Resource.Success(tournamentWithId)
         } catch (e: Exception) {
@@ -59,7 +62,7 @@ class FirebaseFirestoreTournamentDataSource @Inject constructor(
                 }
                 val tournaments = snapshots?.documents.orEmpty().mapNotNull { document ->
                     document.toObject(Tournament::class.java)?.copy(id = document.id)
-                }.sortedBy { it.startDate }
+                }.sortedByDescending { it.createdAtEpochMs }
                 trySend(Resource.Success(tournaments))
             }
         awaitClose { registration.remove() }
