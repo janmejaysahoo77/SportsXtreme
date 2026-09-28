@@ -17,6 +17,9 @@ interface LiveMatchDao {
     @Query("DELETE FROM live_matches")
     suspend fun clearAll()
 
+    @Query("DELETE FROM live_matches WHERE matchId = :matchId")
+    suspend fun delete(matchId: String)
+
     @Query("SELECT * FROM live_matches ORDER BY updatedAtEpochMs DESC")
     fun observeAll(): Flow<List<LiveMatchEntity>>
 

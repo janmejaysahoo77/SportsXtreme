@@ -14,6 +14,9 @@ interface MatchSummaryDao {
     @Query("DELETE FROM match_summaries WHERE matchId = :matchId AND inningsId = :inningsId")
     suspend fun deleteForInnings(matchId: String, inningsId: String)
 
+    @Query("DELETE FROM match_summaries WHERE matchId = :matchId")
+    suspend fun deleteForMatch(matchId: String)
+
     @Query("SELECT * FROM match_summaries WHERE matchId = :matchId AND inningsId = :inningsId")
     fun observeSummary(matchId: String, inningsId: String): Flow<MatchSummaryEntity?>
 }

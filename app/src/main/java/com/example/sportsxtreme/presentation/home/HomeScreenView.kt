@@ -20,6 +20,7 @@ import com.example.sportsxtreme.common.WindowInsetsUtils
 import android.content.Context
 import android.content.Intent
 import android.app.Activity
+import android.app.AlertDialog
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -53,6 +54,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -938,7 +940,7 @@ class HomeScreenView @JvmOverloads constructor(
                                 features = listOf("BALL-BY-BALL", "LIVE UPDATES", "AUTO-SYNC", "MATCH STATS"),
                                 buttonLabel = "START QUICK SCORING",
                                 onClick = {
-                                    context.startActivity(Intent(context, StartMatchActivity::class.java))
+                                    context.startActivity(Intent(context, com.example.sportsxtreme.presentation.scoring.QuickScoringActivity::class.java))
                                 }
                             ), blockParams(top = 18))
                         }
@@ -1227,6 +1229,45 @@ class HomeScreenView @JvmOverloads constructor(
                     addView(TextView(context).apply { text = subtitle; setTextColor(Color.rgb(161, 185, 142)); textSize = 8f; typeface = Typeface.DEFAULT_BOLD })
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 addView(tournamentPill(context, status, false), LinearLayout.LayoutParams(dp(58), dp(23)))
+                addView(TextView(context).apply {
+                    text = "⋮"
+                    gravity = Gravity.CENTER
+                    textSize = 23f
+                    setTextColor(Color.WHITE)
+                    contentDescription = "Tournament options"
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { anchor ->
+                        PopupMenu(context, anchor).apply {
+                            menu.add("Delete tournament")
+                            setOnMenuItemClickListener {
+                                AlertDialog.Builder(context)
+                                    .setTitle("Delete tournament?")
+                                    .setMessage("This will permanently delete this tournament and its registered team entries.")
+                                    .setNegativeButton("Cancel", null)
+                                    .setPositiveButton("Delete") { _, _ ->
+                                        val viewModel = hostTournamentsViewModel
+                                        if (viewModel == null) {
+                                            Toast.makeText(context, "Unable to delete tournament", Toast.LENGTH_LONG).show()
+                                        } else {
+                                            viewModel.deleteTournament(tournament.id) { result ->
+                                                when (result) {
+                                                    is com.example.sportsxtreme.common.Resource.Success ->
+                                                        Toast.makeText(context, "Tournament deleted", Toast.LENGTH_SHORT).show()
+                                                    is com.example.sportsxtreme.common.Resource.Error ->
+                                                        Toast.makeText(context, result.message ?: "Unable to delete tournament", Toast.LENGTH_LONG).show()
+                                                    else -> Unit
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .show()
+                                true
+                            }
+                            show()
+                        }
+                    }
+                }, LinearLayout.LayoutParams(dp(28), dp(30)))
             })
             if (location.isNotBlank()) addView(TextView(context).apply {
                 text = "⌖  $location"; setTextColor(Color.rgb(145, 161, 184)); textSize = 9f; maxLines = 1

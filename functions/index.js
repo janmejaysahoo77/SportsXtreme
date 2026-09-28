@@ -186,6 +186,28 @@ exports.deleteTournament = onCall(async (request) => {
   return { tournamentId };
 });
 
+/** Deletes an organiser-owned match and all of its nested scoring data. */
+exports.deleteMatch = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before deleting a match.");
+  const matchId = requireTeamId(request.data?.matchId);
+  const matchRef = db.collection("matches").doc(matchId);
+  const match = await matchRef.get();
+  if (!match.exists) throw new HttpsError("not-found", "Match not found.");
+  const ownerId = match.get("ownerId") || match.get("organiserId");
+  if (ownerId !== request.auth.uid) {
+    throw new HttpsError("permission-denied", "Only the match organiser can delete it.");
+  }
+
+  const invites = await db.collection("matchInvites").where("matchId", "==", matchId).get();
+  for (let index = 0; index < invites.docs.length; index += 500) {
+    const batch = db.batch();
+    invites.docs.slice(index, index + 500).forEach((invite) => batch.delete(invite.ref));
+    await batch.commit();
+  }
+  await db.recursiveDelete(matchRef);
+  return { matchId };
+});
+
 /** Registers a captain's team in a tournament. Membership and duplicate checks are transactional. */
 exports.joinTournamentInvite = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before joining a tournament.");

@@ -27,4 +27,7 @@ interface InningsDao {
 
     @Query("SELECT * FROM innings WHERE matchId = :matchId ORDER BY number DESC LIMIT 1")
     suspend fun getLatestInnings(matchId: String): InningsEntity?
+
+    @Query("DELETE FROM innings WHERE matchId = :matchId")
+    suspend fun deleteForMatch(matchId: String)
 }

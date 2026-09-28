@@ -31,6 +31,9 @@ interface PlayerDao {
     @Query("DELETE FROM playing_xi WHERE matchId = :matchId AND teamId = :teamId")
     suspend fun clearPlayingXI(matchId: String, teamId: String)
 
+    @Query("DELETE FROM playing_xi WHERE matchId = :matchId")
+    suspend fun deletePlayingXIForMatch(matchId: String)
+
     @Query("SELECT * FROM playing_xi WHERE matchId = :matchId AND teamId = :teamId ORDER BY battingOrder")
     suspend fun getPlayingXI(matchId: String, teamId: String): List<PlayingXIEntity>
 

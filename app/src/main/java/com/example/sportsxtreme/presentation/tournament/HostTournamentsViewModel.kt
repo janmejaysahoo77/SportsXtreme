@@ -27,6 +27,12 @@ class HostTournamentsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<UiState>(UiState.Loading)
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
+    fun deleteTournament(tournamentId: String, onResult: (Resource<Unit>) -> Unit) {
+        viewModelScope.launch {
+            onResult(repository.deleteTournament(tournamentId))
+        }
+    }
+
     init {
         val hostUid = firebaseAuth.currentUser?.uid
         if (hostUid.isNullOrBlank()) {

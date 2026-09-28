@@ -35,6 +35,8 @@ import com.example.sportsxtreme.domain.model.TeamType
 import com.example.sportsxtreme.domain.repository.CreateMatchRequest
 import com.example.sportsxtreme.domain.repository.MatchRepository
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.functions.FirebaseFunctions
+import com.google.firebase.functions.FirebaseFunctionsException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
@@ -54,7 +56,8 @@ class MatchRepositoryImpl @Inject constructor(
     private val firestoreMatchSyncDataSource: FirebaseFirestoreMatchSyncDataSource,
     private val firestoreMatchClaimsDataSource: FirebaseFirestoreMatchClaimsDataSource,
     private val firestoreScoringDataSource: FirestoreScoringDataSource,
-    private val firestore: FirebaseFirestore
+    private val firestore: FirebaseFirestore,
+    private val functions: FirebaseFunctions
 ) : MatchRepository {
     override suspend fun createMatch(request: CreateMatchRequest): Resource<Match> = runCatching {
         val matchId = UUID.randomUUID().toString()
@@ -340,6 +343,71 @@ class MatchRepositoryImpl @Inject constructor(
         else runCatching { Resource.Success(loadMatch(match.matchId)) }
             .getOrElse { Resource.Error(it.message ?: "Unable to observe active match") }
     }
+
+    override fun observeLatestScoringMatch(): Flow<Resource<Match>> = matchDao.observeLatestScoringMatch().map { match ->
+        if (match == null) Resource.Error("No paused match to resume")
+        else runCatching { Resource.Success(loadMatch(match.matchId)) }
+            .getOrElse { Resource.Error(it.message ?: "Unable to load paused match") }
+    }
+
+    override suspend fun pauseScoring(matchId: String): Long? = runCatching {
+        val pausedAt = System.currentTimeMillis()
+        val match = requireMatch(matchId)
+        require(match.status in setOf(MatchStatus.LIVE.name, MatchStatus.IN_PROGRESS.name, MatchStatus.INNINGS_BREAK.name))
+        matchDao.updateMatch(match.copy(updatedAtEpochMs = pausedAt))
+        runCatching { loadAndSyncMatch(matchId) }
+        pausedAt
+    }.getOrNull()
+
+    override suspend fun resumeScoring(matchId: String): Boolean = runCatching {
+        val match = requireMatch(matchId)
+        require(match.status in setOf(MatchStatus.LIVE.name, MatchStatus.IN_PROGRESS.name, MatchStatus.INNINGS_BREAK.name))
+        matchDao.updateMatch(match.copy(updatedAtEpochMs = System.currentTimeMillis()))
+        runCatching { loadAndSyncMatch(matchId) }
+        true
+    }.getOrDefault(false)
+
+    override suspend fun expirePausedScoringMatch(matchId: String, pausedAtEpochMs: Long): Boolean = runCatching {
+        val match = requireMatch(matchId)
+        if (match.updatedAtEpochMs != pausedAtEpochMs ||
+            match.status !in setOf(MatchStatus.LIVE.name, MatchStatus.IN_PROGRESS.name, MatchStatus.INNINGS_BREAK.name)
+        ) return@runCatching false
+        val abandonedAt = System.currentTimeMillis()
+        matchDao.updateMatch(match.copy(status = MatchStatus.ABANDONED.name, updatedAtEpochMs = abandonedAt))
+        runCatching {
+            val expiredMatch = loadAndSyncMatch(matchId)
+            firestoreScoringDataSource.syncLiveScore(matchId, expiredMatch.toInitialLiveScore())
+        }
+        true
+    }.getOrDefault(false)
+
+    override suspend fun deleteMatch(matchId: String): Resource<Unit> = runCatching {
+        require(matchId.isNotBlank()) { "Match ID is missing" }
+        val remoteMatch = firestore.collection("matches").document(matchId).get().await()
+        if (remoteMatch.exists()) {
+            try {
+                functions.getHttpsCallable("deleteMatch").call(mapOf("matchId" to matchId)).await()
+            } catch (error: FirebaseFunctionsException) {
+                val stillExists = firestore.collection("matches").document(matchId).get().await().exists()
+                if (error.code == FirebaseFunctionsException.Code.NOT_FOUND && stillExists) {
+                    throw IllegalStateException("The Firebase deleteMatch function is not deployed yet.")
+                }
+                if (stillExists) throw error
+            }
+        }
+        database.withTransaction {
+            database.ballEventDao().deleteForMatch(matchId)
+            database.battingDao().deleteForMatch(matchId)
+            database.bowlingDao().deleteForMatch(matchId)
+            database.matchSummaryDao().deleteForMatch(matchId)
+            database.inningsDao().deleteForMatch(matchId)
+            database.playerDao().deletePlayingXIForMatch(matchId)
+            database.syncQueueDao().deleteForMatch(matchId)
+            database.liveMatchDao().delete(matchId)
+            matchDao.deleteMatch(matchId)
+        }
+        Resource.Success(Unit)
+    }.getOrElse { Resource.Error(it.message ?: "Unable to delete match") }
 
     override fun observeMatchState(matchId: String): Flow<Resource<MatchState>> = matchDao.observeMatch(matchId).map { match ->
         if (match == null) Resource.Error("Match not found")
