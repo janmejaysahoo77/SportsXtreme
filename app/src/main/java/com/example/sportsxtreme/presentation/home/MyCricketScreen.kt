@@ -706,36 +706,30 @@ private fun CricketTopStrip(onMenuClick: () -> Unit, selectedTab: Int) {
     ) {
         HeaderMenuButton(onMenuClick)
         Spacer(Modifier.width(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-            Text("Sports", color = CricketAccent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text("Xtreme", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(12.dp))
-            val proBadgeColor = CricketAccent
-            ProBadge(proBadgeColor)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+        ) {
+            Image(
+                painter = painterResource(R.drawable.appicon),
+                contentDescription = "SportsXtreme app icon",
+                modifier = Modifier.size(34.dp)
+            )
+            Spacer(Modifier.width(9.dp))
+            Text(
+                text = "Sports",
+                color = CricketAccent,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Xtreme",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
-        Image(painter = painterResource(R.drawable.telegram), contentDescription = "Messages", modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(12.dp))
-        Image(painter = painterResource(R.drawable.ghanti), contentDescription = "Notifications", modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(12.dp))
-        Image(painter = painterResource(R.drawable.user), contentDescription = "Profile", modifier = Modifier.size(20.dp).clip(CircleShape))
     }
-}
-
-@Composable
-private fun ProBadge(backgroundColor: Color) = Box(
-    modifier = Modifier
-        .clip(RoundedCornerShape(12.dp))
-        .background(backgroundColor)
-        .padding(horizontal = 8.dp, vertical = 4.dp),
-    contentAlignment = Alignment.Center
-) {
-    Text(
-        "PRO @ ₹199",
-        color = if (backgroundColor == CricketAccent) Color.Black else Color.White,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.ExtraBold,
-        maxLines = 1
-    )
 }
 
 @Composable
