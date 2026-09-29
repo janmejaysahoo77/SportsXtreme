@@ -171,6 +171,8 @@ class ScoringRepositoryImpl @Inject constructor(
         val nonStriker = summary.nonStrikerId?.let { playerDao.getPlayer(it) }
         val bowler = summary.bowlerId?.let { playerDao.getPlayer(it) }
         val bowlerScorecard = scorecard.bowling.firstOrNull { it.playerId == summary.bowlerId }
+        val strikerCard = scorecard.batting.firstOrNull { it.playerId == summary.strikerId }
+        val nonStrikerCard = scorecard.batting.firstOrNull { it.playerId == summary.nonStrikerId }
 
         firestoreScoringDataSource.syncLiveScore(
             matchId = event.matchId,
@@ -192,9 +194,17 @@ class ScoringRepositoryImpl @Inject constructor(
                 requiredRunRate = summary.requiredRunRate,
                 target = summary.target,
                 strikerName = striker?.playerName,
-                strikerRuns = scorecard.batting.firstOrNull { it.playerId == summary.strikerId }?.runs ?: 0,
-                strikerBalls = scorecard.batting.firstOrNull { it.playerId == summary.strikerId }?.balls ?: 0,
+                strikerRuns = strikerCard?.runs ?: 0,
+                strikerBalls = strikerCard?.balls ?: 0,
+                strikerFours = strikerCard?.fours ?: 0,
+                strikerSixes = strikerCard?.sixes ?: 0,
                 nonStrikerName = nonStriker?.playerName,
+                nonStrikerRuns = nonStrikerCard?.runs ?: 0,
+                nonStrikerBalls = nonStrikerCard?.balls ?: 0,
+                nonStrikerFours = nonStrikerCard?.fours ?: 0,
+                nonStrikerSixes = nonStrikerCard?.sixes ?: 0,
+                strikerPlayerId = summary.strikerId,
+                nonStrikerPlayerId = summary.nonStrikerId,
                 bowlerName = bowler?.playerName,
                 bowlerOvers = bowlerScorecard?.overs?.display ?: "0.0",
                 bowlerRuns = bowlerScorecard?.runsConceded ?: 0,

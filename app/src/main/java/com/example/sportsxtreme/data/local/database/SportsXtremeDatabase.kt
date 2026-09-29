@@ -40,7 +40,7 @@ import com.example.sportsxtreme.data.local.entity.TeamEntity
         SyncQueueEntity::class,
         LiveMatchEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class SportsXtremeDatabase : RoomDatabase() {
@@ -282,6 +282,19 @@ abstract class SportsXtremeDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE live_matches ADD COLUMN teamAId TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE live_matches ADD COLUMN teamBId TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE live_matches ADD COLUMN battingTeamId TEXT DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN strikerFours INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN strikerSixes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN nonStrikerRuns INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN nonStrikerBalls INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN nonStrikerFours INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN nonStrikerSixes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN strikerPlayerId TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN nonStrikerPlayerId TEXT DEFAULT NULL")
             }
         }
     }
