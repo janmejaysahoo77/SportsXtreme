@@ -67,6 +67,7 @@ import com.example.sportsxtreme.domain.model.MatchType
 import com.example.sportsxtreme.domain.model.MatchTeam
 import com.example.sportsxtreme.domain.model.SportType
 import com.example.sportsxtreme.domain.model.TeamSide
+import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.domain.repository.CreateMatchRequest
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import com.example.sportsxtreme.domain.repository.TournamentRepository
@@ -98,7 +99,17 @@ class StartMatchActivity : ComponentActivity() {
         val isTournamentSetupFlow = isScheduleFlow || tournamentOnlyFlow
         val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
         val tournamentName = androidx.compose.runtime.mutableStateOf<String?>(null)
-        if (tournamentOnlyFlow && tournamentId.isNotBlank()) {
+        val hostTournaments = androidx.compose.runtime.mutableStateOf<List<Tournament>>(emptyList())
+        if (!isTournamentSetupFlow) {
+            FirebaseAuth.getInstance().currentUser?.uid?.takeIf { it.isNotBlank() }?.let { hostUid ->
+                lifecycleScope.launch {
+                    tournamentRepository.observeHostTournaments(hostUid).collect { result ->
+                        if (result is Resource.Success) hostTournaments.value = result.data.orEmpty()
+                    }
+                }
+            }
+        }
+        if (isTournamentSetupFlow && tournamentId.isNotBlank()) {
             lifecycleScope.launch {
                 when (val result = tournamentRepository.getTournament(tournamentId)) {
                     is Resource.Success -> tournamentName.value = result.data?.name?.takeIf { it.isNotBlank() }
@@ -168,7 +179,7 @@ class StartMatchActivity : ComponentActivity() {
             }
             StartMatchScreen(
                 onBack = { finish() },
-                onContinue = { selectedType ->
+                onContinue = { selectedType, selectedTournament ->
                     if (isTournamentSetupFlow) {
                         if (!isOpeningScheduleSetup) {
                             isOpeningScheduleSetup = true
@@ -193,13 +204,52 @@ class StartMatchActivity : ComponentActivity() {
                             }
                         }
                     } else {
-                        viewModel.continueWith(selectedType)
+                        if (selectedType == MatchType.TOURNAMENT) {
+                            if (selectedTournament.id.isBlank()) {
+                                Toast.makeText(this@StartMatchActivity, "Choose one of your tournaments to continue", Toast.LENGTH_SHORT).show()
+                            } else {
+                                lifecycleScope.launch {
+                                    val now = System.currentTimeMillis()
+                                    val suffix = now.toString()
+                                    when (val result = matchUseCases.createMatch(
+                                        CreateMatchRequest(
+                                            matchType = MatchType.TOURNAMENT,
+                                            sport = SportType.CRICKET,
+                                            organiserId = FirebaseAuth.getInstance().currentUser?.uid ?: "local-organiser",
+                                            title = "${selectedTournament.name} Match",
+                                            teamA = MatchTeam("tournament-team-a-$suffix", "Team A", "A", TeamSide.TEAM_A),
+                                            teamB = MatchTeam("tournament-team-b-$suffix", "Team B", "B", TeamSide.TEAM_B),
+                                            tournamentId = selectedTournament.id,
+                                            createdAtEpochMs = now
+                                        )
+                                    )) {
+                                        is Resource.Success -> {
+                                            val matchId = result.data?.id
+                                            if (matchId.isNullOrBlank()) {
+                                                Toast.makeText(this@StartMatchActivity, "Unable to create tournament match", Toast.LENGTH_LONG).show()
+                                            } else {
+                                                startActivity(
+                                                    Intent(this@StartMatchActivity, LeagueMatchSetupActivity::class.java)
+                                                        .putExtra("tournament_id", selectedTournament.id)
+                                                        .putExtra(StartMatchActivity.EXTRA_SCHEDULE_MATCH_ID, matchId)
+                                                )
+                                            }
+                                        }
+                                        is Resource.Error -> Toast.makeText(this@StartMatchActivity, result.message ?: "Unable to create tournament match", Toast.LENGTH_LONG).show()
+                                        is Resource.Loading -> Unit
+                                    }
+                                }
+                            }
+                        } else {
+                            viewModel.continueWith(selectedType)
+                        }
                     }
                 },
                 isLoading = uiState.isLoading,
                 isScheduleFlow = isScheduleFlow || tournamentOnlyFlow,
-                tournamentOnlyFlow = tournamentOnlyFlow,
-                tournamentName = tournamentName.value
+                tournamentOnlyFlow = isTournamentSetupFlow,
+                tournamentName = tournamentName.value,
+                tournaments = hostTournaments.value
             )
         }
     }
@@ -227,11 +277,12 @@ private val MatchBlue = Color(0xFF00D2FF)
 @Composable
 private fun StartMatchScreen(
     onBack: () -> Unit,
-    onContinue: (MatchType) -> Unit,
+    onContinue: (MatchType, Tournament) -> Unit,
     isLoading: Boolean,
     isScheduleFlow: Boolean,
     tournamentOnlyFlow: Boolean,
-    tournamentName: String?
+    tournamentName: String?,
+    tournaments: List<Tournament>
 ) {
     var selectedType by remember { mutableIntStateOf(0) }
     var selectedTournament by remember { mutableIntStateOf(0) }
@@ -278,20 +329,19 @@ private fun StartMatchScreen(
                                 selected = true
                             ) { }
                         }
-                    } else {
+                    } else if (tournaments.isNotEmpty()) {
                         SectionTitle("SELECT TOURNAMENT", "SEE ALL")
-                        TournamentCard(
-                            title = "Dubai Premier League",
-                            subtitle = "ACTIVE SEASON 2024",
-                            imageRes = R.drawable.ground,
-                            selected = selectedTournament == 0
-                        ) { selectedTournament = 0 }
-                        TournamentCard(
-                            title = "KPL Knockout",
-                            subtitle = "REGISTRATION OPEN",
-                            imageRes = null,
-                            selected = selectedTournament == 1
-                        ) { selectedTournament = 1 }
+                        tournaments.forEachIndexed { index, tournament ->
+                            TournamentCard(
+                                title = tournament.name.ifBlank { "Tournament" },
+                                subtitle = tournament.type.uppercase(),
+                                imageRes = if (index == 0) R.drawable.ground else null,
+                                selected = selectedTournament == index
+                            ) { selectedTournament = index }
+                        }
+                    } else {
+                        SectionTitle("SELECT TOURNAMENT")
+                        InfoNotice("Create a tournament first, then select it here to start a match.")
                     }
                     SectionTitle("SELECT TOURNAMENT STAGE")
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -323,7 +373,10 @@ private fun StartMatchScreen(
                 .padding(start = 14.dp, end = 14.dp, top = 22.dp, bottom = 14.dp)
         ) {
             ContinueButton(
-                onClick = { onContinue(if (selectedType == 2) MatchType.FRIENDLY else MatchType.TOURNAMENT) },
+                onClick = {
+                    val tournament = tournaments.getOrNull(selectedTournament) ?: Tournament()
+                    onContinue(if (selectedType == 2) MatchType.FRIENDLY else MatchType.TOURNAMENT, tournament)
+                },
                 enabled = !isLoading
             )
         }
