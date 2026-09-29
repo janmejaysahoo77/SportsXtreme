@@ -95,6 +95,18 @@ class TournamentTeamInviteViewModel @Inject constructor(
             }
     }
 
+    fun claimMatchInvite(token: String, teamId: String, teamName: String) {
+        _registrationState.value = RegistrationState.Loading(teamId)
+        functions.getHttpsCallable("claimMatchInviteForTeam")
+            .call(mapOf("token" to token, "teamId" to teamId))
+            .addOnSuccessListener {
+                _registrationState.value = RegistrationState.Success(teamName)
+            }
+            .addOnFailureListener { error ->
+                _registrationState.value = RegistrationState.Error(error.message ?: "Unable to join this match")
+            }
+    }
+
     fun resetRegistrationState() {
         _registrationState.value = RegistrationState.Idle
     }

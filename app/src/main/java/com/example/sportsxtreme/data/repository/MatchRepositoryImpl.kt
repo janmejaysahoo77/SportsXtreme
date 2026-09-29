@@ -334,7 +334,16 @@ class MatchRepositoryImpl @Inject constructor(
 
     override fun observeMatch(matchId: String): Flow<Resource<Match>> = combine(matchDao.observeMatch(matchId), firestoreMatchClaimsDataSource.observe(matchId)) { match, claims ->
         if (match == null) Resource.Error("Match not found")
-        else runCatching { Resource.Success(loadMatch(matchId).copy(teamAClaim = claims.teamA, teamBClaim = claims.teamB)) }
+        else runCatching {
+            val loaded = loadMatch(matchId)
+            val teamA = claims.teamA?.takeIf { it.teamId.isNotBlank() }?.let { claim ->
+                loaded.teamA.copy(teamId = claim.teamId, name = claim.teamName, shortName = claim.teamShortName.ifBlank { claim.teamName.take(3).uppercase() })
+            } ?: loaded.teamA
+            val teamB = claims.teamB?.takeIf { it.teamId.isNotBlank() }?.let { claim ->
+                loaded.teamB.copy(teamId = claim.teamId, name = claim.teamName, shortName = claim.teamShortName.ifBlank { claim.teamName.take(3).uppercase() })
+            } ?: loaded.teamB
+            Resource.Success(loaded.copy(teamA = teamA, teamB = teamB, teamAClaim = claims.teamA, teamBClaim = claims.teamB))
+        }
             .getOrElse { Resource.Error(it.message ?: "Unable to observe match") }
     }
 

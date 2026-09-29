@@ -113,12 +113,15 @@ class SelectTeamAorBActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
         val teamSlot = intent.getStringExtra(EXTRA_TEAM_SLOT)?.takeIf { it == "B" } ?: "A"
+        val isJoinMode = intent.getBooleanExtra(EXTRA_JOIN_MODE, false)
+        val inviteToken = intent.getStringExtra(EXTRA_INVITE_TOKEN).orEmpty()
         val teamSide = if (teamSlot == "B") TeamSide.TEAM_B else TeamSide.TEAM_A
         val inviteViewModel: MatchInviteViewModel by viewModels {
             MatchInviteViewModel.factory(matchId, teamSide, matchUseCases)
         }
         val selectedTeamId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID)
-            ?: FRIENDLY_TEAM_OPTIONS.first().id
+            .orEmpty()
+        var isJoining by mutableStateOf(false)
         val finalSquadLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
@@ -128,12 +131,32 @@ class SelectTeamAorBActivity : ComponentActivity() {
             }
         }
         setContent {
-            val inviteState by inviteViewModel.uiState.collectAsState()
+            val inviteState = if (isJoinMode) {
+                MatchInviteUiState(isLoading = false)
+            } else {
+                inviteViewModel.uiState.collectAsState().value
+            }
             val initialMatchResult: Resource<Match> = Resource.Loading()
             val matchResult by matchUseCases.observeMatch(matchId)
                 .collectAsState(initial = initialMatchResult)
-            val claimedTeamAName = matchResult.data?.teamAClaim?.displayName
-            val claimedTeamBName = matchResult.data?.teamBClaim?.displayName
+            val claimedTeamAName = matchResult.data?.teamAClaim?.let { it.teamName.ifBlank { it.displayName } }
+            val claimedTeamBName = matchResult.data?.teamBClaim?.let { it.teamName.ifBlank { it.displayName } }
+            val claimedSlot = if (teamSide == TeamSide.TEAM_A) matchResult.data?.teamAClaim else matchResult.data?.teamBClaim
+            LaunchedEffect(isJoinMode, teamSlot, claimedSlot?.teamId) {
+                if (!isJoinMode && !claimedSlot?.teamId.isNullOrBlank()) {
+                    setResult(RESULT_OK, Intent().apply {
+                        putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, teamSlot)
+                        if (teamSlot == "A") {
+                            putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID, claimedSlot?.teamId)
+                            putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME, claimedSlot?.teamName)
+                        } else {
+                            putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID, claimedSlot?.teamId)
+                            putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME, claimedSlot?.teamName)
+                        }
+                    })
+                    finish()
+                }
+            }
             val userTeams = rememberSelectableUserTeams()
             SelectTeamAScreen(
                 teamSlot = teamSlot,
@@ -141,19 +164,36 @@ class SelectTeamAorBActivity : ComponentActivity() {
                 invite = inviteState.invite,
                 inviteError = inviteState.errorMessage,
                 teams = userTeams,
+                isJoinMode = isJoinMode,
+                isJoining = isJoining,
                 onBack = { finish() },
                 claimedTeamAName = claimedTeamAName,
                 claimedTeamBName = claimedTeamBName,
                 claimedSlotName = if (teamSide == TeamSide.TEAM_A) claimedTeamAName else claimedTeamBName,
                 onNext = { selectedTeam ->
-                    finalSquadLauncher.launch(
-                        Intent(this, FinalSquadActivity::class.java)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID, selectedTeam.id)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME, selectedTeam.name)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, teamSlot)
-                            .putExtras(intent.copyTeamSelectionExtras())
-                    )
+                    if (isJoinMode && !isJoining) {
+                        isJoining = true
+                        com.google.firebase.functions.FirebaseFunctions.getInstance()
+                            .getHttpsCallable("claimMatchInviteForTeam")
+                            .call(mapOf("token" to inviteToken, "teamId" to selectedTeam.id))
+                            .addOnSuccessListener {
+                                Toast.makeText(this, "${selectedTeam.name} joined Team $teamSlot", Toast.LENGTH_LONG).show()
+                                finish()
+                            }
+                            .addOnFailureListener { error ->
+                                isJoining = false
+                                Toast.makeText(this, error.message ?: "Unable to join match", Toast.LENGTH_LONG).show()
+                            }
+                    } else if (!isJoinMode) {
+                        finalSquadLauncher.launch(
+                            Intent(this, FinalSquadActivity::class.java)
+                                .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                                .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID, selectedTeam.id)
+                                .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME, selectedTeam.name)
+                                .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, teamSlot)
+                                .putExtras(intent.copyTeamSelectionExtras())
+                        )
+                    }
                 },
                 onViewDetails = { selectedTeam ->
                     finalSquadLauncher.launch(
@@ -182,6 +222,8 @@ class SelectTeamAorBActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_TEAM_SLOT = "team_slot"
+        const val EXTRA_JOIN_MODE = "join_match_invite"
+        const val EXTRA_INVITE_TOKEN = "match_invite_token"
     }
 }
 
@@ -221,22 +263,20 @@ private fun rememberSelectableUserTeams(): List<FriendlyTeamOption> {
 }
 
 private fun DocumentSnapshot.belongsToCurrentUser(userId: String): Boolean {
-    if (getString("ownerUserId") == userId || getString("ownerId") == userId) return true
-    if (userId in (get("memberIds") as? List<*>)?.filterIsInstance<String>().orEmpty()) return true
-    return listOf("members", "players").flatMap { field ->
-        (get(field) as? List<*>)?.filterIsInstance<Map<*, *>>().orEmpty()
-    }.any { it["userId"] == userId || it["linkedUserId"] == userId || it["playerId"] == userId }
+    if (getString("ownerUserId") == userId || getString("ownerId") == userId || getString("captainUserId") == userId) return true
+    return (get("members") as? List<*>)
+        ?.filterIsInstance<Map<*, *>>()
+        ?.any { member ->
+            val isCurrentUser = member["userId"] == userId || member["linkedUserId"] == userId
+            val roles = (member["roles"] as? List<*>)?.filterIsInstance<String>().orEmpty()
+            isCurrentUser && ("CAPTAIN" in roles || member["role"] == "CAPTAIN" || member["role"] == "OWNER")
+        } == true
 }
 
 private fun DocumentSnapshot.toSelectableTeam(): FriendlyTeamOption {
     val teamName = getString("teamName").orEmpty().ifBlank { getString("name").orEmpty().ifBlank { id } }
     return FriendlyTeamOption(id, teamName)
 }
-
-private val FRIENDLY_TEAM_OPTIONS = listOf(
-    FriendlyTeamOption("friendly-team-a", "Team A"),
-    FriendlyTeamOption("friendly-team-b", "Team B")
-)
 
 @Composable
 private fun MatchInviteCard(
@@ -290,6 +330,8 @@ private fun SelectTeamAScreen(
     invite: CreatedMatchInvite?,
     inviteError: String?,
     teams: List<FriendlyTeamOption>,
+    isJoinMode: Boolean,
+    isJoining: Boolean,
     onBack: () -> Unit,
     claimedTeamAName: String?,
     claimedTeamBName: String?,
@@ -311,7 +353,7 @@ private fun SelectTeamAScreen(
     val selectedTeam = teams.firstOrNull { it.id == selectedTeamId } ?: teams.firstOrNull()
 
     fun switchTab(tab: Int) {
-        if (tab != selectedTab) {
+        if (tab != selectedTab && (!isJoinMode || tab == 0)) {
             previousTab = selectedTab
             selectedTab = tab
         }
@@ -327,7 +369,7 @@ private fun SelectTeamAScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             SelectTeamATopBar(title = if (selectedTab == 0) "Select team $teamSlot" else "Add Team", onBack = onBack)
-            TeamATabs(selectedTab = selectedTab, onSelectTab = { switchTab(it) })
+            TeamATabs(selectedTab = selectedTab, showAddTeams = !isJoinMode, onSelectTab = { switchTab(it) })
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -388,10 +430,18 @@ private fun SelectTeamAScreen(
                     .shadow(20.dp, RoundedCornerShape(12.dp), clip = false)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Brush.horizontalGradient(listOf(TeamAAccent, Color(0xFF9BFF00))))
-                    .clickable(onClick = { if (selectedTab == 0 && selectedTeam != null) onNext(selectedTeam) }),
+                    .clickable(onClick = { if (selectedTab == 0 && selectedTeam != null && !isJoining) onNext(selectedTeam) }),
                 contentAlignment = Alignment.Center
             ) {
-                Text(if (selectedTab == 0) "NEXT->" else "ADD TEAM", color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text(
+                    when {
+                        isJoining -> "JOINING…"
+                        selectedTab != 0 -> "ADD TEAM"
+                        isJoinMode -> "JOIN MATCH"
+                        else -> "NEXT->"
+                    },
+                    color = Color(0xFF111604), fontSize = 15.sp, fontWeight = FontWeight.Black
+                )
             }
         }
     }
@@ -441,7 +491,7 @@ private fun SelectTeamATopBar(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun TeamATabs(selectedTab: Int, onSelectTab: (Int) -> Unit) {
+private fun TeamATabs(selectedTab: Int, showAddTeams: Boolean, onSelectTab: (Int) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -464,14 +514,16 @@ private fun TeamATabs(selectedTab: Int, onSelectTab: (Int) -> Unit) {
                     modifier = Modifier.clickable { onSelectTab(0) }.padding(vertical = 10.dp)
                 )
             }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text(
-                    "Add Teams",
-                    color = if (selectedTab == 1) TeamAAccent else TeamAMuted,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Black,
-                    modifier = Modifier.clickable { onSelectTab(1) }.padding(vertical = 10.dp)
-                )
+            if (showAddTeams) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        "Add Teams",
+                        color = if (selectedTab == 1) TeamAAccent else TeamAMuted,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.clickable { onSelectTab(1) }.padding(vertical = 10.dp)
+                    )
+                }
             }
         }
         BoxWithConstraints(
@@ -480,12 +532,12 @@ private fun TeamATabs(selectedTab: Int, onSelectTab: (Int) -> Unit) {
                 .height(3.dp)
                 .padding(horizontal = 14.dp)
         ) {
-            val tabWidth = maxWidth / 2
+            val tabWidth = if (showAddTeams) maxWidth / 2 else maxWidth
             val underlineWidth = if (selectedTab == 0) 115.dp else 68.dp
             val targetStart = if (selectedTab == 0) {
                 (tabWidth - underlineWidth) / 2
             } else {
-                tabWidth + (tabWidth - underlineWidth) / 2
+                if (showAddTeams) tabWidth + (tabWidth - underlineWidth) / 2 else (tabWidth - underlineWidth) / 2
             }
             val animatedStart by animateDpAsState(
                 targetValue = targetStart,
