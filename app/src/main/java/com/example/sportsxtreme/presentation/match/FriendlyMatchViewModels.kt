@@ -500,7 +500,10 @@ class OpeningPlayersViewModel(
                 .mapNotNull { it as? Map<*, *> }
                 .mapNotNull { profile ->
                     val userId = profile["userId"] as? String ?: return@mapNotNull null
-                    userId to (profile["displayName"] as? String).orEmpty()
+                    userId to (profile["displayName"] as? String)
+                        ?.trim()
+                        ?.takeUnless { it.isBlank() || it.equals("team member", ignoreCase = true) }
+                        .orEmpty()
                 }.toMap()
         }.getOrDefault(emptyMap())
         buildList {
@@ -509,7 +512,10 @@ class OpeningPlayersViewModel(
                 .forEach { member ->
                     val userId = member["userId"] as? String ?: return@forEach
                     val profile = runCatching { firestore.collection("users").document(userId).get().await() }.getOrNull()
-                    val name = (member["displayName"] as? String).orEmpty()
+                    val name = (member["displayName"] as? String)
+                        ?.trim()
+                        ?.takeUnless { it.isBlank() || it.equals("team member", ignoreCase = true) }
+                        .orEmpty()
                         .ifBlank { (member["name"] as? String).orEmpty() }
                         .ifBlank { profiles[userId].orEmpty() }
                         .ifBlank { profile?.getString("name").orEmpty() }
