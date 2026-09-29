@@ -12,6 +12,7 @@ import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
+import androidx.lifecycle.lifecycleScope
 import androidx.activity.compose.setContent
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedContent
@@ -27,6 +28,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,8 +57,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,12 +83,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.ListenerRegistration
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import javax.inject.Inject
+import java.util.Locale
 
+@AndroidEntryPoint
 class ScorecardActivity : ComponentActivity() {
+
+    @Inject lateinit var firestore: FirebaseFirestore
+    private var matchListener: ListenerRegistration? = null
 
     companion object {
         const val EXTRA_LEAGUE = "scorecard.extra.LEAGUE"
         const val EXTRA_ROUND = "scorecard.extra.ROUND"
+        const val EXTRA_MATCH_ID = "scorecard.extra.MATCH_ID"
         const val EXTRA_LEFT_NAME = "scorecard.extra.LEFT_NAME"
         const val EXTRA_LEFT_SCORE = "scorecard.extra.LEFT_SCORE"
         const val EXTRA_LEFT_OVERS = "scorecard.extra.LEFT_OVERS"
@@ -104,25 +121,237 @@ class ScorecardActivity : ComponentActivity() {
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
 
-        setContent {
-            ScorecardScreen(match = readMatch(), onBack = { finish() })
+        val match = mutableStateOf(readMatch())
+        setContent { ScorecardScreen(match = match.value, onBack = { finish() }) }
+
+        val matchId = intent.getStringExtra(EXTRA_MATCH_ID).orEmpty()
+        if (matchId.isNotBlank()) {
+            var tournamentLookupStartedFor: String? = null
+            matchListener = firestore.collection("matches").document(matchId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
+                    match.value = snapshot.toMatchDetail(match.value)
+
+                    val tournamentId = snapshot.getString("tournamentId")
+                        ?.takeIf(String::isNotBlank)
+                    if (tournamentId != null && tournamentLookupStartedFor != tournamentId) {
+                        tournamentLookupStartedFor = tournamentId
+                        lifecycleScope.launch {
+                            val name = runCatching {
+                                firestore.collection("tournaments").document(tournamentId)
+                                    .get().await().getString("name")
+                            }.getOrNull()?.takeIf(String::isNotBlank)
+                            if (name != null && !isFinishing && !isDestroyed) {
+                                match.value = match.value.copy(league = name)
+                            }
+                        }
+                    }
+                }
         }
+    }
+
+    override fun onDestroy() {
+        matchListener?.remove()
+        matchListener = null
+        super.onDestroy()
+    }
+
+    private fun DocumentSnapshot.toMatchDetail(previous: MatchDetail): MatchDetail {
+        val liveScore = get("liveScore") as? Map<*, *>
+        val teamA = get("teamA") as? Map<*, *>
+        val teamB = get("teamB") as? Map<*, *>
+        val teamAId = (teamA?.get("teamId") as? String)
+            ?: (liveScore?.get("teamAId") as? String).orEmpty()
+        val teamBId = (teamB?.get("teamId") as? String)
+            ?: (liveScore?.get("teamBId") as? String).orEmpty()
+        val teamAName = teamA?.displayName("teamAShortName", "teamAName", liveScore)
+            ?: previous.leftName
+        val teamBName = teamB?.displayName("teamBShortName", "teamBName", liveScore)
+            ?: previous.rightName
+        val innings = (get("innings") as? List<*>)?.filterIsInstance<Map<*, *>>().orEmpty()
+        val currentBattingTeamId = (liveScore?.get("battingTeamId") as? String)
+            ?: (innings.lastOrNull()?.get("battingTeamId") as? String)
+
+        var leftScore = innings.scoreFor(teamAId) ?: getString("teamAScore") ?: previous.leftScore
+        var leftOvers = innings.oversFor(teamAId) ?: getString("teamAOvers") ?: previous.leftOvers
+        var rightScore = innings.scoreFor(teamBId) ?: getString("teamBScore") ?: previous.rightScore
+        var rightOvers = innings.oversFor(teamBId) ?: getString("teamBOvers") ?: previous.rightOvers
+
+        val liveRuns = liveScore?.number("score")
+        val liveWickets = liveScore?.number("wickets")
+        val liveOvers = liveScore?.get("overs")?.toString()?.takeIf(String::isNotBlank)
+        val strikerName = liveScore?.get("strikerName") as? String
+        val currentBatters = if (liveScore == null) previous.currentBatters else listOfNotNull(
+            strikerName?.takeIf(String::isNotBlank)?.let {
+                CurrentBatter(
+                    name = it,
+                    runs = liveScore?.number("strikerRuns") ?: 0,
+                    balls = liveScore?.number("strikerBalls") ?: 0,
+                    fours = liveScore?.number("strikerFours") ?: 0,
+                    sixes = liveScore?.number("strikerSixes") ?: 0,
+                    isStriker = true
+                )
+            },
+            (liveScore?.get("nonStrikerName") as? String)
+                ?.takeIf(String::isNotBlank)
+                ?.takeIf { it != strikerName }
+                ?.let {
+                    CurrentBatter(
+                        name = it,
+                        runs = liveScore?.number("nonStrikerRuns") ?: 0,
+                        balls = liveScore?.number("nonStrikerBalls") ?: 0,
+                        fours = liveScore?.number("nonStrikerFours") ?: 0,
+                        sixes = liveScore?.number("nonStrikerSixes") ?: 0,
+                        isStriker = false
+                    )
+                }
+        )
+        if (liveRuns != null && currentBattingTeamId == teamAId) {
+            leftScore = "$liveRuns/${liveWickets ?: 0}"
+            leftOvers = liveOvers ?: leftOvers
+        } else if (liveRuns != null && currentBattingTeamId == teamBId) {
+            rightScore = "$liveRuns/${liveWickets ?: 0}"
+            rightOvers = liveOvers ?: rightOvers
+        }
+
+        val activeInnings = innings.lastOrNull()
+        val activeInningsNumber = activeInnings?.number("number")
+        val targetValue = liveScore?.number("target") ?: activeInnings?.number("target")
+        val isFirstInnings = when {
+            activeInningsNumber != null -> activeInningsNumber <= 1
+            innings.size >= 2 -> false
+            else -> targetValue == null
+        }
+        val ballsBowled = liveOvers?.let(::ballsFromOvers)
+            ?: activeInnings?.number("legalBalls")
+        val scheduledOvers = (get("overs") as? Number)?.toInt()
+            ?: (get("overs") as? String)?.toIntOrNull()
+        val crr = liveScore?.decimal("currentRunRate")
+            ?: activeInnings?.let { inning ->
+                val balls = inning.number("legalBalls") ?: 0
+                val runs = inning.number("score") ?: 0
+                if (balls > 0) runs * 6.0 / balls else 0.0
+            }
+        val toss = get("toss") as? Map<*, *>
+        val tossWinnerId = toss?.get("winnerTeamId") as? String
+        val tossDecision = (toss?.get("decision") as? String)?.uppercase(Locale.US)
+        val tossWinnerName = when (tossWinnerId) {
+            teamAId -> teamAName
+            teamBId -> teamBName
+            else -> null
+        }
+        val tossText = when {
+            tossWinnerName.isNullOrBlank() -> ""
+            tossDecision == "BAT" -> "$tossWinnerName won the toss and elected to bat"
+            tossDecision == "FIELD" -> "$tossWinnerName won the toss and elected to field"
+            else -> ""
+        }
+        val target = if (isFirstInnings) "—" else targetValue?.toString() ?: "—"
+        val requiredRunRate = if (isFirstInnings) "—" else {
+            liveScore?.decimal("requiredRunRate")?.formatRate()
+                ?: activeInnings?.let { inning ->
+                    val totalBalls = scheduledOvers?.times(6)
+                    val remainingBalls = totalBalls?.minus(inning.number("legalBalls") ?: 0) ?: 0
+                    if (targetValue != null && remainingBalls > 0) {
+                        ((targetValue - (liveRuns ?: inning.number("score") ?: 0)).coerceAtLeast(0) * 6.0 / remainingBalls).formatRate()
+                    } else "—"
+                } ?: "—"
+        }
+        val isFriendlyMatch = getString("matchType")?.equals("FRIENDLY", ignoreCase = true) == true
+
+        return previous.copy(
+            league = if (isFriendlyMatch) getString("title")?.takeIf(String::isNotBlank) ?: "Friendly Match"
+                else getString("tournamentName")?.takeIf(String::isNotBlank)
+                    ?: (liveScore?.get("tournamentName") as? String)?.takeIf(String::isNotBlank)
+                    ?: previous.league,
+            round = if (isFriendlyMatch) "" else (getString("roundName")
+                ?: getString("selectedStage") ?: previous.round).orEmpty(),
+            leftName = teamAName,
+            leftScore = leftScore,
+            leftOvers = leftOvers,
+            rightName = teamBName,
+            rightScore = rightScore,
+            rightOvers = rightOvers,
+            venue = getString("venue")?.takeIf(String::isNotBlank).orEmpty(),
+            target = target,
+            rrr = requiredRunRate,
+            currentRunRate = crr?.formatRate() ?: previous.currentRunRate,
+            tossInfo = tossText,
+            isFirstInnings = isFirstInnings,
+            battingTeamIsLeft = when (currentBattingTeamId) {
+                teamAId -> true
+                teamBId -> false
+                else -> null
+            },
+            ballsBowled = ballsBowled,
+            scheduledBalls = scheduledOvers?.times(6),
+            currentBatters = currentBatters
+        )
+    }
+
+    private fun Map<*, *>?.number(key: String): Int? = when (val value = this?.get(key)) {
+        is Number -> value.toInt()
+        is String -> value.toIntOrNull()
+        else -> null
+    }
+
+    private fun Map<*, *>?.decimal(key: String): Double? = when (val value = this?.get(key)) {
+        is Number -> value.toDouble()
+        is String -> value.toDoubleOrNull()
+        else -> null
+    }
+
+    private fun Map<*, *>?.displayName(shortNameKey: String, nameKey: String, liveScore: Map<*, *>?): String? =
+        (this?.get("shortName") as? String)?.takeIf(String::isNotBlank)
+            ?: (this?.get("name") as? String)?.takeIf(String::isNotBlank)
+            ?: (liveScore?.get(shortNameKey) as? String)?.takeIf(String::isNotBlank)
+            ?: (liveScore?.get(nameKey) as? String)?.takeIf(String::isNotBlank)
+
+    private fun List<Map<*, *>>.scoreFor(teamId: String): String? =
+        lastOrNull { it["battingTeamId"] == teamId }?.let { inning ->
+            val runs = inning.number("score") ?: return@let null
+            "$runs/${inning.number("wickets") ?: 0}"
+        }
+
+    private fun List<Map<*, *>>.oversFor(teamId: String): String? =
+        lastOrNull { it["battingTeamId"] == teamId }?.let { inning ->
+            val legalBalls = inning.number("legalBalls")
+            if (legalBalls != null) "${legalBalls / 6}.${legalBalls % 6}"
+            else inning["overs"]?.toString()?.takeIf(String::isNotBlank)
+        }
+
+    private fun Double.formatRate(): String = String.format(Locale.US, "%.2f", this)
+
+    private fun ballsFromOvers(overs: String): Int? {
+        val parts = overs.split('.')
+        val completedOvers = parts.firstOrNull()?.toIntOrNull() ?: return null
+        val ballsInOver = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        if (ballsInOver !in 0..5) return null
+        return completedOvers * 6 + ballsInOver
     }
 
     private fun readMatch(): MatchDetail {
         return MatchDetail(
-            league = intent.getStringExtra(EXTRA_LEAGUE) ?: "VALORANT PRO LEAGUE",
-            round = intent.getStringExtra(EXTRA_ROUND) ?: "Semi-final - Match 07",
-            leftName = intent.getStringExtra(EXTRA_LEFT_NAME) ?: "NSC",
-            leftScore = intent.getStringExtra(EXTRA_LEFT_SCORE) ?: "142/4",
-            leftOvers = intent.getStringExtra(EXTRA_LEFT_OVERS) ?: "18.4 OV",
-            rightName = intent.getStringExtra(EXTRA_RIGHT_NAME) ?: "VCR",
-            rightScore = intent.getStringExtra(EXTRA_RIGHT_SCORE) ?: "138/6",
-            rightOvers = intent.getStringExtra(EXTRA_RIGHT_OVERS) ?: "18.1 OV",
-            target = intent.getStringExtra(EXTRA_TARGET) ?: "156",
-            rrr = intent.getStringExtra(EXTRA_RRR) ?: "8.42",
-            win = intent.getStringExtra(EXTRA_WIN) ?: "NSC 61%",
-            note = intent.getStringExtra(EXTRA_NOTE) ?: "VCR chose to bowl - Powerplay complete"
+            league = intent.getStringExtra(EXTRA_LEAGUE)?.takeIf(String::isNotBlank) ?: "MATCH SCORECARD",
+            round = intent.getStringExtra(EXTRA_ROUND)?.takeIf(String::isNotBlank).orEmpty(),
+            leftName = intent.getStringExtra(EXTRA_LEFT_NAME)?.takeIf(String::isNotBlank) ?: "TEAM A",
+            leftScore = intent.getStringExtra(EXTRA_LEFT_SCORE) ?: "—",
+            leftOvers = intent.getStringExtra(EXTRA_LEFT_OVERS).orEmpty(),
+            rightName = intent.getStringExtra(EXTRA_RIGHT_NAME)?.takeIf(String::isNotBlank) ?: "TEAM B",
+            rightScore = intent.getStringExtra(EXTRA_RIGHT_SCORE) ?: "—",
+            rightOvers = intent.getStringExtra(EXTRA_RIGHT_OVERS).orEmpty(),
+            target = intent.getStringExtra(EXTRA_TARGET) ?: "—",
+            rrr = intent.getStringExtra(EXTRA_RRR) ?: "—",
+            currentRunRate = "—",
+            tossInfo = "",
+            isFirstInnings = true,
+            battingTeamIsLeft = null,
+            ballsBowled = null,
+            scheduledBalls = null,
+            currentBatters = emptyList(),
+            win = intent.getStringExtra(EXTRA_WIN).orEmpty(),
+            note = intent.getStringExtra(EXTRA_NOTE).orEmpty(),
+            venue = ""
         )
     }
 }
@@ -136,11 +365,31 @@ private data class MatchDetail(
     val rightName: String,
     val rightScore: String,
     val rightOvers: String,
+    val venue: String,
     val target: String,
     val rrr: String,
+    val currentRunRate: String,
+    val tossInfo: String,
+    val isFirstInnings: Boolean,
+    val battingTeamIsLeft: Boolean?,
+    val ballsBowled: Int?,
+    val scheduledBalls: Int?,
+    val currentBatters: List<CurrentBatter>,
     val win: String,
     val note: String
 )
+
+private data class CurrentBatter(
+    val name: String,
+    val runs: Int,
+    val balls: Int,
+    val fours: Int,
+    val sixes: Int,
+    val isStriker: Boolean
+) {
+    val strikeRate: String
+        get() = if (balls == 0) "0.0" else String.format(Locale.US, "%.1f", runs * 100.0 / balls)
+}
 
 private val Accent = Color(0xFFC1FF00)
 private val ElectricBlue = Color(0xFF007FFF)
@@ -265,21 +514,23 @@ private fun ScorecardTopBar(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = match.round,
-                color = SoftText,
-                fontSize = 7.2.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            if (match.round.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = match.round,
+                    color = SoftText,
+                    fontSize = 7.2.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
-        DetailIconView(DetailIcon.SEARCH, Color.White, Modifier.size(18.dp))
-        Spacer(Modifier.width(12.dp))
-        DetailIconView(DetailIcon.BELL, Color.White, Modifier.size(18.dp))
-        Spacer(Modifier.width(12.dp))
-        DetailIconView(DetailIcon.MESSAGE, Color.White, Modifier.size(18.dp))
+        Image(
+            painter = painterResource(R.drawable.ic_share),
+            contentDescription = "Share",
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 
@@ -365,7 +616,11 @@ private fun MatchDetailsStrip(match: MatchDetail) {
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "${match.leftName} vs ${match.rightName}, ${match.round} - Live Score",
+                text = buildString {
+                    append("${match.leftName} vs ${match.rightName}")
+                    if (match.round.isNotBlank()) append(", ${match.round}")
+                    append(" - Live Score")
+                },
                 color = Color.White,
                 fontSize = 14.5.sp,
                 fontWeight = FontWeight.Black,
@@ -380,8 +635,10 @@ private fun MatchDetailsStrip(match: MatchDetail) {
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             DetailMeta("League", match.league, Modifier.weight(1f))
-            HeaderDot()
-            DetailMeta("Venue", "Narendra Modi Stadium, Ahmedabad", Modifier.weight(1.22f))
+            if (match.venue.isNotBlank()) {
+                HeaderDot()
+                DetailMeta("Venue", match.venue, Modifier.weight(1.22f))
+            }
         }
     }
 }
@@ -464,13 +721,15 @@ private fun MatchHero(match: MatchDetail) {
         }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MetricPill(MetricIcon.SPEED, "CRR", "7.61", Modifier.weight(1f))
+            MetricPill(MetricIcon.SPEED, "CRR", match.currentRunRate, Modifier.weight(1f))
             MetricPill(MetricIcon.TARGET, "TARGET", match.target, Modifier.weight(1f))
             MetricPill(MetricIcon.TREND, "RRR", match.rrr, Modifier.weight(1f))
             MetricPill(MetricIcon.TROPHY, "WIN", match.win, Modifier.weight(1.1f))
         }
         Spacer(Modifier.height(6.dp))
-        Text("${match.rightName} won toss and chose to bowl", color = Color(0xFFB8C6C1), fontSize = 9.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        if (match.tossInfo.isNotBlank()) {
+            Text(match.tossInfo, color = Color(0xFFB8C6C1), fontSize = 9.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        }
     }
 }
 
@@ -522,8 +781,8 @@ private fun MetricPill(icon: MetricIcon, label: String, value: String, modifier:
 @Composable
 private fun InfoTab(match: MatchDetail) {
     SectionPanel("MATCH INFO") {
-        InfoRow("Venue", "Madanpur Sports Arena")
-        InfoRow("Toss", "${match.rightName} chose to bowl")
+        if (match.venue.isNotBlank()) InfoRow("Venue", match.venue)
+        if (match.tossInfo.isNotBlank()) InfoRow("Toss", match.tossInfo)
         InfoRow("Target", match.target)
         InfoRow("Required rate", match.rrr)
         InfoRow("Win projection", match.win)
@@ -534,7 +793,7 @@ private fun InfoTab(match: MatchDetail) {
 @Composable
 private fun LiveTab(match: MatchDetail) {
     LiveScorePanel(match)
-    CurrentBattingCard()
+    CurrentBattingCard(match.currentBatters)
     PartnershipCard()
     LiveKeyStats(match)
     CurrentBowlingCard()
@@ -545,53 +804,67 @@ private fun LiveTab(match: MatchDetail) {
 @Composable
 private fun LiveScorePanel(match: MatchDetail) {
     SectionPanel("LIVE SCORE") {
-        Text(
-            text = "${match.rightName} ${match.rightScore} (${match.rightOvers})",
-            color = SoftText,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(Modifier.height(5.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom
-        ) {
+        val battingIsLeft = match.battingTeamIsLeft ?: true
+        val battingName = if (battingIsLeft) match.leftName else match.rightName
+        val battingScore = if (battingIsLeft) match.leftScore else match.rightScore
+        val battingOvers = if (battingIsLeft) match.leftOvers else match.rightOvers
+        val oppositionName = if (battingIsLeft) match.rightName else match.leftName
+        val oppositionScore = if (battingIsLeft) match.rightScore else match.leftScore
+        val oppositionOvers = if (battingIsLeft) match.rightOvers else match.leftOvers
+        val currentRuns = battingScore.substringBefore('/').toIntOrNull()
+        val target = match.target.toIntOrNull()
+        val runsNeeded = if (target != null && currentRuns != null) (target - currentRuns).coerceAtLeast(0) else null
+        val ballsRemaining = if (match.scheduledBalls != null && match.ballsBowled != null) {
+            (match.scheduledBalls - match.ballsBowled).coerceAtLeast(0)
+        } else null
+
+        if (!match.isFirstInnings && oppositionScore != "—") {
             Text(
-                text = "${match.leftName} ${match.leftScore}",
-                color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Black,
-                fontStyle = FontStyle.Italic,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = "(${match.leftOvers})",
+                text = "1ST INNINGS  ·  $oppositionName  $oppositionScore${oppositionOvers.takeIf(String::isNotBlank)?.let { " ($it ov)" }.orEmpty()}",
                 color = SoftText,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(9.dp))
+        }
+
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(battingName, color = SoftText, fontSize = 11.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(3.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(battingScore, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic)
+                    Spacer(Modifier.width(7.dp))
+                    Text("(${battingOvers.ifBlank { "0.0" }} ov)", color = SoftText, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 3.dp))
+                }
+            }
+            Text(if (match.isFirstInnings) "1ST INNINGS" else "2ND INNINGS", color = Accent, fontSize = 8.sp, fontWeight = FontWeight.Black)
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LiveRateChip("CRR", match.currentRunRate)
+            if (!match.isFirstInnings && target != null) {
+                Spacer(Modifier.width(7.dp))
+                LiveRateChip("REQ", match.rrr)
+                Spacer(Modifier.width(7.dp))
+                LiveRateChip("TARGET", match.target)
+            }
+        }
+
+        if (!match.isFirstInnings && runsNeeded != null && ballsRemaining != null) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = if (runsNeeded == 0) "Target reached" else "$battingName need $runsNeeded runs from $ballsRemaining balls",
+                color = if (runsNeeded == 0) Accent else Color(0xFFFF4D5E),
                 fontSize = 12.sp,
-                fontWeight = FontWeight.Black
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            LiveRateChip("CRR", "7.61")
-            Spacer(Modifier.width(7.dp))
-            LiveRateChip("REQ", match.rrr)
-            Spacer(Modifier.width(7.dp))
-            LiveRateChip("TARGET", match.target)
-        }
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = "${match.leftName} need 18 runs in 8 balls",
-            color = Color(0xFFFF4D5E),
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Black,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 
@@ -620,7 +893,7 @@ private fun LiveKeyStats(match: MatchDetail) {
         ThinRule()
         LiveStatLine("Last 5 overs", "43 runs, 2 wickets")
         ThinRule()
-        LiveStatLine("Toss", "${match.rightName} chose to bowl")
+        if (match.tossInfo.isNotBlank()) LiveStatLine("Toss", match.tossInfo)
     }
 }
 
@@ -661,7 +934,7 @@ private fun WinPredictorPanel(match: MatchDetail) {
             Text(match.rightName, color = ElectricBlue, fontSize = 10.sp, fontWeight = FontWeight.Black)
         }
         Spacer(Modifier.height(8.dp))
-        WinPredictor()
+        WinPredictor(match)
     }
 }
 
@@ -751,10 +1024,10 @@ private fun ScorecardTab(match: MatchDetail) {
 @Composable
 private fun SummaryTab(match: MatchDetail) {
     LastSixBalls()
-    CurrentBattingCard()
+    CurrentBattingCard(match.currentBatters)
     PartnershipCard()
     CurrentBowlingCard()
-    RunWormPanel()
+    RunWormPanel(match)
     MatchInsights(match)
     FallOfWicketsPremium()
 }
@@ -859,13 +1132,26 @@ private fun BallBubble(ball: String, index: Int) {
 }
 
 @Composable
-private fun CurrentBattingCard() {
+private fun CurrentBattingCard(batters: List<CurrentBatter>) {
     SectionPanel("CURRENT BATTING") {
         PlayerTableHeader("BATTER", listOf("R", "B", "4S", "6S", "SR"))
         ThinRule()
-        BatterTableRow("A. Kumar*", "34", "20", "3", "1", "170.0", active = true)
-        ThinRule()
-        BatterTableRow("R. Singh", "14", "11", "1", "0", "127.2", active = false)
+        if (batters.isEmpty()) {
+            Text("Batting figures will appear when live scoring begins.", color = SoftText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 12.dp, horizontal = 10.dp))
+        } else {
+            batters.forEachIndexed { index, batter ->
+                if (index > 0) ThinRule()
+                BatterTableRow(
+                    name = batter.name + if (batter.isStriker) "*" else "",
+                    runs = batter.runs.toString(),
+                    balls = batter.balls.toString(),
+                    fours = batter.fours.toString(),
+                    sixes = batter.sixes.toString(),
+                    sr = batter.strikeRate,
+                    active = batter.isStriker
+                )
+            }
+        }
     }
 }
 
@@ -1116,13 +1402,13 @@ private fun WormPanel() {
 }
 
 @Composable
-private fun RunWormPanel() {
+private fun RunWormPanel(match: MatchDetail) {
     SectionPanel("RUN WORM") {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.weight(1f))
-            LegendLine("NSC", Accent, dashed = false)
+            LegendLine(match.leftName, Accent, dashed = false)
             Spacer(Modifier.width(14.dp))
-            LegendLine("VCR", Color(0xFFB4B5B7), dashed = true)
+            LegendLine(match.rightName, Color(0xFFB4B5B7), dashed = true)
         }
         Spacer(Modifier.height(10.dp))
         Canvas(
@@ -1206,7 +1492,7 @@ private fun MatchInsights(match: MatchDetail) {
             InsightMetric("High P'ship", "52", Modifier.weight(1f))
         }
         Spacer(Modifier.height(9.dp))
-        WinPredictor()
+        WinPredictor(match)
     }
 }
 
@@ -1227,12 +1513,12 @@ private fun InsightMetric(label: String, value: String, modifier: Modifier) {
 }
 
 @Composable
-private fun WinPredictor() {
+private fun WinPredictor(match: MatchDetail) {
     val animated by animateFloatAsState(targetValue = 0.61f, label = "winPredictor")
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("NSC 61%", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Black)
+        Text("${match.leftName} 61%", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Black)
         Spacer(Modifier.weight(1f))
-        Text("VCR 39%", color = ElectricBlue, fontSize = 10.sp, fontWeight = FontWeight.Black)
+        Text("${match.rightName} 39%", color = ElectricBlue, fontSize = 10.sp, fontWeight = FontWeight.Black)
     }
     Spacer(Modifier.height(5.dp))
     Row(

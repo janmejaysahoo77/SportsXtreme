@@ -249,7 +249,9 @@ class LiveMatchesSectionView @JvmOverloads constructor(
 
     private fun onMatchClick(match: LiveMatch) {
         context.startActivity(
-            android.content.Intent(context, com.example.sportsxtreme.presentation.scoring.ScorecardActivity::class.java)
+            android.content.Intent(context, com.example.sportsxtreme.presentation.scoring.ScorecardActivity::class.java).apply {
+                putExtra(com.example.sportsxtreme.presentation.scoring.ScorecardActivity.EXTRA_MATCH_ID, match.matchId)
+            }
         )
     }
 

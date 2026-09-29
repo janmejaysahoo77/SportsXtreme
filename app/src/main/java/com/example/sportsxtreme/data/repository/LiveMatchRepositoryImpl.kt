@@ -35,14 +35,9 @@ class LiveMatchRepositoryImpl @Inject constructor(
             firestoreLiveMatchDataSource.observeLiveMatches()
                 .catch { error -> send(Resource.Error(error.message ?: "Unable to load live matches")) }
                 .collect { remoteMatches ->
-                    // Firestore is the source of truth. When it returns an
-                    // empty list, clear the Room cache so stale scores never
-                    // linger on a spectator's phone.
-                    if (remoteMatches.isEmpty()) {
-                        liveMatchDao.clearAll()
-                    } else {
-                        liveMatchDao.upsertAll(remoteMatches.map { it.toEntity() })
-                    }
+                    // Firestore is authoritative: reconcile the full snapshot
+                    // so removed matches cannot linger or be restored from Room.
+                    liveMatchDao.replaceAll(remoteMatches.map { it.toEntity() })
                     send(Resource.Success(remoteMatches))
                 }
         }
@@ -86,7 +81,15 @@ class LiveMatchRepositoryImpl @Inject constructor(
         strikerName = strikerName,
         strikerRuns = strikerRuns,
         strikerBalls = strikerBalls,
+        strikerFours = strikerFours,
+        strikerSixes = strikerSixes,
         nonStrikerName = nonStrikerName,
+        nonStrikerRuns = nonStrikerRuns,
+        nonStrikerBalls = nonStrikerBalls,
+        nonStrikerFours = nonStrikerFours,
+        nonStrikerSixes = nonStrikerSixes,
+        strikerPlayerId = strikerPlayerId,
+        nonStrikerPlayerId = nonStrikerPlayerId,
         bowlerName = bowlerName,
         bowlerOvers = bowlerOvers,
         bowlerRuns = bowlerRuns,
@@ -115,7 +118,15 @@ class LiveMatchRepositoryImpl @Inject constructor(
         strikerName = strikerName,
         strikerRuns = strikerRuns,
         strikerBalls = strikerBalls,
+        strikerFours = strikerFours,
+        strikerSixes = strikerSixes,
         nonStrikerName = nonStrikerName,
+        nonStrikerRuns = nonStrikerRuns,
+        nonStrikerBalls = nonStrikerBalls,
+        nonStrikerFours = nonStrikerFours,
+        nonStrikerSixes = nonStrikerSixes,
+        strikerPlayerId = strikerPlayerId,
+        nonStrikerPlayerId = nonStrikerPlayerId,
         bowlerName = bowlerName,
         bowlerOvers = bowlerOvers,
         bowlerRuns = bowlerRuns,
