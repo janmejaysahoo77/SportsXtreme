@@ -48,9 +48,14 @@ class TournamentTeamInviteActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val token = intent.getStringExtra(EXTRA_TOKEN).orEmpty()
+        val matchToken = intent.getStringExtra(EXTRA_MATCH_TOKEN).orEmpty()
+        val isMatchInvite = matchToken.isNotBlank()
+        val invitedSlot = intent.getStringExtra(EXTRA_MATCH_SLOT)
+            ?.removePrefix("TEAM_")
+            ?.takeIf { isMatchInvite && (it == "A" || it == "B") }
         val uid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
         
-        if (token.isBlank() || uid.isBlank()) {
+        if ((!isMatchInvite && token.isBlank()) || uid.isBlank()) {
             finish()
             return
         }
@@ -76,7 +81,7 @@ class TournamentTeamInviteActivity : ComponentActivity() {
                     ).let { result ->
                         if (result == SnackbarResult.ActionPerformed) {
                             selectedTeam?.let { team ->
-                                viewModel.registerTeam(token, team.teamId, team.teamName)
+                                submitSelection(isMatchInvite, matchToken, token, team)
                             }
                         } else {
                             viewModel.resetRegistrationState()
@@ -100,11 +105,15 @@ class TournamentTeamInviteActivity : ComponentActivity() {
                             .fillMaxSize()
                             .padding(22.dp)
                     ) {
-                        Text("JOIN TOURNAMENT", color = Color(0xFFC6FF00), fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        Text(if (isMatchInvite) "JOIN MATCH" else "JOIN TOURNAMENT", color = Color(0xFFC6FF00), fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                         Spacer(Modifier.height(8.dp))
                         Text("Select your team", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
                         Spacer(Modifier.height(8.dp))
-                        Text("Choose a team to continue. The organiser will see your entry immediately.", color = Color(0xFF9CAAB8), fontSize = 14.sp, lineHeight = 20.sp)
+                        Text(
+                            if (isMatchInvite) "Choose one of the teams you captain to join the organiser's match${invitedSlot?.let { " in Team $it" }.orEmpty()}."
+                            else "Choose a team to continue. The organiser will see your entry immediately.",
+                            color = Color(0xFF9CAAB8), fontSize = 14.sp, lineHeight = 20.sp
+                        )
                         Spacer(Modifier.height(24.dp))
                         
                         when (val state = uiState) {
@@ -118,7 +127,7 @@ class TournamentTeamInviteActivity : ComponentActivity() {
                             }
                             is TournamentTeamUiState.Success -> {
                                 if (state.teams.isEmpty()) {
-                                    EmptyState()
+                                    EmptyState(isMatchInvite)
                                 } else {
                                     LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                         items(state.teams, key = { it.teamId }) { team ->
@@ -157,7 +166,10 @@ class TournamentTeamInviteActivity : ComponentActivity() {
                         BottomSheetContent(
                             team = selectedTeam!!,
                             isSubmitting = registrationState is RegistrationState.Loading,
-                            onConfirm = { viewModel.registerTeam(token, selectedTeam!!.teamId, selectedTeam!!.teamName) },
+                            title = if (isMatchInvite) "Join this match?" else "Confirm Registration",
+                            message = if (isMatchInvite) "Join the organiser's match with ${selectedTeam!!.teamName}? This will fill the invited team slot."
+                                else "Are you sure you want to register ${selectedTeam!!.teamName} for this tournament? This action will notify the organiser.",
+                            onConfirm = { submitSelection(isMatchInvite, matchToken, token, selectedTeam!!) },
                             onCancel = { scope.launch { sheetState.hide() }.invokeOnCompletion { selectedTeam = null } }
                         )
                     }
@@ -166,6 +178,7 @@ class TournamentTeamInviteActivity : ComponentActivity() {
                 if (registrationState is RegistrationState.Success) {
                     SuccessOverlay(
                         teamName = (registrationState as RegistrationState.Success).teamName,
+                        isMatchInvite = isMatchInvite,
                         onFinished = { finish() }
                     )
                 }
@@ -173,7 +186,17 @@ class TournamentTeamInviteActivity : ComponentActivity() {
         }
     }
 
-    companion object { const val EXTRA_TOKEN = "tournament_invite_token" }
+    private fun submitSelection(isMatchInvite: Boolean, matchToken: String, tournamentToken: String, team: TeamInviteUiModel) {
+        if (isMatchInvite) viewModel.claimMatchInvite(matchToken, team.teamId, team.teamName)
+        else viewModel.registerTeam(tournamentToken, team.teamId, team.teamName)
+    }
+
+    companion object {
+        const val EXTRA_TOKEN = "tournament_invite_token"
+        const val EXTRA_MATCH_TOKEN = "match_invite_token"
+        const val EXTRA_MATCH_ID = "match_invite_match_id"
+        const val EXTRA_MATCH_SLOT = "match_invite_team_slot"
+    }
 }
 
 @Composable
@@ -295,7 +318,7 @@ private fun SkeletonList() {
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(isMatchInvite: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -315,7 +338,8 @@ private fun EmptyState() {
         Text("No teams available", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "You need to be a captain or admin of a team to register it in this tournament.",
+            if (isMatchInvite) "You need to captain or manage a team to join this match."
+            else "You need to be a captain or admin of a team to register it in this tournament.",
             color = Color(0xFF9CAAB8),
             fontSize = 14.sp,
             textAlign = TextAlign.Center,
@@ -328,6 +352,8 @@ private fun EmptyState() {
 private fun BottomSheetContent(
     team: TeamInviteUiModel,
     isSubmitting: Boolean,
+    title: String,
+    message: String,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -337,10 +363,10 @@ private fun BottomSheetContent(
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Confirm Registration", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Text(
-            "Are you sure you want to register ${team.teamName} for this tournament? This action will notify the organiser.",
+            message,
             color = Color(0xFF9CAAB8),
             fontSize = 14.sp,
             textAlign = TextAlign.Center
@@ -381,7 +407,7 @@ private fun BottomSheetContent(
 }
 
 @Composable
-private fun SuccessOverlay(teamName: String, onFinished: () -> Unit) {
+private fun SuccessOverlay(teamName: String, isMatchInvite: Boolean, onFinished: () -> Unit) {
     val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.success))
     val context = LocalContext.current
     val cheerPlayer = remember { MediaPlayer.create(context, R.raw.success_sound) }
@@ -406,9 +432,9 @@ private fun SuccessOverlay(teamName: String, onFinished: () -> Unit) {
                 modifier = Modifier.size(200.dp)
             )
             Spacer(Modifier.height(24.dp))
-            Text("Tournament Joined!", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            Text(if (isMatchInvite) "Match Joined!" else "Tournament Joined!", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(8.dp))
-            Text("$teamName is now registered.", color = Color(0xFF9CAAB8), fontSize = 16.sp)
+            Text(if (isMatchInvite) "$teamName joined the match." else "$teamName is now registered.", color = Color(0xFF9CAAB8), fontSize = 16.sp)
         }
     }
 }

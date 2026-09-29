@@ -162,10 +162,13 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                             }
                         }
                         startActivity(
-                            Intent(this@SelectPlayingTeamsActivity, StartMatchPreviewActivity::class.java)
-                                .putExtra(EXTRA_MATCH_ID, matchId)
-                                .putExtra(StartMatchPreviewActivity.EXTRA_TOURNAMENT_NAME, tournamentName.value.orEmpty())
-                                .putExtra(StartMatchPreviewActivity.EXTRA_SELECTED_STAGE, selectedStage)
+                            Intent(this@SelectPlayingTeamsActivity, ScheduleMatchActivity::class.java)
+                                .putExtra(ScheduleMatchActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                                .putExtra(ScheduleMatchActivity.EXTRA_MATCH_ID, matchId)
+                                .putExtra(EXTRA_TEAM_A_ID, selectedA.id)
+                                .putExtra(EXTRA_TEAM_A_NAME, selectedA.name)
+                                .putExtra(EXTRA_TEAM_B_ID, selectedB.id)
+                                .putExtra(EXTRA_TEAM_B_NAME, selectedB.name)
                         )
                         finish()
                     }
@@ -329,8 +332,12 @@ private fun SelectPlayingTeamsScreen(
     onSelectTeamA: () -> Unit,
     onSelectTeamB: () -> Unit
 ) {
-    val claimedTeamA = match?.teamAClaim?.let { SelectedTeam(match.teamA.teamId, it.displayName) }
-    val claimedTeamB = match?.teamBClaim?.let { SelectedTeam(match.teamB.teamId, it.displayName) }
+    val claimedTeamA = match?.teamAClaim?.let {
+        SelectedTeam(it.teamId.ifBlank { match.teamA.teamId }, it.teamName.ifBlank { it.displayName })
+    }
+    val claimedTeamB = match?.teamBClaim?.let {
+        SelectedTeam(it.teamId.ifBlank { match.teamB.teamId }, it.teamName.ifBlank { it.displayName })
+    }
     val displayedTeamA = claimedTeamA ?: teamA
     val displayedTeamB = claimedTeamB ?: teamB
     val onTeamAClick: () -> Unit = if (claimedTeamA == null) onSelectTeamA else ({})

@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { initializeApp } = require("firebase-admin/app");
+const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { HttpsError, onCall } = require("firebase-functions/v2/https");
 
@@ -54,18 +55,30 @@ exports.getTeamMemberProfiles = onCall(async (request) => {
   const userSnapshots = await db.getAll(
     ...members.map((member) => db.collection("users").doc(member.userId))
   );
+  const authUsers = await Promise.all(members.map(async (member) => {
+    try {
+      return await getAuth().getUser(member.userId);
+    } catch (_) {
+      return null;
+    }
+  }));
   return {
     members: members.map((member, index) => {
       const profile = userSnapshots[index];
-      const displayName = profile.exists && typeof profile.get("name") === "string"
-        ? profile.get("name").trim()
+      const profileName = profile.exists
+        ? [profile.get("name"), profile.get("displayName"), profile.get("fullName")]
+          .find((value) => typeof value === "string" && value.trim())?.trim() || ""
         : "";
+      const authName = authUsers[index]?.displayName?.trim() || "";
+      const memberName = [member.displayName, member.name]
+        .find((value) => typeof value === "string" && value.trim())?.trim() || "";
+      const displayName = profileName || authName || memberName;
       const profilePlayingRole = profile.exists && typeof profile.get("role") === "string"
         ? profile.get("role").trim()
         : "";
       return {
         userId: member.userId,
-        displayName: displayName || "Team member",
+        displayName: displayName || "",
         playingRole: member.playingRole || profilePlayingRole || "Player"
       };
     })
@@ -242,6 +255,88 @@ exports.joinTournamentInvite = onCall(async (request) => {
       transaction.update(tournamentRef, { teamIds: FieldValue.arrayUnion(teamId), updatedAtEpochMs: Date.now() });
     }
     return { tournamentId, tournamentName: String(tournament.get("name") || "Tournament"), alreadyJoined: existingEntry.exists };
+  });
+});
+
+/** Resolves a match invitation without claiming the slot, so the captain can choose a team first. */
+exports.resolveMatchInvite = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before joining a match.");
+  const token = typeof request.data?.token === "string" ? request.data.token.trim() : "";
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError("invalid-argument", "Invalid match invitation.");
+  const tokenHash = crypto.createHash("sha256").update(token, "utf8").digest("hex");
+  const matches = await db.collection("matchInvites").where("tokenHash", "==", tokenHash).limit(2).get();
+  if (matches.size !== 1) throw new HttpsError("not-found", "This match invitation is invalid.");
+  const invite = matches.docs[0];
+  if (invite.get("status") !== "OPEN") throw new HttpsError("failed-precondition", "This match slot is no longer available.");
+  if (!invite.get("expiresAt") || invite.get("expiresAt").toDate() <= new Date()) {
+    throw new HttpsError("deadline-exceeded", "This match invitation has expired.");
+  }
+  const teamSlot = invite.get("teamSlot");
+  if (!["TEAM_A", "TEAM_B"].includes(teamSlot)) throw new HttpsError("data-loss", "The invitation has an invalid team slot.");
+  const match = await db.collection("matches").doc(String(invite.get("matchId") || "")).get();
+  if (!match.exists) throw new HttpsError("not-found", "The match no longer exists.");
+  return { matchId: match.id, teamSlot, title: String(match.get("title") || "Match") };
+});
+
+/** A captain selects one of their teams and atomically fills the organiser's invited slot. */
+exports.claimMatchInviteForTeam = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before joining a match.");
+  const token = typeof request.data?.token === "string" ? request.data.token.trim() : "";
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError("invalid-argument", "Invalid match invitation.");
+  const teamId = requireTeamId(request.data?.teamId);
+  const uid = request.auth.uid;
+  const tokenHash = crypto.createHash("sha256").update(token, "utf8").digest("hex");
+  const matches = await db.collection("matchInvites").where("tokenHash", "==", tokenHash).limit(2).get();
+  if (matches.size !== 1) throw new HttpsError("not-found", "This match invitation is invalid.");
+  const inviteRef = matches.docs[0].ref;
+
+  return db.runTransaction(async (transaction) => {
+    const invite = await transaction.get(inviteRef);
+    if (!invite.exists || invite.get("status") !== "OPEN") throw new HttpsError("failed-precondition", "This match slot is no longer available.");
+    const expiresAt = invite.get("expiresAt");
+    if (!expiresAt || expiresAt.toDate() <= new Date()) throw new HttpsError("deadline-exceeded", "This match invitation has expired.");
+    const matchId = String(invite.get("matchId") || "");
+    const teamSlot = invite.get("teamSlot");
+    if (!["TEAM_A", "TEAM_B"].includes(teamSlot)) throw new HttpsError("data-loss", "The invitation has an invalid team slot.");
+    const matchRef = db.collection("matches").doc(matchId);
+    const teamRef = db.collection("teams").doc(teamId);
+    const match = await transaction.get(matchRef);
+    const team = await transaction.get(teamRef);
+    if (!match.exists) throw new HttpsError("not-found", "The match no longer exists.");
+    if (!team.exists) throw new HttpsError("not-found", "The selected team no longer exists.");
+    const members = Array.isArray(team.get("members")) ? team.get("members") : [];
+    const captain = findMember(members, uid);
+    if (!hasRole(captain, ROLES.CAPTAIN) && team.get("ownerUserId") !== uid && team.get("ownerId") !== uid && team.get("captainUserId") !== uid) {
+      throw new HttpsError("permission-denied", "Only a captain of the selected team can join this match.");
+    }
+    const claimField = teamSlot === "TEAM_A" ? "teamAClaim" : "teamBClaim";
+    const otherClaimField = teamSlot === "TEAM_A" ? "teamBClaim" : "teamAClaim";
+    if (match.get(claimField)) throw new HttpsError("failed-precondition", "This team slot has already been filled.");
+    if (match.get(otherClaimField)?.userId === uid) throw new HttpsError("failed-precondition", "You have already joined the other team slot.");
+    const teamName = String(team.get("teamName") || team.get("name") || "Team").trim() || "Team";
+    const teamShortName = String(team.get("shortName") || teamName.slice(0, 3).toUpperCase()).trim();
+    const profile = await transaction.get(db.collection("users").doc(uid));
+    const captainName = String(profile.get("name") || "Team captain").trim() || "Team captain";
+    const replacementId = teamSlot === "TEAM_A" ? "dA1" : "dB1";
+    transaction.update(matchRef, {
+      [claimField]: {
+        userId: uid,
+        displayName: captainName,
+        replacedDummyPlayerId: replacementId,
+        teamId,
+        teamName,
+        teamShortName,
+        claimedAt: FieldValue.serverTimestamp()
+      },
+      updatedAtEpochMs: Date.now()
+    });
+    transaction.update(inviteRef, {
+      status: "CLAIMED",
+      claimedByUserId: uid,
+      claimedTeamId: teamId,
+      claimedAt: FieldValue.serverTimestamp()
+    });
+    return { matchId, teamSlot, teamId, teamName };
   });
 });
 

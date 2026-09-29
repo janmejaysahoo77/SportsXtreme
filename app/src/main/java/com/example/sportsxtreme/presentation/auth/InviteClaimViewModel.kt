@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.repository.MatchInviteRepository
+import com.example.sportsxtreme.domain.model.TeamSide
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.functions.FirebaseFunctions
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,6 +21,23 @@ class InviteClaimViewModel @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+    fun resolveMatchInvite(token: String, onFinished: (Resource<ResolvedMatchInvitation>) -> Unit) {
+        viewModelScope.launch {
+            val result = runCatching {
+                val response = awaitCallable("resolveMatchInvite", mapOf("token" to token)) as? Map<*, *>
+                    ?: error("Invalid match invitation response")
+                ResolvedMatchInvitation(
+                    matchId = response["matchId"] as? String ?: error("Match id is missing"),
+                    teamSide = TeamSide.valueOf(response["teamSlot"] as? String ?: error("Team slot is missing"))
+                )
+            }.fold(
+                onSuccess = { Resource.Success(it) },
+                onFailure = { Resource.Error(it.message ?: "Unable to open match invitation") }
+            )
+            onFinished(result)
+        }
+    }
+
     fun claim(token: String, onFinished: (Resource<com.example.sportsxtreme.domain.model.ClaimedMatchInvite>) -> Unit) {
         if (savedStateHandle.get<String>("claiming_token") == token) return
         savedStateHandle["claiming_token"] = token
@@ -89,6 +107,8 @@ class InviteClaimViewModel @Inject constructor(
         const val TEAMS_COLLECTION = "teams"
     }
 }
+
+data class ResolvedMatchInvitation(val matchId: String, val teamSide: TeamSide)
 
 data class TeamInviteJoin(
     val teamId: String,

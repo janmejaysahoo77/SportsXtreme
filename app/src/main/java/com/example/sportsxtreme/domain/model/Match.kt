@@ -25,7 +25,14 @@ data class Match(
     val teamBClaim: MatchSlotClaim? = null
 )
 
-data class MatchSlotClaim(val userId: String, val displayName: String, val replacedDummyPlayerId: String)
+data class MatchSlotClaim(
+    val userId: String,
+    val displayName: String,
+    val replacedDummyPlayerId: String,
+    val teamId: String = "",
+    val teamName: String = displayName,
+    val teamShortName: String = ""
+)
 
 data class MatchTeam(
     val teamId: String,

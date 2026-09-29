@@ -197,23 +197,25 @@ class MainActivity : ComponentActivity() {
         val pendingTeamInviteToken by inviteLinkViewModel.pendingTeamInviteToken.collectAsState()
         val pendingTournamentInviteToken by inviteLinkViewModel.pendingTournamentInviteToken.collectAsState()
         val authState by authViewModel.state.collectAsState()
-        LaunchedEffect(pendingInviteToken) {
-            pendingInviteToken?.let { token ->
-                inviteClaimViewModel.claim(token) { result ->
-                    if (result is Resource.Error) {
-                        Log.e("MatchInvite", "Invite claim failed: ${result.message}")
-                        Toast.makeText(
-                            this@MainActivity,
-                            result.message ?: "Invite claim failed",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    } else if (result is Resource.Success) {
-                        result.data?.let { claim ->
-                            Log.d(
-                                "MatchInvite",
-                                "Invite claimed: ${claim.matchId} ${claim.teamSlot}"
+        LaunchedEffect(pendingInviteToken, authState.authenticatedUser?.id) {
+            val token = pendingInviteToken
+            if (token != null && authState.authenticatedUser != null) {
+                inviteClaimViewModel.resolveMatchInvite(token) { result ->
+                    when (result) {
+                        is Resource.Success -> result.data?.let { invitation ->
+                            startActivity(
+                                Intent(this@MainActivity, TournamentTeamInviteActivity::class.java)
+                                    .putExtra(TournamentTeamInviteActivity.EXTRA_MATCH_TOKEN, token)
+                                    .putExtra(TournamentTeamInviteActivity.EXTRA_MATCH_ID, invitation.matchId)
+                                    .putExtra(TournamentTeamInviteActivity.EXTRA_MATCH_SLOT, invitation.teamSide.name)
                             )
                         }
+                        is Resource.Error -> Toast.makeText(
+                            this@MainActivity,
+                            result.message ?: "Unable to open match invitation",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        is Resource.Loading -> Unit
                     }
                     inviteLinkViewModel.consumeInviteToken(token)
                 }
