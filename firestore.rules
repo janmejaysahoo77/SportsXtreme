@@ -48,7 +48,11 @@ service cloud.firestore {
         && validClaim(request.resource.data.teamBClaim)
         && resource.data.get('teamAClaim', {}).get('userId', '') != request.auth.uid
         && getAfter(/databases/$(database)/documents/matchInvites/$(matchId + '-team_b')).data.status == 'CLAIMED'
-        && getAfter(/databases/$(database)/documents/matchInvites/$(matchId + '-team_b')).data.claimedByUserId == request.auth.uid;
+        && getAfter(/databases/$(database)/documents/matchInvites/$(matchId + '-team_b')).data.claimedByUserId == request.auth.uid
+        || isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['scorecardViews'])
+        && request.resource.data.get('scorecardViews', 0) is int
+        && request.resource.data.get('scorecardViews', 0) == resource.data.get('scorecardViews', 0) + 1;
       allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
     }
 
