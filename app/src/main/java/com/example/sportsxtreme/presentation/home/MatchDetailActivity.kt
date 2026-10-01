@@ -47,8 +47,8 @@ class MatchDetailActivity : ComponentActivity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(14), dp(14), dp(14), dp(24))
                     addView(backButton())
-                    loadingBar = ProgressBar(this@MatchDetailActivity).apply { visibility = View.GONE }
-                    addView(loadingBar, LinearLayout.LayoutParams(dp(42), dp(42)).apply {
+                    loadingBar = SkeletonMatchCardView(this@MatchDetailActivity).apply { visibility = View.GONE }
+                    addView(loadingBar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(180)).apply {
                         gravity = Gravity.CENTER_HORIZONTAL
                         topMargin = dp(28)
                     })
@@ -99,7 +99,7 @@ class MatchDetailActivity : ComponentActivity() {
         }
     }
 
-    private lateinit var loadingBar: ProgressBar
+    private lateinit var loadingBar: SkeletonMatchCardView
     private lateinit var errorText: TextView
     private lateinit var detailContainer: LinearLayout
 

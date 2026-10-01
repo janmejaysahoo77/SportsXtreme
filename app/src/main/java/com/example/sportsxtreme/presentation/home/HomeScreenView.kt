@@ -103,7 +103,8 @@ class HomeScreenView @JvmOverloads constructor(
         GO_TO_CLUB,
         ADD_TOURNAMENT,
         START_MATCH,
-        CREATE_TEAM
+        CREATE_TEAM,
+        MY_CRICKET
     }
 
     private val primary = Color.rgb(193, 255, 0)
@@ -286,7 +287,7 @@ class HomeScreenView @JvmOverloads constructor(
                         DrawerItem("Add a Tournament/Series", DrawerIconView.Icon.PLUS_CIRCLE, badge = "FREE", action = DrawerAction.ADD_TOURNAMENT),
                         DrawerItem("Start A Match", DrawerIconView.Icon.BAT, badge = "FREE", action = DrawerAction.START_MATCH),
                         DrawerItem("Create Your Team", drawableRes = R.drawable.outline_groups_24, action = DrawerAction.CREATE_TEAM),
-                        DrawerItem("My Cricket", DrawerIconView.Icon.STADIUM),
+                        DrawerItem("My Cricket", DrawerIconView.Icon.STADIUM, action = DrawerAction.MY_CRICKET),
                         DrawerItem("SportsXtreme Awards", DrawerIconView.Icon.TROPHY),
                         DrawerItem("Contact", DrawerIconView.Icon.HELP),
                         DrawerItem("Share the app", DrawerIconView.Icon.SHARE),
@@ -387,6 +388,7 @@ class HomeScreenView @JvmOverloads constructor(
                         DrawerAction.ADD_TOURNAMENT -> context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
                         DrawerAction.START_MATCH -> context.startActivity(Intent(context, StartMatchActivity::class.java))
                         DrawerAction.CREATE_TEAM -> context.startActivity(Intent(context, CreateTeamActivity::class.java))
+                        DrawerAction.MY_CRICKET -> showTab(1)
                     }
                 }
             }
@@ -1114,10 +1116,7 @@ class HomeScreenView @JvmOverloads constructor(
             val dynamicChildCount = max(0, allContent.childCount - 1)
             if (dynamicChildCount > 0) allContent.removeViews(1, dynamicChildCount)
             when (state) {
-                HostTournamentsViewModel.UiState.Loading -> allContent.addView(
-                    tournamentMessageCard(context, "Loading your tournaments…", "Please wait while we get your hosted events."),
-                    blockParams(top = 12)
-                )
+                HostTournamentsViewModel.UiState.Loading -> { allContent.addView(SkeletonMatchCardView(context), blockParams(top = 12)); allContent.addView(SkeletonMatchCardView(context), blockParams(top = 14)) }
                 is HostTournamentsViewModel.UiState.Error -> allContent.addView(
                     tournamentMessageCard(context, "Couldn't load tournaments", state.message),
                     blockParams(top = 12)
