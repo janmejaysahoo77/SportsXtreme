@@ -23,7 +23,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -39,6 +43,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -46,11 +53,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -63,6 +70,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -79,6 +87,7 @@ import com.example.sportsxtreme.presentation.ui.theme.*
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
 
 private val CricketAccent = XtremeLime
 private val CricketBg = XtremeBgBlue
@@ -92,7 +101,7 @@ private val ClubCardBlack = XtremeCardBlue
 private val ClubCardBorder = XtremeCardBorder
 private val ClubMuted = XtremeMuted
 
-private val cricketTabs = listOf("Matches", "Tournaments", "Teams", "Stats", "Highlights")
+private val cricketTabs = listOf("Matches", "Tournaments", "Teams", "Stats")
 
 private data class CricketMatch(
     val type: String,
@@ -437,7 +446,12 @@ fun MyCricketScreen(
     initialTab: Int = 0,
     hostTournamentsViewModel: HostTournamentsViewModel? = null
 ) {
-    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
+    val pagerState = rememberPagerState(
+        initialPage = initialTab.coerceIn(0, cricketTabs.lastIndex),
+        pageCount = { cricketTabs.size }
+    )
+    val coroutineScope = rememberCoroutineScope()
+    val selectedTab = pagerState.currentPage
     var selectedMatchesTab by remember { mutableIntStateOf(0) }
     var selectedTournamentSegment by remember { mutableIntStateOf(0) }
     var tournamentPendingDeletion by remember { mutableStateOf<Tournament?>(null) }
@@ -463,18 +477,21 @@ fun MyCricketScreen(
             .background(CricketBg)
     ) {
         CricketTopStrip(onMenuClick, selectedTab)
-        CricketTabs(selectedTab = selectedTab, onSelect = { selectedTab = it })
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 10.dp,
-                top = 10.dp,
-                end = 10.dp,
-                bottom = 100.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(13.dp)
-        ) {
-            when (selectedTab) {
+        CricketTabs(selectedTab = selectedTab, onSelect = { page ->
+            coroutineScope.launch { pagerState.animateScrollToPage(page) }
+        })
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = 10.dp,
+                    top = 10.dp,
+                    end = 10.dp,
+                    bottom = 100.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(13.dp)
+            ) {
+            when (page) {
                 0 -> {
                     item { StartMatchPrompt(onStartMatch) }
                     item {
@@ -500,12 +517,7 @@ fun MyCricketScreen(
                         "Matches you host will appear here."
                     }
                     when {
-                        playerMatchesState.loading -> item {
-                            TournamentFeedbackCard(
-                                title = "Loading your matches…",
-                                detail = "Fetching matches from your account."
-                            )
-                        }
+                        playerMatchesState.loading -> item { AndroidView(factory = { context -> SkeletonMatchCardView(context) }, modifier = Modifier.fillMaxWidth().height(180.dp).padding(horizontal = 16.dp, vertical = 8.dp)) }
                         playerMatchesState.error != null -> item {
                             TournamentFeedbackCard(
                                 title = "Couldn't load your matches",
@@ -557,29 +569,21 @@ fun MyCricketScreen(
                 }
 
                 3 -> {
-                    item { StatsProContent() }
+                    item {
+                        StatsContent(
+                            userId = FirebaseAuth.getInstance().currentUser?.uid,
+                            teamIds = joinedTeams.mapTo(linkedSetOf()) { it.id }
+                        )
+                    }
                 }
 
-                else -> {
-                    item {
-                        SectionTitle(
-                            "Match History",
-                            "Recent scorecards and completed fixtures"
-                        )
-                    }
-                    items(sampleMatches.filter { it.status == "Finished" || it.status == "Result" }) { match ->
-                        MatchCard(
-                            match
-                        )
-                    }
-                    item { TimelineCard() }
-                }
             }
             item {
                 Spacer(
                     Modifier
                         .height(30.dp)
                 )
+            }
             }
         }
 
@@ -624,12 +628,7 @@ private fun LazyListScope.hostedTournamentsContent(
     onDeleteClick: (Tournament) -> Unit
 ) {
     when (state) {
-        HostTournamentsViewModel.UiState.Loading -> item {
-            TournamentFeedbackCard(
-                title = "Loading your tournaments…",
-                detail = "Fetching tournaments you host."
-            )
-        }
+        HostTournamentsViewModel.UiState.Loading -> item { AndroidView(factory = { context -> SkeletonMatchCardView(context) }, modifier = Modifier.fillMaxWidth().height(180.dp).padding(horizontal = 16.dp, vertical = 8.dp)) }
 
         is HostTournamentsViewModel.UiState.Error -> item {
             TournamentFeedbackCard(
@@ -718,15 +717,17 @@ private fun CricketTopStrip(onMenuClick: () -> Unit, selectedTab: Int) {
             Spacer(Modifier.width(9.dp))
             Text(
                 text = "Sports",
-                color = CricketAccent,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
+                color = Color(0xFFE8F1F6),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                fontStyle = FontStyle.Italic
             )
             Text(
                 text = "Xtreme",
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
+                color = Color(0xFF007FFF),
+                fontSize = 16.5.sp,
+                fontWeight = FontWeight.Bold,
+                fontStyle = FontStyle.Italic
             )
         }
     }
@@ -734,39 +735,40 @@ private fun CricketTopStrip(onMenuClick: () -> Unit, selectedTab: Int) {
 
 @Composable
 private fun CricketTabs(selectedTab: Int, onSelect: (Int) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .background(CricketBg)
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically
+    TabRow(
+        modifier = Modifier.selectableGroup(),
+        selectedTabIndex = selectedTab,
+        containerColor = CricketBg,
+        contentColor = CricketAccent,
+        divider = {},
+        indicator = { positions ->
+            TabRowDefaults.Indicator(
+                modifier = Modifier.tabIndicatorOffset(positions[selectedTab]),
+                height = 3.dp,
+                color = CricketAccent
+            )
+        }
     ) {
         cricketTabs.forEachIndexed { index, label ->
-            Column(
+            Box(
                 modifier = Modifier
                     .height(48.dp)
-                    .clickable { onSelect(index) },
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                    .selectable(
+                        selected = index == selectedTab,
+                        onClick = { onSelect(index) },
+                        role = Role.Tab
+                    ),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     label,
                     color = if (index == selectedTab) CricketAccent else Color.White.copy(alpha = 0.7f),
-                    fontSize = 14.sp,
-                    fontWeight = if (index == selectedTab) FontWeight.Bold else FontWeight.Normal
+                    fontSize = 12.sp,
+                    fontWeight = if (index == selectedTab) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                    softWrap = false,
+                    textAlign = TextAlign.Center
                 )
-                if (index == selectedTab) {
-                    Spacer(Modifier.height(4.dp))
-                    Box(
-                        Modifier
-                            .width(20.dp)
-                            .height(2.dp)
-                            .background(CricketAccent)
-                    )
-                }
             }
         }
     }
@@ -1208,150 +1210,307 @@ private fun SectionTitle(title: String, subtitle: String, showInfo: Boolean = fa
 
 private data class StatItem(val label: String, val value: String)
 
-@Composable
-private fun StatsProContent() {
-    var selectedStatTab by remember { mutableIntStateOf(0) }
-    var isUnlocked by remember { mutableStateOf(false) }
+private data class CricketStatsState(
+    val loading: Boolean = true,
+    val error: String? = null,
+    val batting: List<StatItem> = emptyList(),
+    val bowling: List<StatItem> = emptyList(),
+    val fielding: List<StatItem> = emptyList(),
+    val captaincy: List<StatItem> = emptyList()
+)
 
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(84.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(CricketPanel)
-                .border(
-                    1.dp,
-                    Brush.verticalGradient(listOf(CricketAccent.copy(alpha = 0.5f), Color.Transparent)),
-                    RoundedCornerShape(18.dp)
-                )
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "Want to improve your stats?",
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
+private data class MatchStatRows(
+    val matchId: String,
+    val match: DocumentSnapshot,
+    val batting: List<Map<String, Any?>>,
+    val bowling: List<Map<String, Any?>>,
+    val deliveries: List<Map<String, Any?>>
+)
+
+@Composable
+private fun rememberPlayerStats(userId: String?, teamIds: Set<String>): CricketStatsState {
+    var state by remember(userId, teamIds) { mutableStateOf(CricketStatsState()) }
+    DisposableEffect(userId, teamIds) {
+        if (userId.isNullOrBlank() || teamIds.isEmpty()) {
+            state = emptyPlayerStats(loading = false)
+            return@DisposableEffect onDispose { }
+        }
+
+        val firestore = FirebaseFirestore.getInstance()
+        var matchDocuments = emptyList<DocumentSnapshot>()
+        var captainTeamIds = emptySet<String>()
+        var loadVersion = 0
+
+        fun refreshStats() {
+            val playerIds = teamIds.mapTo(linkedSetOf()) { "$it::$userId" }.apply { add(userId) }
+            val relevantMatches = matchDocuments.filter { match ->
+                val matchTeams = match.statsTeamIds()
+                val lineup = match.statsLineupIds()
+                matchTeams.any { it in teamIds } || lineup.any { it in playerIds }
             }
-            Box(
-                Modifier
-                    .height(37.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(CricketAccent)
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "ANALYSE",
-                    color = Color.Black,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
+            if (relevantMatches.isEmpty()) {
+                state = emptyPlayerStats(loading = false)
+                return
+            }
+
+            val version = ++loadVersion
+            state = CricketStatsState(loading = true)
+            val rows = mutableListOf<MatchStatRows>()
+            var remaining = relevantMatches.size
+            var failures = 0
+            val lock = Any()
+
+            fun finishedOne() {
+                synchronized(lock) {
+                    remaining -= 1
+                    if (remaining != 0 || version != loadVersion) return
+                    state = if (rows.isEmpty() && failures > 0) {
+                        CricketStatsState(loading = false, error = "Scorecards are temporarily unavailable.")
+                    } else {
+                        aggregatePlayerStats(rows, userId, teamIds, captainTeamIds)
+                    }
+                }
+            }
+
+            relevantMatches.forEach { match ->
+                val ref = match.reference
+                val battingTask = ref.collection("scorecard").document("batting").collection("entries").get()
+                val bowlingTask = ref.collection("scorecard").document("bowling").collection("entries").get()
+                val deliveriesTask = ref.collection("deliveries").get()
+                com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(
+                    listOf(battingTask, bowlingTask, deliveriesTask)
+                ).addOnSuccessListener { snapshots ->
+                    val battingRows = snapshots.getOrNull(0)?.documents.orEmpty().map { it.data.orEmpty() }
+                    val bowlingRows = snapshots.getOrNull(1)?.documents.orEmpty().map { it.data.orEmpty() }
+                    val deliveryRows = snapshots.getOrNull(2)?.documents.orEmpty().map { it.data.orEmpty() }
+                    synchronized(lock) { rows += MatchStatRows(match.id, match, battingRows, bowlingRows, deliveryRows) }
+                    finishedOne()
+                }.addOnFailureListener {
+                    synchronized(lock) { failures += 1 }
+                    finishedOne()
+                }
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        val matchesListener = firestore.collection("matches").addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                state = CricketStatsState(loading = false, error = error.message ?: "Unable to load matches.")
+            } else {
+                matchDocuments = snapshot?.documents.orEmpty()
+                refreshStats()
+            }
+        }
+        val teamsListener = firestore.collection("teams")
+            .whereArrayContains("memberIds", userId)
+            .addSnapshotListener { snapshot, _ ->
+                captainTeamIds = snapshot?.documents.orEmpty().filter { team ->
+                    val member = (team.get("members") as? List<*>)
+                        .orEmpty().filterIsInstance<Map<*, *>>()
+                        .firstOrNull { it["userId"] == userId }
+                    val roles = (member?.get("roles") as? List<*>)?.filterIsInstance<String>().orEmpty()
+                    val legacyRole = member?.get("role") as? String
+                    "CAPTAIN" in roles || "ADMIN" in roles || legacyRole == "CAPTAIN" ||
+                        team.getString("ownerUserId") == userId || team.getString("ownerId") == userId
+                }.mapTo(linkedSetOf()) { it.id }
+                refreshStats()
+            }
+        onDispose {
+            matchesListener.remove()
+            teamsListener.remove()
+        }
+    }
+    return state
+}
+
+private fun emptyPlayerStats(loading: Boolean): CricketStatsState = CricketStatsState(
+    loading = loading,
+    batting = listOf("MAT", "INNS", "NO", "RUNS", "HS", "AVG", "SR", "30s", "50s", "100s", "4s", "6s", "DUCKS", "WON", "LOSS").map { StatItem(it, "0") },
+    bowling = listOf("MAT", "INNS", "OVERS", "MAIDENS", "RUNS", "WKTS", "BB", "3 WKTS", "5 WKTS", "ECO", "SR", "AVG", "WD", "NB", "DOTS", "4S", "6S").map { StatItem(it, "0") },
+    fielding = listOf("MAT", "CATCHES", "C.B", "R/O", "ST").map { StatItem(it, "0") },
+    captaincy = listOf("MAT", "TOSS WON", "WON", "LOST", "WIN %", "LOSS %").map { StatItem(it, "0") }
+)
+
+private fun DocumentSnapshot.statsTeamIds(): Set<String> {
+    val teamA = get("teamA") as? Map<*, *>
+    val teamB = get("teamB") as? Map<*, *>
+    return setOfNotNull(
+        teamA?.get("teamId") as? String,
+        teamB?.get("teamId") as? String,
+        getString("teamAId"),
+        getString("teamBId")
+    )
+}
+
+private fun DocumentSnapshot.statsLineupIds(): Set<String> =
+    (get("playingXI") as? Map<*, *>)?.values.orEmpty()
+        .flatMap { ((it as? Map<*, *>)?.get("playerIds") as? List<*>).orEmpty().filterIsInstance<String>() }
+        .toSet()
+
+private fun aggregatePlayerStats(
+    matches: List<MatchStatRows>,
+    userId: String,
+    teamIds: Set<String>,
+    captainTeamIds: Set<String>
+): CricketStatsState {
+    val playerIds = teamIds.mapTo(linkedSetOf()) { "$it::$userId" }.apply { add(userId) }
+    val batting = matches.flatMap { match ->
+        match.batting.filter { it["playerId"] in playerIds }.map { match to it }
+    }.filter { (_, row) ->
+        val status = (row["status"] as? String).orEmpty().uppercase()
+        val balls = (row["balls"] as? Number)?.toInt() ?: 0
+        val runs = (row["runs"] as? Number)?.toInt() ?: 0
+        status !in setOf("YET_TO_BAT", "NOT_BATTED") && (status.isNotBlank() || balls > 0 || runs > 0)
+    }
+    val bowling = matches.flatMap { match ->
+        match.bowling.filter { it["playerId"] in playerIds }.map { match to it }
+    }
+    val fielding = matches.flatMap { match ->
+        match.deliveries.filter { it["fielderId"] in playerIds }.map { match to it }
+    }
+
+    fun number(row: Map<String, Any?>, key: String): Int = (row[key] as? Number)?.toInt() ?: 0
+    fun formatRate(value: Double): String = if (value.isFinite()) String.format(java.util.Locale.getDefault(), "%.2f", value) else "0.00"
+    fun inningsScores(match: DocumentSnapshot): Map<String, Int> = (match.get("innings") as? List<*>)
+        .orEmpty().filterIsInstance<Map<*, *>>()
+        .mapNotNull { inning ->
+            val teamId = inning["battingTeamId"] as? String ?: return@mapNotNull null
+            teamId to ((inning["score"] as? Number)?.toInt() ?: 0)
+        }.groupBy({ it.first }, { it.second }).mapValues { (_, scores) -> scores.sum() }
+
+    fun matchResult(match: DocumentSnapshot, teams: Set<String>): Int? {
+        if ((match.getString("status") ?: "").uppercase() !in setOf("COMPLETED", "FINISHED")) return null
+        val scores = inningsScores(match)
+        if (scores.size < 2) return null
+        val teamA = ((match.get("teamA") as? Map<*, *>)?.get("teamId") as? String) ?: match.getString("teamAId")
+        val teamB = ((match.get("teamB") as? Map<*, *>)?.get("teamId") as? String) ?: match.getString("teamBId")
+        val ownTeam = listOfNotNull(teamA, teamB).firstOrNull { it in teams } ?: return null
+        val otherTeam = listOfNotNull(teamA, teamB).firstOrNull { it != ownTeam } ?: return null
+        val ownScore = scores[ownTeam] ?: return null
+        val otherScore = scores[otherTeam] ?: return null
+        return ownScore.compareTo(otherScore)
+    }
+
+    val battingMatches = batting.map { it.first.matchId }.distinct().size
+    val batRuns = batting.sumOf { number(it.second, "runs") }
+    val batBalls = batting.sumOf { number(it.second, "balls") }
+    val notOuts = batting.count { (it.second["status"] as? String).equals("NOT_OUT", true) || (it.second["status"] as? String).equals("RETIRED_HURT", true) }
+    val outs = batting.count { (it.second["status"] as? String).equals("OUT", true) || (it.second["status"] as? String).equals("RETIRED_OUT", true) }
+    val scores = batting.map { number(it.second, "runs") }
+    val highestInnings = batting.maxByOrNull { number(it.second, "runs") }
+    val winsLosses = batting.map { it.first }.distinctBy { it.matchId }.mapNotNull { match ->
+        matchResult(match.match, match.match.statsTeamIds())
+    }
+    val fours = batting.sumOf { number(it.second, "fours") }
+    val sixes = batting.sumOf { number(it.second, "sixes") }
+    val battingStats = listOf(
+        StatItem("MAT", battingMatches.toString()), StatItem("INNS", batting.size.toString()), StatItem("NO", notOuts.toString()),
+        StatItem("RUNS", batRuns.toString()), StatItem("HS", (highestInnings?.let { number(it.second, "runs") } ?: 0).toString() + if ((highestInnings?.second?.get("status") as? String).equals("NOT_OUT", true)) "*" else ""),
+        StatItem("AVG", if (outs == 0) "-" else formatRate(batRuns.toDouble() / outs)),
+        StatItem("SR", formatRate(if (batBalls == 0) 0.0 else batRuns * 100.0 / batBalls)),
+        StatItem("30s", scores.count { it in 30..49 }.toString()), StatItem("50s", scores.count { it in 50..99 }.toString()),
+        StatItem("100s", scores.count { it >= 100 }.toString()), StatItem("4s", fours.toString()), StatItem("6s", sixes.toString()),
+        StatItem("DUCKS", batting.count { number(it.second, "runs") == 0 && (it.second["status"] as? String).equals("OUT", true) }.toString()),
+        StatItem("WON", winsLosses.count { it > 0 }.toString()), StatItem("LOSS", winsLosses.count { it < 0 }.toString())
+    )
+
+    val legalBalls = bowling.sumOf { number(it.second, "legalBalls") }
+    val bowlRuns = bowling.sumOf { number(it.second, "runs") }
+    val wickets = bowling.sumOf { number(it.second, "wickets") }
+    val bestBowling = bowling.map { number(it.second, "wickets") to number(it.second, "runs") }
+        .maxWithOrNull(compareBy<Pair<Int, Int>> { it.first }.thenByDescending { it.second }) ?: (0 to 0)
+    fun deliveriesForBowlingRow(match: MatchStatRows, row: Map<String, Any?>): List<Map<String, Any?>> =
+        match.deliveries.filter { delivery ->
+            delivery["bowlerId"] == row["playerId"] &&
+                (row["inningsId"] == null || delivery["inningsId"] == row["inningsId"])
+        }
+    val dotBalls = bowling.sumOf { (match, row) ->
+        deliveriesForBowlingRow(match, row).count { number(it, "runs") == 0 && number(it, "extras") == 0 }
+    }
+    val foursConceded = bowling.sumOf { (match, row) ->
+        deliveriesForBowlingRow(match, row).count { number(it, "runs") == 4 }
+    }
+    val sixesConceded = bowling.sumOf { (match, row) ->
+        deliveriesForBowlingRow(match, row).count { number(it, "runs") == 6 }
+    }
+    val bowlingStats = listOf(
+        StatItem("MAT", bowling.map { it.first.matchId }.distinct().size.toString()), StatItem("INNS", bowling.size.toString()),
+        StatItem("OVERS", "${legalBalls / 6}.${legalBalls % 6}"), StatItem("MAIDENS", bowling.sumOf { number(it.second, "maidens") }.toString()),
+        StatItem("RUNS", bowlRuns.toString()), StatItem("WKTS", wickets.toString()), StatItem("BB", "${bestBowling.first}/${bestBowling.second}"),
+        StatItem("3 WKTS", bowling.count { number(it.second, "wickets") >= 3 }.toString()),
+        StatItem("5 WKTS", bowling.count { number(it.second, "wickets") >= 5 }.toString()),
+        StatItem("ECO", formatRate(if (legalBalls == 0) 0.0 else bowlRuns * 6.0 / legalBalls)),
+        StatItem("SR", formatRate(if (wickets == 0) 0.0 else legalBalls.toDouble() / wickets)),
+        StatItem("AVG", formatRate(if (wickets == 0) 0.0 else bowlRuns.toDouble() / wickets)),
+        StatItem("WD", bowling.sumOf { number(it.second, "wides") }.toString()),
+        StatItem("NB", bowling.sumOf { number(it.second, "noBalls") }.toString()),
+        StatItem("DOTS", dotBalls.toString()), StatItem("4S", foursConceded.toString()),
+        StatItem("6S", sixesConceded.toString())
+    )
+
+    val caughtBowled = fielding.count { (match, row) ->
+        (row["dismissalType"] as? String).equals("CAUGHT", true) && row["fielderId"] == row["bowlerId"]
+    }
+    val catches = fielding.count { (_, row) -> (row["dismissalType"] as? String).equals("CAUGHT", true) } - caughtBowled
+    val runOuts = fielding.count { (_, row) -> (row["dismissalType"] as? String).equals("RUN_OUT", true) }
+    val stumpings = fielding.count { (_, row) -> (row["dismissalType"] as? String).equals("STUMPED", true) }
+    val fieldingStats = listOf(
+        StatItem("MAT", matches.filter { match -> match.match.statsLineupIds().any { it in playerIds } }.size.toString()),
+        StatItem("CATCHES", catches.toString()), StatItem("C.B", caughtBowled.toString()),
+        StatItem("R/O", runOuts.toString()), StatItem("ST", stumpings.toString())
+    )
+
+    val captainMatches = matches.filter { row ->
+        row.match.statsTeamIds().any { it in captainTeamIds } &&
+            (row.match.getString("status") ?: "").uppercase() in setOf("COMPLETED", "FINISHED", "LIVE", "IN_PROGRESS", "INNINGS_BREAK")
+    }
+    val completedCaptainMatches = captainMatches.filter { (it.match.getString("status") ?: "").uppercase() in setOf("COMPLETED", "FINISHED") }
+    val captainResults = completedCaptainMatches.mapNotNull { row -> matchResult(row.match, row.match.statsTeamIds().intersect(captainTeamIds)) }
+    val tossWins = captainMatches.count { row ->
+        val toss = row.match.get("toss") as? Map<*, *>
+        (toss?.get("winnerTeamId") as? String) in captainTeamIds
+    }
+    val captainWins = captainResults.count { it > 0 }
+    val captainLosses = captainResults.count { it < 0 }
+    val captainDecisions = captainWins + captainLosses
+    val captaincyStats = listOf(
+        StatItem("MAT", captainMatches.size.toString()), StatItem("TOSS WON", tossWins.toString()),
+        StatItem("WON", captainWins.toString()), StatItem("LOST", captainLosses.toString()),
+        StatItem("WIN %", formatRate(if (captainDecisions == 0) 0.0 else captainWins * 100.0 / captainDecisions) + "%"),
+        StatItem("LOSS %", formatRate(if (captainDecisions == 0) 0.0 else captainLosses * 100.0 / captainDecisions) + "%")
+    )
+    return CricketStatsState(loading = false, batting = battingStats, bowling = bowlingStats, fielding = fieldingStats, captaincy = captaincyStats)
+}
+
+@Composable
+private fun StatsContent(userId: String?, teamIds: Set<String>) {
+    var selectedStatTab by remember { mutableIntStateOf(0) }
+    val stats = rememberPlayerStats(userId, teamIds)
+    Column {
         SegmentPills(
             labels = listOf("Batting", "Bowling", "Fielding", "Captaincy"),
             active = selectedStatTab,
             onTabClick = { selectedStatTab = it }
         )
 
-        Spacer(Modifier.height(28.dp))
-
-        Box(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .blur(if (!isUnlocked) 15.dp else 0.dp)
-                    .then(if (!isUnlocked) Modifier.alpha(0.5f) else Modifier)
-            ) {
-                StatCategoryContent(selectedStatTab)
-            }
-
-            if (!isUnlocked) {
-                // Freeze overlay: intercepts all touches so background stats aren't selectable
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clickable(enabled = false, onClick = { /* Intercept */ })
-                )
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 60.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(122.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(CricketPanel)
-                            .border(1.dp, CricketStroke, RoundedCornerShape(28.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Image(
-                            painter = painterResource(R.drawable.tala),
-                            contentDescription = "PRO locked",
-                            modifier = Modifier.size(61.dp)
-                        )
-                    }
-                    Spacer(Modifier.height(30.dp))
-                    Text(
-                        "Full stats, full story",
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "Track every run, wicket, and pattern that\ndefines your game with PRO.",
-                        color = CricketMuted,
-                        fontSize = 13.sp,
-                        lineHeight = 19.sp,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(Modifier.height(34.dp))
-                    Box(
-                        Modifier
-                            .height(60.dp)
-                            .width(267.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(CricketAccent)
-                            .clickable { isUnlocked = true }
-                            .padding(horizontal = 22.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "PRO starting at ₹69",
-                            color = Color(0xFF091002),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                }
-            }
+        Spacer(Modifier.height(20.dp))
+        when {
+            stats.loading -> TournamentFeedbackCard("Loading your stats…", "Fetching your match scorecards.")
+            stats.error != null -> TournamentFeedbackCard("Couldn't load your stats", stats.error)
+            else -> StatCategoryContent(selectedStatTab, stats)
         }
     }
 }
 
 @Composable
-private fun StatCategoryContent(tabIndex: Int) {
-    val stats = when (tabIndex) {
-        0 -> battingStats
-        1 -> bowlingStats
-        2 -> fieldingStats
-        else -> captaincyStats
+private fun StatCategoryContent(tabIndex: Int, state: CricketStatsState) {
+    val categoryStats = when (tabIndex) {
+        0 -> state.batting
+        1 -> state.bowling
+        2 -> state.fielding
+        else -> state.captaincy
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        StatSection("Overall", stats)
-        StatSection("Tennis ball", stats, isTennis = true)
-    }
+    StatSection("Overall", categoryStats)
 }
 
 @Composable
@@ -1477,34 +1636,6 @@ private fun StatBox(item: StatItem, modifier: Modifier = Modifier) {
         )
     }
 }
-
-private val battingStats = listOf(
-    StatItem("MAT", "1"), StatItem("INNS", "1"), StatItem("NO", "1"),
-    StatItem("RUNS", "1"), StatItem("HS", "1*"), StatItem("AVG", "-"),
-    StatItem("SR", "100"), StatItem("30s", "0"), StatItem("50s", "0"),
-    StatItem("100s", "0"), StatItem("4s", "0"), StatItem("6s", "0"),
-    StatItem("DUCKS", "0"), StatItem("WON", "1"), StatItem("LOSS", "0")
-)
-
-private val bowlingStats = listOf(
-    StatItem("MAT", "1"), StatItem("INNS", "1"), StatItem("OVERS", "1"),
-    StatItem("MAIDENS", "0"), StatItem("RUNS", "16"), StatItem("WKTS", "0"),
-    StatItem("BB", "0/16"), StatItem("3 WKTS", "0"), StatItem("5 WKTS", "0"),
-    StatItem("ECO", "16"), StatItem("SR", "0"), StatItem("AVG", "0"),
-    StatItem("WD", "0"), StatItem("NB", "0"), StatItem("DOTS", "3"),
-    StatItem("4S", "1"), StatItem("6S", "2")
-)
-
-private val fieldingStats = listOf(
-    StatItem("MAT", "1"), StatItem("CATCHES", "0"), StatItem("C.B", "0"),
-    StatItem("R/O", "0"), StatItem("ST", "0"), StatItem("ASST. R/O", "0"),
-    StatItem("BYES", "0")
-)
-
-private val captaincyStats = listOf(
-    StatItem("MAT", "1"), StatItem("TOSS WON", "1"),
-    StatItem("WIN %", "100.00%"), StatItem("LOSS %", "0.00%")
-)
 
 @Composable
 private fun HostTournamentPrompt() {
@@ -2166,5 +2297,3 @@ private fun HeaderMenuButton(onMenuClick: () -> Unit) {
         }
     }
 }
-
-
