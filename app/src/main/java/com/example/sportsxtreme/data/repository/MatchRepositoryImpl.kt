@@ -144,6 +144,20 @@ class MatchRepositoryImpl @Inject constructor(
         }
         val teamName = document.getString("teamName").orEmpty()
             .ifBlank { document.getString("name").orEmpty().ifBlank { teamId } }
+        // User profiles are private, so direct reads often return no name. Use the
+        // same authorized roster endpoint as the team screens, which also resolves
+        // Firebase Auth display names and fullName profile fields.
+        val memberNames = runCatching {
+            val response = functions.getHttpsCallable("getTeamMemberProfiles")
+                .call(mapOf("teamId" to teamId)).await().data as? Map<*, *>
+            (response?.get("members") as? List<*>).orEmpty()
+                .mapNotNull { it as? Map<*, *> }
+                .mapNotNull { profile ->
+                    val userId = profile["userId"] as? String ?: return@mapNotNull null
+                    val name = (profile["displayName"] as? String)?.trim().orEmpty()
+                    userId to name.takeUnless { it.isBlank() || it.equals("team member", ignoreCase = true) }
+                }.toMap()
+        }.getOrDefault(emptyMap())
         val members = buildList {
             (document.get("members") as? List<*>).orEmpty()
             .mapNotNull { it as? Map<*, *> }
@@ -154,11 +168,14 @@ class MatchRepositoryImpl @Inject constructor(
                         if (value in setOf("BATTER", "BOWLER", "ALL_ROUNDER", "WICKET_KEEPER")) value else "UNKNOWN"
                     }
                 val profile = runCatching { firestore.collection("users").document(userId).get().await() }.getOrNull()
-                val displayName = (member["displayName"] as? String).orEmpty()
-                    .ifBlank { (member["name"] as? String).orEmpty() }
-                    .ifBlank { profile?.getString("name").orEmpty() }
-                    .ifBlank { profile?.getString("displayName").orEmpty() }
-                    .ifBlank { "Team member" }
+                val displayName = (member["displayName"] as? String)?.trim().orEmpty()
+                    .takeUnless { it.isBlank() || it.equals("team member", ignoreCase = true) }
+                    ?: (member["name"] as? String)?.trim().orEmpty()
+                        .takeUnless { it.isBlank() || it.equals("team member", ignoreCase = true) }
+                    ?: memberNames[userId]
+                    ?: profile?.getString("name")?.trim()?.takeIf(String::isNotBlank)
+                    ?: profile?.getString("displayName")?.trim()?.takeIf(String::isNotBlank)
+                    ?: "Team member"
                 add(PlayerEntity(
                     // A user can legitimately be a member of both teams; player IDs must
                     // therefore be scoped to their team inside the local match engine.

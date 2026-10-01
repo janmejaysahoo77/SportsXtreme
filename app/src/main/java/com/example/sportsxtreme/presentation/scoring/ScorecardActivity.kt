@@ -12,6 +12,9 @@ import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.lifecycleScope
 import androidx.activity.compose.setContent
 import androidx.activity.ComponentActivity
@@ -84,8 +87,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.functions.FirebaseFunctions
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -96,7 +101,9 @@ import java.util.Locale
 class ScorecardActivity : ComponentActivity() {
 
     @Inject lateinit var firestore: FirebaseFirestore
+    private val functions by lazy { FirebaseFunctions.getInstance() }
     private var matchListener: ListenerRegistration? = null
+    private var deliveriesListener: ListenerRegistration? = null
 
     companion object {
         const val EXTRA_LEAGUE = "scorecard.extra.LEAGUE"
@@ -122,15 +129,93 @@ class ScorecardActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
 
         val match = mutableStateOf(readMatch())
-        setContent { ScorecardScreen(match = match.value, onBack = { finish() }) }
+        setContent {
+            ScorecardScreen(
+                match = match.value,
+                onBack = { finish() },
+                onShare = { shareScorecard(match.value) }
+            )
+        }
 
-        val matchId = intent.getStringExtra(EXTRA_MATCH_ID).orEmpty()
+        val matchId = resolveMatchId(intent)
         if (matchId.isNotBlank()) {
+            if (savedInstanceState == null) {
+                firestore.collection("matches").document(matchId)
+                    .update("scorecardViews", FieldValue.increment(1))
+                    .addOnFailureListener { error ->
+                        Log.w("ScorecardActivity", "Could not increment scorecard views", error)
+                    }
+            }
+            var deliveryDocuments = emptyList<DocumentSnapshot>()
+            val playerNames = mutableMapOf<String, String>()
+            val playerNameLookups = mutableSetOf<String>()
+            val pendingPlayerNameLookups = mutableSetOf<String>()
+            fun refreshPartnership() {
+                val current = match.value.copy(
+                    currentBatters = match.value.currentBatters.map { batter ->
+                        batter.copy(name = playerNames.resolvePlayerName(batter.id, batter.name))
+                    },
+                    currentBowlerName = playerNames.resolvePlayerName(
+                        match.value.currentBowlerId,
+                        match.value.currentBowlerName
+                    )
+                )
+                val deliveries = deliveryDocuments.activeInningsDeliveries(current)
+                val scorecardDeliveries = deliveryDocuments.activeMatchDeliveries()
+                match.value = current.copy(
+                    currentPartnership = deliveries.calculateCurrentPartnership(current),
+                    lastWicket = deliveries.lastWicketSummary(),
+                    lastFiveOvers = deliveries.lastFiveOversSummary(),
+                    currentBowling = deliveries.currentBowlingFigures(current),
+                    lastSixBalls = deliveries.lastSixBallOutcomes(),
+                    scorecardBatting = scorecardDeliveries.scorecardBattingRows(current, playerNames),
+                    scorecardBowling = scorecardDeliveries.scorecardBowlingRows(current, playerNames),
+                    battedTeamIds = current.battedTeamIds + scorecardDeliveries.mapNotNull { it["battingTeamId"] as? String }
+                )
+            }
+            deliveriesListener = firestore.collection("matches").document(matchId)
+                .collection("deliveries")
+                .addSnapshotListener { snapshot, _ ->
+                    deliveryDocuments = snapshot?.documents.orEmpty()
+                    refreshPartnership()
+                }
             var tournamentLookupStartedFor: String? = null
             matchListener = firestore.collection("matches").document(matchId)
                 .addSnapshotListener { snapshot, error ->
                     if (error != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
                     match.value = snapshot.toMatchDetail(match.value)
+                    val teamIds = listOf(match.value.leftTeamId, match.value.rightTeamId)
+                        .filter(String::isNotBlank)
+                    val lookupsToStart = teamIds.filter { teamId ->
+                        playerNameLookups.add(teamId).also { isNew ->
+                            if (isNew) pendingPlayerNameLookups.add(teamId)
+                        }
+                    }
+                    match.value = match.value.copy(playerNamesLoading = pendingPlayerNameLookups.isNotEmpty())
+                    refreshPartnership()
+
+                    lookupsToStart.forEach { teamId ->
+                        lifecycleScope.launch {
+                            val names = runCatching {
+                                val response = functions.getHttpsCallable("getTeamMemberProfiles")
+                                    .call(mapOf("teamId" to teamId)).await().data as? Map<*, *>
+                                (response?.get("members") as? List<*>).orEmpty()
+                                    .mapNotNull { it as? Map<*, *> }
+                                    .mapNotNull { member ->
+                                        val userId = member["userId"] as? String ?: return@mapNotNull null
+                                        val name = (member["displayName"] as? String)?.trim()
+                                            ?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+                                        listOf(userId, "$teamId::$userId").map { it to name }
+                                    }.flatten().toMap()
+                            }.getOrDefault(emptyMap())
+                            if (!isFinishing && !isDestroyed) {
+                                if (names.isNotEmpty()) playerNames.putAll(names)
+                                pendingPlayerNameLookups.remove(teamId)
+                                match.value = match.value.copy(playerNamesLoading = pendingPlayerNameLookups.isNotEmpty())
+                                refreshPartnership()
+                            }
+                        }
+                    }
 
                     val tournamentId = snapshot.getString("tournamentId")
                         ?.takeIf(String::isNotBlank)
@@ -153,8 +238,30 @@ class ScorecardActivity : ComponentActivity() {
     override fun onDestroy() {
         matchListener?.remove()
         matchListener = null
+        deliveriesListener?.remove()
+        deliveriesListener = null
         super.onDestroy()
     }
+
+    private fun shareScorecard(match: MatchDetail) {
+        if (match.matchId.isBlank()) return
+        val scorecardUrl = Uri.Builder()
+            .scheme("https")
+            .authority("sportsxtreme-95fbb.web.app")
+            .appendPath("scorecard")
+            .appendQueryParameter("matchId", match.matchId)
+            .build()
+            .toString()
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "${match.leftName} vs ${match.rightName} scorecard on SportsXtreme:\n$scorecardUrl")
+        }
+        startActivity(Intent.createChooser(shareIntent, "Share scorecard"))
+    }
+
+    private fun resolveMatchId(source: Intent?): String =
+        source?.getStringExtra(EXTRA_MATCH_ID)?.takeIf(String::isNotBlank)
+            ?: source?.data?.getQueryParameter("matchId").orEmpty()
 
     private fun DocumentSnapshot.toMatchDetail(previous: MatchDetail): MatchDetail {
         val liveScore = get("liveScore") as? Map<*, *>
@@ -184,6 +291,7 @@ class ScorecardActivity : ComponentActivity() {
         val currentBatters = if (liveScore == null) previous.currentBatters else listOfNotNull(
             strikerName?.takeIf(String::isNotBlank)?.let {
                 CurrentBatter(
+                    id = liveScore?.get("strikerPlayerId") as? String,
                     name = it,
                     runs = liveScore?.number("strikerRuns") ?: 0,
                     balls = liveScore?.number("strikerBalls") ?: 0,
@@ -192,11 +300,13 @@ class ScorecardActivity : ComponentActivity() {
                     isStriker = true
                 )
             },
-            (liveScore?.get("nonStrikerName") as? String)
+            (liveScore?.get("non" +
+                    "StrikerName") as? String)
                 ?.takeIf(String::isNotBlank)
                 ?.takeIf { it != strikerName }
                 ?.let {
                     CurrentBatter(
+                        id = liveScore?.get("nonStrikerPlayerId") as? String,
                         name = it,
                         runs = liveScore?.number("nonStrikerRuns") ?: 0,
                         balls = liveScore?.number("nonStrikerBalls") ?: 0,
@@ -267,9 +377,11 @@ class ScorecardActivity : ComponentActivity() {
             round = if (isFriendlyMatch) "" else (getString("roundName")
                 ?: getString("selectedStage") ?: previous.round).orEmpty(),
             leftName = teamAName,
+            leftTeamId = teamAId,
             leftScore = leftScore,
             leftOvers = leftOvers,
             rightName = teamBName,
+            rightTeamId = teamBId,
             rightScore = rightScore,
             rightOvers = rightOvers,
             venue = getString("venue")?.takeIf(String::isNotBlank).orEmpty(),
@@ -285,7 +397,12 @@ class ScorecardActivity : ComponentActivity() {
             },
             ballsBowled = ballsBowled,
             scheduledBalls = scheduledOvers?.times(6),
-            currentBatters = currentBatters
+            currentBatters = currentBatters,
+            currentInningsId = activeInnings?.get("inningsId") as? String ?: activeInnings?.get("id") as? String,
+            currentBowlerId = activeInnings?.get("currentBowlerId") as? String,
+            currentBowlerName = (liveScore?.get("bowlerName") as? String).orEmpty(),
+            battedTeamIds = innings.mapNotNull { it["battingTeamId"] as? String }.toSet(),
+            scorecardViews = getLong("scorecardViews") ?: 0L
         )
     }
 
@@ -333,11 +450,14 @@ class ScorecardActivity : ComponentActivity() {
     private fun readMatch(): MatchDetail {
         return MatchDetail(
             league = intent.getStringExtra(EXTRA_LEAGUE)?.takeIf(String::isNotBlank) ?: "MATCH SCORECARD",
+            matchId = resolveMatchId(intent),
             round = intent.getStringExtra(EXTRA_ROUND)?.takeIf(String::isNotBlank).orEmpty(),
             leftName = intent.getStringExtra(EXTRA_LEFT_NAME)?.takeIf(String::isNotBlank) ?: "TEAM A",
+            leftTeamId = "",
             leftScore = intent.getStringExtra(EXTRA_LEFT_SCORE) ?: "—",
             leftOvers = intent.getStringExtra(EXTRA_LEFT_OVERS).orEmpty(),
             rightName = intent.getStringExtra(EXTRA_RIGHT_NAME)?.takeIf(String::isNotBlank) ?: "TEAM B",
+            rightTeamId = "",
             rightScore = intent.getStringExtra(EXTRA_RIGHT_SCORE) ?: "—",
             rightOvers = intent.getStringExtra(EXTRA_RIGHT_OVERS).orEmpty(),
             target = intent.getStringExtra(EXTRA_TARGET) ?: "—",
@@ -349,6 +469,14 @@ class ScorecardActivity : ComponentActivity() {
             ballsBowled = null,
             scheduledBalls = null,
             currentBatters = emptyList(),
+            currentInningsId = null,
+            currentBowlerId = null,
+            currentBowlerName = "",
+            currentPartnership = CurrentPartnership(),
+            currentBowling = null,
+            lastWicket = "No wicket this innings",
+            lastFiveOvers = "0 runs, 0 wickets",
+            scorecardViews = 0L,
             win = intent.getStringExtra(EXTRA_WIN).orEmpty(),
             note = intent.getStringExtra(EXTRA_NOTE).orEmpty(),
             venue = ""
@@ -358,11 +486,14 @@ class ScorecardActivity : ComponentActivity() {
 
 private data class MatchDetail(
     val league: String,
+    val matchId: String,
     val round: String,
     val leftName: String,
+    val leftTeamId: String,
     val leftScore: String,
     val leftOvers: String,
     val rightName: String,
+    val rightTeamId: String,
     val rightScore: String,
     val rightOvers: String,
     val venue: String,
@@ -375,11 +506,25 @@ private data class MatchDetail(
     val ballsBowled: Int?,
     val scheduledBalls: Int?,
     val currentBatters: List<CurrentBatter>,
+    val currentInningsId: String?,
+    val currentBowlerId: String?,
+    val currentBowlerName: String,
+    val playerNamesLoading: Boolean = false,
+    val currentPartnership: CurrentPartnership = CurrentPartnership(),
+    val currentBowling: CurrentBowlingFigures? = null,
+    val lastWicket: String = "No wicket this innings",
+    val lastFiveOvers: String = "0 runs, 0 wickets",
+    val lastSixBalls: List<BallOutcome> = emptyList(),
+    val battedTeamIds: Set<String> = emptySet(),
+    val scorecardBatting: Map<String, List<ScorecardBattingRow>> = emptyMap(),
+    val scorecardBowling: Map<String, List<ScorecardBowlingRow>> = emptyMap(),
+    val scorecardViews: Long = 0L,
     val win: String,
     val note: String
 )
 
 private data class CurrentBatter(
+    val id: String?,
     val name: String,
     val runs: Int,
     val balls: Int,
@@ -389,6 +534,242 @@ private data class CurrentBatter(
 ) {
     val strikeRate: String
         get() = if (balls == 0) "0.0" else String.format(Locale.US, "%.1f", runs * 100.0 / balls)
+}
+
+private data class CurrentPartnership(
+    val runs: Int = 0,
+    val balls: Int = 0,
+    val firstBatterRuns: Int = 0,
+    val secondBatterRuns: Int = 0,
+    val firstBatterBalls: Int = 0,
+    val secondBatterBalls: Int = 0
+) {
+    val runRate: String
+        get() = if (balls == 0) "0.00" else String.format(Locale.US, "%.2f", runs * 6.0 / balls)
+}
+
+private data class CurrentBowlingFigures(
+    val name: String,
+    val overs: String,
+    val maidens: Int,
+    val runs: Int,
+    val wickets: Int,
+    val economy: String
+)
+
+private data class BallOutcome(val label: String, val kind: String)
+private data class ScorecardBattingRow(
+    val name: String,
+    val runs: Int,
+    val balls: Int,
+    val fours: Int,
+    val sixes: Int,
+    val strikeRate: String,
+    val active: Boolean
+)
+private data class ScorecardBowlingRow(val name: String, val overs: String, val runs: Int, val wickets: Int, val economy: String)
+
+private fun Map<String, String>.resolvePlayerName(playerId: String?, candidate: String?): String {
+    playerId?.let { this[it]?.takeIf(String::isNotBlank) }?.let { return it }
+    val value = candidate?.trim().orEmpty()
+    val looksLikeId = value.isNotBlank() && (
+        value == playerId || "::" in value || value.matches(Regex("[A-Za-z0-9_-]{20,}"))
+    )
+    if (value.isNotBlank() && !looksLikeId) return value
+    return "Player"
+}
+
+private fun List<DocumentSnapshot>.activeMatchDeliveries(): List<Map<String, Any?>> {
+    val all = mapNotNull { it.data }.sortedWith(compareBy<Map<String, Any?>> { (it["sequenceNumber"] as? Number)?.toLong() ?: 0L })
+    val reversedIds = all.mapNotNull { it["reversedEventId"] as? String }.toSet()
+    return all.filter { it["eventType"] != "REVERSAL" && (it["deliveryId"] as? String) !in reversedIds }
+}
+
+private fun List<Map<String, Any?>>.scorecardBattingRows(
+    match: MatchDetail,
+    playerNames: Map<String, String>
+): Map<String, List<ScorecardBattingRow>> =
+    groupBy { it["battingTeamId"] as? String ?: return@groupBy "" }
+        .filterKeys(String::isNotBlank)
+        .mapValues { (_, inningsDeliveries) ->
+            inningsDeliveries.groupBy { it["batsmanId"] as? String ?: (it["batsmanName"] as? String ?: "Unknown") }
+                .map { (playerId, balls) ->
+                    val runs = balls.sumOf { (it["runs"] as? Number)?.toInt() ?: 0 }
+                    val faced = balls.count { it["extraType"] != "WIDE" }
+                    val knownName = match.currentBatters.firstOrNull { it.id == playerId }?.name
+                    val batter = match.currentBatters.firstOrNull { it.id == playerId }
+                    val deliveryName = balls.firstNotNullOfOrNull { it["batsmanName"] as? String }
+                    val resolvedName = playerNames.resolvePlayerName(playerId, knownName ?: deliveryName)
+                    ScorecardBattingRow(
+                        name = resolvedName + if (batter?.isStriker == true) "*" else "",
+                        runs = runs,
+                        balls = faced,
+                        fours = balls.count { (it["runs"] as? Number)?.toInt() == 4 },
+                        sixes = balls.count { (it["runs"] as? Number)?.toInt() == 6 },
+                        strikeRate = if (faced == 0) "0.0" else String.format(Locale.US, "%.1f", runs * 100.0 / faced),
+                        active = batter?.isStriker == true
+                    )
+                }.sortedByDescending { it.balls }
+        }
+
+private fun List<Map<String, Any?>>.scorecardBowlingRows(
+    match: MatchDetail,
+    playerNames: Map<String, String>
+): Map<String, List<ScorecardBowlingRow>> =
+    groupBy { it["bowlingTeamId"] as? String ?: return@groupBy "" }
+        .filterKeys(String::isNotBlank)
+        .mapValues { (_, inningsDeliveries) ->
+            inningsDeliveries.groupBy { it["bowlerId"] as? String ?: (it["bowlerName"] as? String ?: "Unknown") }
+                .map { (playerId, balls) ->
+                    val legalBalls = balls.count { it["isLegalDelivery"] as? Boolean ?: true }
+                    val conceded = balls.sumOf { ball ->
+                        val batRuns = (ball["runs"] as? Number)?.toInt() ?: 0
+                        val extras = ball["extraBreakdown"] as? List<*> ?: emptyList<Any>()
+                        batRuns + extras.filterIsInstance<Map<*, *>>()
+                            .filter { it["type"] == "WIDE" || it["type"] == "NO_BALL" }
+                            .sumOf { (it["runs"] as? Number)?.toInt() ?: 0 }
+                    }
+                    val wickets = balls.count { ball ->
+                        val type = (ball["dismissalType"] as? String).orEmpty()
+                        (ball["dismissedPlayerId"] as? String).orEmpty().isNotBlank() &&
+                            type !in setOf("", "NONE", "RUN_OUT", "RETIRED_OUT", "RETIRED_HURT", "OBSTRUCTING_THE_FIELD")
+                    }
+                    val economy = if (legalBalls == 0) 0.0 else conceded * 6.0 / legalBalls
+                    val deliveryName = balls.firstNotNullOfOrNull { it["bowlerName"] as? String }
+                    val knownName = if (playerId == match.currentBowlerId) match.currentBowlerName else deliveryName
+                    ScorecardBowlingRow(
+                        name = playerNames.resolvePlayerName(playerId, knownName),
+                        overs = "${legalBalls / 6}.${legalBalls % 6}",
+                        runs = conceded,
+                        wickets = wickets,
+                        economy = String.format(Locale.US, "%.1f", economy)
+                    )
+                }.sortedByDescending { it.overs }
+        }
+
+private fun List<Map<String, Any?>>.lastSixBallOutcomes(): List<BallOutcome> = takeLast(6).map { delivery ->
+    val runs = (delivery["runs"] as? Number)?.toInt() ?: 0
+    val extras = (delivery["extras"] as? Number)?.toInt() ?: 0
+    val extraType = (delivery["extraType"] as? String).orEmpty()
+    val dismissalType = (delivery["dismissalType"] as? String).orEmpty()
+    val isWicket = (delivery["dismissedPlayerId"] as? String).orEmpty().isNotBlank() &&
+        dismissalType.isNotBlank() && dismissalType != "NONE" && dismissalType != "RETIRED_HURT"
+    when {
+        isWicket -> BallOutcome("W", "W")
+        extraType == "WIDE" -> BallOutcome("Wd", "EXTRA")
+        extraType == "NO_BALL" -> BallOutcome("Nb", "EXTRA")
+        runs + extras == 0 -> BallOutcome(".", ".")
+        else -> BallOutcome((runs + extras).toString(), if (runs + extras == 4) "4" else if (runs + extras == 6) "6" else "RUN")
+    }
+}
+
+private fun List<DocumentSnapshot>.activeInningsDeliveries(match: MatchDetail): List<Map<String, Any?>> {
+    val inningsId = match.currentInningsId ?: return emptyList()
+    val inningsDeliveries = mapNotNull { document ->
+        val data = document.data ?: return@mapNotNull null
+        if (data["inningsId"] != inningsId) return@mapNotNull null
+        data
+    }.sortedWith(compareBy<Map<String, Any?>> { (it["sequenceNumber"] as? Number)?.toLong() ?: 0L })
+    val reversedDeliveryIds = inningsDeliveries.mapNotNull { it["reversedEventId"] as? String }.toSet()
+    val activeDeliveries = inningsDeliveries.filter {
+        it["eventType"] != "REVERSAL" && (it["deliveryId"] as? String) !in reversedDeliveryIds
+    }
+    return activeDeliveries
+}
+
+private fun List<Map<String, Any?>>.calculateCurrentPartnership(match: MatchDetail): CurrentPartnership {
+    val lastWicketIndex = indexOfLast { delivery ->
+        val dismissal = (delivery["dismissedPlayerId"] as? String).orEmpty()
+        val type = (delivery["dismissalType"] as? String).orEmpty()
+        dismissal.isNotBlank() && type.isNotBlank() && type != "NONE" && type != "RETIRED_HURT"
+    }
+    val partnershipDeliveries = drop(lastWicketIndex + 1)
+    fun number(delivery: Map<String, Any?>, key: String): Int = (delivery[key] as? Number)?.toInt() ?: 0
+    val firstBatterId = match.currentBatters.getOrNull(0)?.id
+    val secondBatterId = match.currentBatters.getOrNull(1)?.id
+    return CurrentPartnership(
+        runs = partnershipDeliveries.sumOf { number(it, "runs") + number(it, "extras") },
+        balls = partnershipDeliveries.count { it["isLegalDelivery"] as? Boolean ?: true },
+        firstBatterRuns = partnershipDeliveries.filter { it["batsmanId"] == firstBatterId }.sumOf { number(it, "runs") },
+        secondBatterRuns = partnershipDeliveries.filter { it["batsmanId"] == secondBatterId }.sumOf { number(it, "runs") },
+        firstBatterBalls = partnershipDeliveries.count { it["batsmanId"] == firstBatterId && it["extraType"] != "WIDE" },
+        secondBatterBalls = partnershipDeliveries.count { it["batsmanId"] == secondBatterId && it["extraType"] != "WIDE" }
+    )
+}
+
+private fun List<Map<String, Any?>>.lastWicketSummary(): String {
+    val wicketIndex = indexOfLast { delivery ->
+        val dismissedPlayer = (delivery["dismissedPlayerId"] as? String).orEmpty()
+        val dismissalType = (delivery["dismissalType"] as? String).orEmpty()
+        dismissedPlayer.isNotBlank() && dismissalType.isNotBlank() &&
+            dismissalType != "NONE" && dismissalType != "RETIRED_HURT"
+    }
+    if (wicketIndex < 0) return "No wicket this innings"
+    fun number(delivery: Map<String, Any?>, key: String): Int = (delivery[key] as? Number)?.toInt() ?: 0
+    val wicketDelivery = this[wicketIndex]
+    val runsAtFall = take(wicketIndex + 1).sumOf { number(it, "runs") + number(it, "extras") }
+    val wicketsAtFall = take(wicketIndex + 1).count { delivery ->
+        val dismissalType = (delivery["dismissalType"] as? String).orEmpty()
+        (delivery["dismissedPlayerId"] as? String).orEmpty().isNotBlank() &&
+            dismissalType.isNotBlank() && dismissalType != "NONE" && dismissalType != "RETIRED_HURT"
+    }
+    val dismissalType = (wicketDelivery["dismissalType"] as? String)
+        ?.replace('_', ' ')
+        ?.lowercase(Locale.US)
+        ?.replaceFirstChar { it.uppercase(Locale.US) }
+        .orEmpty()
+    return "$runsAtFall/$wicketsAtFall · $dismissalType"
+}
+
+private fun List<Map<String, Any?>>.lastFiveOversSummary(): String {
+    if (isEmpty()) return "0 runs, 0 wickets"
+    val legalIndices = indices.filter { this[it]["isLegalDelivery"] as? Boolean ?: true }
+    val startIndex = legalIndices.getOrNull((legalIndices.size - 30).coerceAtLeast(0)) ?: 0
+    val recentDeliveries = drop(startIndex)
+    val runs = recentDeliveries.sumOf {
+        ((it["runs"] as? Number)?.toInt() ?: 0) + ((it["extras"] as? Number)?.toInt() ?: 0)
+    }
+    val wickets = recentDeliveries.count { delivery ->
+        val dismissalType = (delivery["dismissalType"] as? String).orEmpty()
+        (delivery["dismissedPlayerId"] as? String).orEmpty().isNotBlank() &&
+            dismissalType.isNotBlank() && dismissalType != "NONE" && dismissalType != "RETIRED_HURT"
+    }
+    val legalBalls = recentDeliveries.count { it["isLegalDelivery"] as? Boolean ?: true }
+    return "$runs runs, $wickets wickets ($legalBalls balls)"
+}
+
+private fun List<Map<String, Any?>>.currentBowlingFigures(match: MatchDetail): CurrentBowlingFigures? {
+    val bowlerId = match.currentBowlerId ?: lastOrNull()?.get("bowlerId") as? String ?: return null
+    val deliveries = filter { it["bowlerId"] == bowlerId }
+    if (deliveries.isEmpty()) return null
+    fun number(delivery: Map<String, Any?>, key: String): Int = (delivery[key] as? Number)?.toInt() ?: 0
+    fun extrasOfType(delivery: Map<String, Any?>, type: String): Int {
+        val breakdown = delivery["extraBreakdown"] as? List<*> ?: return if (delivery["extraType"] == type) number(delivery, "extras") else 0
+        return breakdown.filterIsInstance<Map<*, *>>()
+            .filter { it["type"] == type }
+            .sumOf { (it["runs"] as? Number)?.toInt() ?: 0 }
+    }
+    fun runsConceded(delivery: Map<String, Any?>): Int =
+        number(delivery, "runs") + extrasOfType(delivery, "WIDE") + extrasOfType(delivery, "NO_BALL")
+    val legalBalls = deliveries.count { it["isLegalDelivery"] as? Boolean ?: true }
+    val runs = deliveries.sumOf(::runsConceded)
+    val wickets = deliveries.count { delivery ->
+        val dismissalType = (delivery["dismissalType"] as? String).orEmpty()
+        (delivery["dismissedPlayerId"] as? String).orEmpty().isNotBlank() &&
+            dismissalType !in setOf("", "NONE", "RUN_OUT", "RETIRED_OUT", "RETIRED_HURT", "OBSTRUCTING_THE_FIELD")
+    }
+    val maidens = deliveries.groupBy { it["over"] }.values.count { over ->
+        over.count { it["isLegalDelivery"] as? Boolean ?: true } == 6 && over.sumOf(::runsConceded) == 0
+    }
+    val economy = if (legalBalls == 0) 0.0 else runs * 6.0 / legalBalls
+    return CurrentBowlingFigures(
+        name = match.currentBowlerName.ifBlank { "Bowler" },
+        overs = "${legalBalls / 6}.${legalBalls % 6}",
+        maidens = maidens,
+        runs = runs,
+        wickets = wickets,
+        economy = String.format(Locale.US, "%.2f", economy)
+    )
 }
 
 private val Accent = Color(0xFFC1FF00)
@@ -403,7 +784,7 @@ private enum class DetailIcon { BACK, SEARCH, BELL, MESSAGE, SHIELD, BOLT, DOTS 
 private enum class MetricIcon { SPEED, TARGET, TREND, TROPHY }
 
 @Composable
-private fun ScorecardScreen(match: MatchDetail, onBack: () -> Unit) {
+private fun ScorecardScreen(match: MatchDetail, onBack: () -> Unit, onShare: () -> Unit) {
     var selectedTab by remember { mutableIntStateOf(1) }
     val tabs = listOf("INFO", "LIVE", "SCORECARD", "SUMMARY", "COMMENTARY")
 
@@ -417,7 +798,7 @@ private fun ScorecardScreen(match: MatchDetail, onBack: () -> Unit) {
             )
     ) {
         Column(Modifier.fillMaxSize()) {
-            ScorecardTopBar(match = match, onBack = onBack)
+            ScorecardTopBar(match = match, onBack = onBack, onShare = onShare)
 
             Column(
                 modifier = Modifier
@@ -479,7 +860,8 @@ private fun ScorecardScreen(match: MatchDetail, onBack: () -> Unit) {
 @Composable
 private fun ScorecardTopBar(
     match: MatchDetail,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onShare: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -526,11 +908,19 @@ private fun ScorecardTopBar(
                 )
             }
         }
-        Image(
-            painter = painterResource(R.drawable.ic_share),
-            contentDescription = "Share",
-            modifier = Modifier.size(20.dp)
-        )
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(enabled = match.matchId.isNotBlank(), onClick = onShare),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_share),
+                contentDescription = "Share scorecard",
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 
@@ -630,7 +1020,7 @@ private fun MatchDetailsStrip(match: MatchDetail) {
                 modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(8.dp))
-            ViewsPill("30.6Cr")
+            ViewsPill(match.scorecardViews.toString())
         }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -787,17 +1177,17 @@ private fun InfoTab(match: MatchDetail) {
         InfoRow("Required rate", match.rrr)
         InfoRow("Win projection", match.win)
     }
-    TwoColumnStats("CURRENT SNAPSHOT", listOf("Partnership" to "38 (24)", "Run rate" to "7.61", "Last 5 overs" to "43/2", "Momentum" to match.leftName))
+    TwoColumnStats("CURRENT SNAPSHOT", listOf("Partnership" to "${match.currentPartnership.runs} (${match.currentPartnership.balls})", "Run rate" to match.currentRunRate, "Last 5 overs" to match.lastFiveOvers, "Momentum" to match.leftName))
 }
 
 @Composable
 private fun LiveTab(match: MatchDetail) {
     LiveScorePanel(match)
-    CurrentBattingCard(match.currentBatters)
-    PartnershipCard()
+    LastSixBalls(match)
+    CurrentBattingCard(match.currentBatters, match.playerNamesLoading)
+    CurrentBowlingCard(match)
+    PartnershipCard(match)
     LiveKeyStats(match)
-    CurrentBowlingCard()
-    LastSixBalls()
     WinPredictorPanel(match)
 }
 
@@ -887,11 +1277,11 @@ private fun LiveRateChip(label: String, value: String) {
 @Composable
 private fun LiveKeyStats(match: MatchDetail) {
     SectionPanel("KEY STATS") {
-        LiveStatLine("Partnership", "38 (26)")
+        LiveStatLine("Partnership", "${match.currentPartnership.runs} (${match.currentPartnership.balls})")
         ThinRule()
-        LiveStatLine("Last wicket", "R. Singh c deep mid-wicket b K. Roy - 28 (21)")
+        LiveStatLine("Last wicket", match.lastWicket)
         ThinRule()
-        LiveStatLine("Last 5 overs", "43 runs, 2 wickets")
+        LiveStatLine("Last 5 overs", match.lastFiveOvers)
         ThinRule()
         if (match.tossInfo.isNotBlank()) LiveStatLine("Toss", match.tossInfo)
     }
@@ -978,55 +1368,71 @@ private fun ScorecardTab(match: MatchDetail) {
     
     Spacer(Modifier.height(14.dp))
 
-    if (selectedTeamTab == 0) {
-        SectionPanel("${match.leftName} BATTING") {
-            TableHeader("BATTER", "R", "B", "SR")
-            ThinRule()
-            ScoreLine("A. Kumar", "54", "31", "174.1", Accent)
-            ThinRule()
-            ScoreLine("R. Singh", "28", "21", "133.3", Color.White)
-            ThinRule()
-            ScoreLine("M. Das", "17", "12", "141.6", Color.White)
-        }
-        Spacer(Modifier.height(14.dp))
-        SectionPanel("${match.rightName} BOWLING") {
-            TableHeader("BOWLER", "O", "R", "W")
-            ThinRule()
-            ScoreLine("K. Roy", "4.0", "29", "2", CyanLine)
-            ThinRule()
-            ScoreLine("D. Sen", "3.4", "26", "1", Color.White)
-            ThinRule()
-            ScoreLine("P. Malik", "4.0", "34", "1", Color.White)
+    val isLeftTeam = selectedTeamTab == 0
+    val battingName = if (isLeftTeam) match.leftName else match.rightName
+    val bowlingName = if (isLeftTeam) match.rightName else match.leftName
+    val battingTeamId = if (isLeftTeam) match.leftTeamId else match.rightTeamId
+    val bowlingTeamId = if (isLeftTeam) match.rightTeamId else match.leftTeamId
+    val displayedScore = if (isLeftTeam) match.leftScore else match.rightScore
+    val displayedOvers = if (isLeftTeam) match.leftOvers else match.rightOvers
+    val hasBatted = battingTeamId.isNotBlank() && battingTeamId in match.battedTeamIds ||
+        displayedScore != "—" && displayedOvers.isNotBlank()
+    if (!hasBatted) {
+        SectionPanel("$battingName BATTING") {
+            Text(
+                "This team has not started batting.",
+                color = SoftText,
+                fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp, horizontal = 8.dp),
+                textAlign = TextAlign.Center
+            )
         }
     } else {
-        SectionPanel("${match.rightName} BATTING") {
-            TableHeader("BATTER", "R", "B", "SR")
+        SectionPanel("$battingName BATTING") {
+            PlayerTableHeader("BATTER", listOf("R", "B", "4S", "6S", "SR"))
             ThinRule()
-            ScoreLine("P. Patel", "42", "28", "150.0", Accent)
-            ThinRule()
-            ScoreLine("S. Yadav", "31", "24", "129.1", Color.White)
-            ThinRule()
-            ScoreLine("K. Sharma", "12", "9", "133.3", Color.White)
+            val battingRows = match.scorecardBatting[battingTeamId].orEmpty()
+            if (battingRows.isEmpty()) {
+                Text("No batting figures recorded yet.", color = SoftText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp))
+            } else {
+                battingRows.forEachIndexed { index, row ->
+                    if (index > 0) ThinRule()
+                    BatterTableRow(
+                        name = row.name,
+                        runs = row.runs.toString(),
+                        balls = row.balls.toString(),
+                        fours = row.fours.toString(),
+                        sixes = row.sixes.toString(),
+                        sr = row.strikeRate,
+                        active = row.active,
+                        nameLoading = match.playerNamesLoading && row.name == "Player"
+                    )
+                }
+            }
         }
         Spacer(Modifier.height(14.dp))
-        SectionPanel("${match.leftName} BOWLING") {
+        SectionPanel("$bowlingName BOWLING") {
             TableHeader("BOWLER", "O", "R", "W")
             ThinRule()
-            ScoreLine("J. Bumrah", "4.0", "24", "2", CyanLine)
-            ThinRule()
-            ScoreLine("M. Siraj", "3.1", "30", "1", Color.White)
-            ThinRule()
-            ScoreLine("H. Pandya", "4.0", "38", "1", Color.White)
+            val bowlingRows = match.scorecardBowling[bowlingTeamId].orEmpty()
+            if (bowlingRows.isEmpty()) {
+                Text("No bowling figures recorded yet.", color = SoftText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp))
+            } else {
+                bowlingRows.forEachIndexed { index, row ->
+                    if (index > 0) ThinRule()
+                    ScoreLine(row.name, row.overs, row.runs.toString(), row.wickets.toString(), if (index == 0) CyanLine else Color.White, match.playerNamesLoading && row.name == "Player")
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun SummaryTab(match: MatchDetail) {
-    LastSixBalls()
-    CurrentBattingCard(match.currentBatters)
-    PartnershipCard()
-    CurrentBowlingCard()
+    LastSixBalls(match)
+    CurrentBattingCard(match.currentBatters, match.playerNamesLoading)
+    PartnershipCard(match)
+    CurrentBowlingCard(match)
     RunWormPanel(match)
     MatchInsights(match)
     FallOfWicketsPremium()
@@ -1090,36 +1496,43 @@ private fun TwoColumnStats(title: String, stats: List<Pair<String, String>>) {
 }
 
 @Composable
-private fun LastSixBalls() {
+private fun LastSixBalls(match: MatchDetail) {
     SectionPanel("LAST 6 BALLS") {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp), verticalAlignment = Alignment.CenterVertically) {
-            listOf("6", "1", "4", "W", "2", ".").forEachIndexed { index, ball ->
-                BallBubble(ball = ball, index = index)
+        if (match.lastSixBalls.isEmpty()) {
+            Text("Ball outcomes will appear when live scoring begins.", color = SoftText, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp))
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                match.lastSixBalls.forEachIndexed { index, outcome ->
+                    BallBubble(outcome = outcome, isLatest = index == match.lastSixBalls.lastIndex)
+                }
+                Spacer(Modifier.weight(1f))
+                val ballsBowled = match.ballsBowled
+                val overLabel = ballsBowled?.let { "${it / 6}.${it % 6} OV" } ?: "— OV"
+                Text(overLabel, color = SoftText, fontSize = 9.5.sp, fontWeight = FontWeight.Black)
             }
-            Spacer(Modifier.weight(1f))
-            Text("18.4 OV", color = SoftText, fontSize = 9.5.sp, fontWeight = FontWeight.Black)
         }
     }
 }
 
 @Composable
-private fun BallBubble(ball: String, index: Int) {
+private fun BallBubble(outcome: BallOutcome, isLatest: Boolean) {
+    val ball = outcome.label
     val scale by animateFloatAsState(
-        targetValue = if (index == 0) 1.08f else 1f,
+        targetValue = if (isLatest) 1.08f else 1f,
         animationSpec = tween(420),
         label = "ballEntry"
     )
-    val colors = when (ball) {
+    val colors = when (outcome.kind) {
         "6" -> listOf(Accent, Color(0xFF7BFF2B))
         "4" -> listOf(Color(0xFF8EEA42), Color(0xFF16B85E))
         "W" -> listOf(Color(0xFFFF5F6D), Color(0xFF99001E))
         "." -> listOf(Color(0xFF30383D), Color(0xFF11171B))
         else -> listOf(Color(0xFF40484E), Color(0xFF1A2227))
     }
-    val textColor = if (ball == "6" || ball == "4") ScreenBg else Color.White
+    val textColor = if (outcome.kind == "6" || outcome.kind == "4") ScreenBg else Color.White
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(40.dp)
             .graphicsLayer(scaleX = scale, scaleY = scale)
             .shadow(12.dp, CircleShape, clip = false)
             .clip(CircleShape)
@@ -1127,12 +1540,12 @@ private fun BallBubble(ball: String, index: Int) {
             .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        Text(ball, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        Text(ball, color = textColor, fontSize = if (ball.length > 1) 10.sp else 14.sp, fontWeight = FontWeight.Black)
     }
 }
 
 @Composable
-private fun CurrentBattingCard(batters: List<CurrentBatter>) {
+private fun CurrentBattingCard(batters: List<CurrentBatter>, namesLoading: Boolean) {
     SectionPanel("CURRENT BATTING") {
         PlayerTableHeader("BATTER", listOf("R", "B", "4S", "6S", "SR"))
         ThinRule()
@@ -1148,7 +1561,8 @@ private fun CurrentBattingCard(batters: List<CurrentBatter>) {
                     fours = batter.fours.toString(),
                     sixes = batter.sixes.toString(),
                     sr = batter.strikeRate,
-                    active = batter.isStriker
+                    active = batter.isStriker,
+                    nameLoading = namesLoading && batter.name == "Player"
                 )
             }
         }
@@ -1173,7 +1587,7 @@ private fun PlayerTableHeader(first: String, columns: List<String>) {
 }
 
 @Composable
-private fun BatterTableRow(name: String, runs: String, balls: String, fours: String, sixes: String, sr: String, active: Boolean) {
+private fun BatterTableRow(name: String, runs: String, balls: String, fours: String, sixes: String, sr: String, active: Boolean, nameLoading: Boolean = false) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.985f else 1f, label = "batterRowPress")
@@ -1187,15 +1601,10 @@ private fun BatterTableRow(name: String, runs: String, balls: String, fours: Str
             .padding(horizontal = 10.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            name,
-            color = if (active) Accent else Color(0xFFE4ECE8),
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Black,
-            fontStyle = FontStyle.Italic,
-            modifier = Modifier.weight(1.9f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+        if (nameLoading) PlayerNameSkeleton(Modifier.weight(1.9f)) else Text(
+            name, color = if (active) Accent else Color(0xFFE4ECE8), fontSize = 14.sp,
+            fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic,
+            modifier = Modifier.weight(1.9f), maxLines = 1, overflow = TextOverflow.Ellipsis
         )
         listOf(runs, balls, fours, sixes, sr).forEachIndexed { index, value ->
             Text(
@@ -1211,31 +1620,38 @@ private fun BatterTableRow(name: String, runs: String, balls: String, fours: Str
 }
 
 @Composable
-private fun PartnershipCard() {
+private fun PartnershipCard(match: MatchDetail) {
+    val partnership = match.currentPartnership
+    val firstBatter = match.currentBatters.getOrNull(0)
+    val secondBatter = match.currentBatters.getOrNull(1)
+    val batterRuns = partnership.firstBatterRuns + partnership.secondBatterRuns
+    val firstShare = if (batterRuns == 0) 0.5f else partnership.firstBatterRuns.toFloat() / batterRuns
+    val firstPercent = if (batterRuns == 0) 0 else partnership.firstBatterRuns * 100 / batterRuns
+    val secondPercent = if (batterRuns == 0) 0 else 100 - firstPercent
     SectionPanel("CURRENT PARTNERSHIP") {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("52", color = Accent, fontSize = 31.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic)
+                Text(partnership.runs.toString(), color = Accent, fontSize = 31.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic)
                 Text("RUNS", color = SoftText, fontSize = 8.5.sp, fontWeight = FontWeight.Black)
             }
             Spacer(Modifier.width(10.dp))
-            Text("(31 BALLS)", color = Color.White.copy(alpha = 0.72f), fontSize = 10.5.sp, fontWeight = FontWeight.Black)
+            Text("(${partnership.balls} BALLS)", color = Color.White.copy(alpha = 0.72f), fontSize = 10.5.sp, fontWeight = FontWeight.Black)
             Spacer(Modifier.weight(1f))
-            Text("RR 10.06", color = SoftText, fontSize = 9.5.sp, fontWeight = FontWeight.Black)
+            Text("RR ${partnership.runRate}", color = SoftText, fontSize = 9.5.sp, fontWeight = FontWeight.Black)
         }
         Spacer(Modifier.height(16.dp))
-        ContributionBar(leftFraction = 0.65f)
+        ContributionBar(leftFraction = firstShare)
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth()) {
-            Text("A. Kumar 65%", color = Accent, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
-            Text("R. Singh 35%", color = Color(0xFFD7E2DF), fontSize = 9.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+            Text("${firstBatter?.name ?: "—"} $firstPercent%", color = Accent, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${secondBatter?.name ?: "—"} $secondPercent%", color = Color(0xFFD7E2DF), fontSize = 9.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.End, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.height(14.dp))
-        PartnershipRate()
+        PartnershipRate(partnership.runRate)
         Spacer(Modifier.height(14.dp))
         Row(Modifier.fillMaxWidth()) {
-            PartnershipPlayer("A. Kumar", "34 (20)", Modifier.weight(1f), alignEnd = false)
-            PartnershipPlayer("R. Singh", "14 (11)", Modifier.weight(1f), alignEnd = true)
+            PartnershipPlayer(firstBatter?.name ?: "—", "${partnership.firstBatterRuns} (${partnership.firstBatterBalls})", Modifier.weight(1f), alignEnd = false)
+            PartnershipPlayer(secondBatter?.name ?: "—", "${partnership.secondBatterRuns} (${partnership.secondBatterBalls})", Modifier.weight(1f), alignEnd = true)
         }
     }
 }
@@ -1275,7 +1691,7 @@ private fun ContributionBar(leftFraction: Float) {
 }
 
 @Composable
-private fun PartnershipRate() {
+private fun PartnershipRate(rate: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1288,7 +1704,7 @@ private fun PartnershipRate() {
     ) {
         Column(Modifier.weight(1f)) {
             Text("RATE VISUAL", color = SoftText, fontSize = 7.5.sp, fontWeight = FontWeight.Black)
-            Text("10.06 RPO", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black)
+            Text("$rate RPO", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black)
         }
         repeat(8) { index ->
             val height = (16 + index * 4).dp
@@ -1305,18 +1721,29 @@ private fun PartnershipRate() {
 }
 
 @Composable
-private fun CurrentBowlingCard() {
+private fun CurrentBowlingCard(match: MatchDetail) {
     SectionPanel("CURRENT BOWLING") {
         PlayerTableHeader("BOWLER", listOf("O", "M", "R", "W", "ECN"))
         ThinRule()
-        BowlerTableRow("J. Hazlewood", "3.0", "0", "22", "2", "7.33")
-        ThinRule()
-        BowlerTableRow("R. Khan", "4.0", "0", "31", "1", "7.75")
+        val bowler = match.currentBowling
+        if (bowler == null) {
+            Text("Bowling figures will appear when live scoring begins.", color = SoftText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 12.dp, horizontal = 10.dp))
+        } else {
+            BowlerTableRow(
+                bowler.name,
+                bowler.overs,
+                bowler.maidens.toString(),
+                bowler.runs.toString(),
+                bowler.wickets.toString(),
+                bowler.economy,
+                nameLoading = match.playerNamesLoading && bowler.name == "Player"
+            )
+        }
     }
 }
 
 @Composable
-private fun BowlerTableRow(name: String, overs: String, maidens: String, runs: String, wickets: String, economy: String) {
+private fun BowlerTableRow(name: String, overs: String, maidens: String, runs: String, wickets: String, economy: String, nameLoading: Boolean = false) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.985f else 1f, label = "bowlerRowPress")
@@ -1330,7 +1757,7 @@ private fun BowlerTableRow(name: String, overs: String, maidens: String, runs: S
             .padding(horizontal = 10.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(name, color = if (wickets.toIntOrNull() ?: 0 >= 2) CyanLine else Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic, modifier = Modifier.weight(1.9f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (nameLoading) PlayerNameSkeleton(Modifier.weight(1.9f)) else Text(name, color = if (wickets.toIntOrNull() ?: 0 >= 2) CyanLine else Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic, modifier = Modifier.weight(1.9f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         listOf(overs, maidens, runs, wickets, economy).forEachIndexed { index, value ->
             Text(value, color = if (index == 3) Accent else Color(0xFFD9E0DD), fontSize = if (index == 4) 11.sp else 12.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.End, modifier = Modifier.weight(0.62f))
         }
@@ -1650,13 +2077,38 @@ private fun TableHeader(first: String, second: String, third: String, fourth: St
 }
 
 @Composable
-private fun ScoreLine(name: String, a: String, b: String, c: String, color: Color) {
+private fun ScoreLine(name: String, a: String, b: String, c: String, color: Color, nameLoading: Boolean = false) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(name, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.9f))
+        if (nameLoading) PlayerNameSkeleton(Modifier.weight(1.9f))
+        else Text(name, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.9f))
         listOf(a, b, c).forEach {
             Text(it, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End, modifier = Modifier.weight(0.7f))
         }
     }
+}
+
+@Composable
+private fun PlayerNameSkeleton(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "playerNameSkeleton")
+    val progress by transition.animateFloat(
+        initialValue = -110f,
+        targetValue = 150f,
+        animationSpec = infiniteRepeatable(animation = tween(950), repeatMode = RepeatMode.Restart),
+        label = "playerNameShimmer"
+    )
+    Box(
+        modifier = modifier
+            .padding(end = 16.dp)
+            .height(13.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(Color.White.copy(alpha = 0.08f), Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.08f)),
+                    start = Offset(progress, 0f),
+                    end = Offset(progress + 110f, 20f)
+                )
+            )
+    )
 }
 
 @Composable

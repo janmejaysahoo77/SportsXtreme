@@ -183,7 +183,17 @@
             android:exported="false" />
         <activity
             android:name=".presentation.scoring.ScorecardActivity"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="sportsxtreme-95fbb.web.app"
+                    android:pathPrefix="/scorecard" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".presentation.scoring.ViewAllScoreCardActivity"
             android:exported="false" />
