@@ -893,6 +893,10 @@ private fun MatchActions(modifier: Modifier, onSchedule: () -> Unit, onStart: ()
 private fun TeamsTab(tournament: Tournament?) {
     val context = LocalContext.current
     var isCreatingInvite by remember { mutableStateOf(false) }
+    var isAddingTeamId by remember { mutableStateOf<String?>(null) }
+    var showAddTeamsMenu by remember { mutableStateOf(false) }
+    var showManualTeamPicker by remember { mutableStateOf(false) }
+    var availableTeams by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var joinedTeams by remember(tournament?.id) { mutableStateOf(emptyList<TournamentJoinedTeam>()) }
     DisposableEffect(tournament?.id) {
         val tournamentId = tournament?.id.orEmpty()
@@ -907,6 +911,22 @@ private fun TeamsTab(tournament: Tournament?) {
                         captainUserId = document.getString("captainUserId").orEmpty()
                     )
                 }.sortedBy { it.name.lowercase() }
+            }
+        onDispose { registration.remove() }
+    }
+    val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    DisposableEffect(currentUserId) {
+        if (currentUserId.isBlank()) return@DisposableEffect onDispose { }
+        val registration = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            .collection("teams")
+            .whereArrayContains("memberIds", currentUserId)
+            .addSnapshotListener { snapshots, _ ->
+                availableTeams = snapshots?.documents.orEmpty().mapNotNull { document ->
+                    val name = document.getString("teamName")?.trim().orEmpty()
+                        .ifBlank { document.getString("name")?.trim().orEmpty() }
+                        .ifBlank { "Team" }
+                    document.id to name
+                }.sortedBy { it.second.lowercase() }
             }
         onDispose { registration.remove() }
     }
@@ -933,6 +953,25 @@ private fun TeamsTab(tournament: Tournament?) {
                 Toast.makeText(context, error.message ?: "Unable to create invitation", Toast.LENGTH_LONG).show()
             }
     }
+    fun addTeamManually(teamId: String, teamName: String) {
+        val tournamentId = tournament?.id.orEmpty()
+        if (tournamentId.isBlank()) {
+            Toast.makeText(context, "Tournament is still loading", Toast.LENGTH_SHORT).show()
+            return
+        }
+        isAddingTeamId = teamId
+        FirebaseFunctions.getInstance().getHttpsCallable("addTournamentTeamManually")
+            .call(mapOf("tournamentId" to tournamentId, "teamId" to teamId))
+            .addOnSuccessListener {
+                isAddingTeamId = null
+                showManualTeamPicker = false
+                Toast.makeText(context, "$teamName added to tournament", Toast.LENGTH_SHORT).show()
+            }
+            .addOnFailureListener { error ->
+                isAddingTeamId = null
+                Toast.makeText(context, error.message ?: "Unable to add team", Toast.LENGTH_LONG).show()
+            }
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -942,8 +981,37 @@ private fun TeamsTab(tournament: Tournament?) {
                 Text("Teams", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
                 Text("Build your lineup before fixtures begin", color = FinalMuted, fontSize = 12.sp)
             }
-            Box(Modifier.clip(RoundedCornerShape(20.dp)).background(FinalAccent.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
-                Text("${joinedTeams.size} TEAMS", color = FinalAccent, fontSize = 11.sp, fontWeight = FontWeight.Black)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Box(Modifier.clip(RoundedCornerShape(20.dp)).background(FinalAccent.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
+                    Text("${joinedTeams.size} TEAMS", color = FinalAccent, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                }
+                if (joinedTeams.isNotEmpty()) {
+                    Box {
+                        Row(
+                            Modifier.shadow(10.dp, RoundedCornerShape(14.dp), ambientColor = FinalAccent, spotColor = FinalAccent)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(FinalAccent)
+                                .clickable { showAddTeamsMenu = true }
+                                .padding(horizontal = 11.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Text("+", color = Color(0xFF101604), fontSize = 18.sp, fontWeight = FontWeight.Black, lineHeight = 18.sp)
+                            Text("ADD TEAMS", color = Color(0xFF101604), fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = .3.sp)
+                        }
+                        DropdownMenu(expanded = showAddTeamsMenu, onDismissRequest = { showAddTeamsMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("SHARE INVITE LINK") },
+                                onClick = { showAddTeamsMenu = false; shareInvite() },
+                                enabled = !isCreatingInvite
+                            )
+                            DropdownMenuItem(
+                                text = { Text("ADD TEAM MANUALLY") },
+                                onClick = { showAddTeamsMenu = false; showManualTeamPicker = true }
+                            )
+                        }
+                    }
+                }
             }
         }
         Spacer(Modifier.height(18.dp))
@@ -960,7 +1028,7 @@ private fun TeamsTab(tournament: Tournament?) {
             }
         }
         Spacer(Modifier.height(12.dp))
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(FinalPanel).padding(horizontal = 20.dp, vertical = 26.dp), contentAlignment = Alignment.Center) {
+        if (joinedTeams.isEmpty()) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(FinalPanel).padding(horizontal = 20.dp, vertical = 26.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.size(84.dp).clip(CircleShape).background(FinalAccent.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
                     Text("01", color = FinalAccent, fontSize = 26.sp, fontWeight = FontWeight.Black)
@@ -972,8 +1040,36 @@ private fun TeamsTab(tournament: Tournament?) {
                 Spacer(Modifier.height(24.dp))
                 FinalActionButton(if (isCreatingInvite) "CREATING LINK…" else "SHARE INVITE LINK", filled = true, enabled = !isCreatingInvite, onClick = ::shareInvite)
                 Text("OR", color = Color(0xFF65718A), fontSize = 11.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(vertical = 17.dp))
-                FinalActionButton("ADD A TEAM MANUALLY", filled = false)
+                FinalActionButton("ADD A TEAM MANUALLY", filled = false, onClick = { showManualTeamPicker = true })
             }
+        }
+        if (showManualTeamPicker) {
+            AlertDialog(
+                onDismissRequest = { if (isAddingTeamId == null) showManualTeamPicker = false },
+                title = { Text("ADD A TEAM MANUALLY", color = Color.White, fontWeight = FontWeight.Black) },
+                text = {
+                    val teamsToAdd = availableTeams.filterNot { (teamId, _) -> joinedTeams.any { it.id == teamId } }
+                    if (teamsToAdd.isEmpty()) {
+                        Text("No teams are available to add.", color = FinalMuted)
+                    } else {
+                        Column(Modifier.height(240.dp).verticalScroll(rememberScrollState())) {
+                            teamsToAdd.forEach { (teamId, teamName) ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable(enabled = isAddingTeamId == null) {
+                                        addTeamManually(teamId, teamName)
+                                    }.padding(vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(teamName, color = Color.White, modifier = Modifier.weight(1f))
+                                    Text(if (isAddingTeamId == teamId) "ADDING…" else "ADD", color = FinalAccent, fontWeight = FontWeight.Black, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = { Text("CLOSE", color = FinalAccent, modifier = Modifier.clickable { if (isAddingTeamId == null) showManualTeamPicker = false }.padding(12.dp)) },
+                containerColor = FinalPanel
+            )
         }
         Spacer(Modifier.height(20.dp))
         Text("You can edit teams and players anytime before\npublishing the tournament.", color = FinalMuted, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 17.sp)

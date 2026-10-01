@@ -176,6 +176,45 @@ exports.createTournamentInvite = onCall(async (request) => {
   throw new HttpsError("internal", "Unable to create a unique invitation. Please try again.");
 });
 
+/** Lets the tournament organiser register one of their teams without an invite link. */
+exports.addTournamentTeamManually = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before adding a team.");
+  const tournamentId = requireTeamId(request.data?.tournamentId);
+  const teamId = requireTeamId(request.data?.teamId);
+  const tournamentRef = db.collection("tournaments").doc(tournamentId);
+  const teamRef = db.collection("teams").doc(teamId);
+  const entryRef = tournamentRef.collection("teams").doc(teamId);
+
+  return db.runTransaction(async (transaction) => {
+    const tournament = await transaction.get(tournamentRef);
+    const team = await transaction.get(teamRef);
+    const existingEntry = await transaction.get(entryRef);
+    if (!tournament.exists) throw new HttpsError("not-found", "Tournament not found.");
+    if (tournament.get("hostUid") !== request.auth.uid) {
+      throw new HttpsError("permission-denied", "Only the tournament organiser can add teams manually.");
+    }
+    if (!team.exists) throw new HttpsError("not-found", "Team not found.");
+    if (existingEntry.exists) return { tournamentId, teamId, alreadyJoined: true };
+
+    const maxTeams = Number.parseInt(String(tournament.get("requirements")?.numberOfTeams || ""), 10);
+    const teamIds = Array.isArray(tournament.get("teamIds")) ? tournament.get("teamIds") : [];
+    if (Number.isFinite(maxTeams) && maxTeams > 0 && teamIds.length >= maxTeams) {
+      throw new HttpsError("failed-precondition", "This tournament has reached its team limit.");
+    }
+    const teamName = String(team.get("teamName") || team.get("name") || "Team").trim() || "Team";
+    transaction.create(entryRef, {
+      teamId,
+      teamName,
+      captainUserId: request.auth.uid,
+      manuallyAdded: true,
+      addedBy: request.auth.uid,
+      joinedAt: FieldValue.serverTimestamp()
+    });
+    transaction.update(tournamentRef, { teamIds: FieldValue.arrayUnion(teamId), updatedAtEpochMs: Date.now() });
+    return { tournamentId, teamId, teamName, alreadyJoined: false };
+  });
+});
+
 /** Deletes a tournament and its nested entries after verifying the organiser. */
 exports.deleteTournament = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before deleting a tournament.");
