@@ -34,7 +34,9 @@ class FirebaseFirestoreUserDataSource(
             if (profile.phoneNumber.isNotBlank()) {
                 payload["phoneNumber"] = profile.phoneNumber
             }
-            profile.profilePhotoUrl?.let { payload["profilePhotoUrl"] = it }
+            // The Firestore value may have been changed after sign-in (for example by a
+            // Cloudinary profile-photo upload). Do not overwrite it with the Auth photo
+            // whenever the profile is refreshed.
 
             document
                 .set(payload, SetOptions.merge())
