@@ -627,7 +627,9 @@ private fun Avatar(
                 .border(4.dp, Gold, CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            val photoModel = previewUri ?: photoUrl?.withProfilePhotoRefreshKey(profilePhotoRefreshKey)
+            val photoModel = previewUri ?: photoUrl
+                ?.takeIf { it.isNotBlank() }
+                ?.withProfilePhotoRefreshKey(profilePhotoRefreshKey)
             if (photoModel == null) {
                 Canvas(Modifier.size(104.dp)) {
                     drawCircle(Color(0xFFE9F2F4), radius = size.minDimension * 0.22f, center = center.copy(y = size.height * 0.28f))
