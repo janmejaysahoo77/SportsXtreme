@@ -1,8 +1,11 @@
 package com.example.sportsxtreme.presentation.profile
 
 import android.os.Bundle
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -40,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -59,6 +63,7 @@ import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
+import com.example.sportsxtreme.data.remote.cloudinary.CloudinaryProfilePhotoUploader
 import com.example.sportsxtreme.domain.model.User
 import com.example.sportsxtreme.domain.model.PendingUserProfile
 import com.example.sportsxtreme.domain.model.UserProfile
@@ -66,6 +71,8 @@ import com.example.sportsxtreme.domain.model.UserProfileSettings
 import com.example.sportsxtreme.domain.model.UserProfileStats
 import com.example.sportsxtreme.domain.usecase.AuthUseCases
 import kotlinx.coroutines.launch
+import coil3.compose.AsyncImage
+import androidx.compose.ui.platform.LocalContext
 
 internal val XtremeBg = Color(0xFF010407)
 internal val Card = Color(0xFF0C1419)
@@ -81,6 +88,8 @@ private data class ProfileUiState(
     val profile: UserProfile = fallbackProfile(),
     val stats: UserProfileStats = UserProfileStats(userId = ""),
     val settings: UserProfileSettings = UserProfileSettings(userId = ""),
+    val profilePhotoPreviewUri: Uri? = null,
+    val profilePhotoRefreshKey: Long = 0L,
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
     val infoMessage: String? = null,
@@ -101,6 +110,13 @@ private enum class ProfileEditSection(val title: String) {
 
 class ProfileActivity : ComponentActivity() {
 
+    private var selectedProfilePhotoUri by mutableStateOf<Uri?>(null)
+    private val profilePhotoPicker = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        selectedProfilePhotoUri = uri
+    }
+
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -111,7 +127,16 @@ class ProfileActivity : ComponentActivity() {
         setContent {
             ProfileScreen(
                 useCases = AuthDependencies.authUseCases(),
-                onBack = { finish() }
+                onBack = { finish() },
+                selectedPhotoUri = selectedProfilePhotoUri,
+                onPhotoHandled = { selectedProfilePhotoUri = null },
+                onPickPhoto = {
+                    profilePhotoPicker.launch(
+                        PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
+                    )
+                }
             )
         }
     }
@@ -119,15 +144,65 @@ class ProfileActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProfileScreen(useCases: AuthUseCases, onBack: () -> Unit) {
+private fun ProfileScreen(
+    useCases: AuthUseCases,
+    onBack: () -> Unit,
+    selectedPhotoUri: Uri?,
+    onPhotoHandled: () -> Unit,
+    onPickPhoto: () -> Unit
+) {
     var uiState by remember { mutableStateOf(ProfileUiState()) }
     var activeEditSection by remember { mutableStateOf<ProfileEditSection?>(null) }
     var draftProfile by remember { mutableStateOf(uiState.profile) }
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         uiState = loadProfileUiState(useCases)
+    }
+
+    LaunchedEffect(selectedPhotoUri) {
+        val photoUri = selectedPhotoUri ?: return@LaunchedEffect
+        if (uiState.profile.id.isBlank()) {
+            onPhotoHandled()
+            return@LaunchedEffect
+        }
+        uiState = uiState.copy(
+            profilePhotoPreviewUri = photoUri,
+            isSaving = true,
+            infoMessage = null,
+            errorMessage = null
+        )
+        val uploadResult = CloudinaryProfilePhotoUploader(context.applicationContext).upload(photoUri)
+        val photoUrl = uploadResult.getOrElse { error ->
+            uiState = uiState.copy(
+                profilePhotoPreviewUri = null,
+                isSaving = false,
+                errorMessage = error.message ?: "Could not upload profile photo."
+            )
+            onPhotoHandled()
+            return@LaunchedEffect
+        }
+        val updatedProfile = uiState.profile.copy(profilePhotoUrl = photoUrl)
+        uiState = when (useCases.updateUserProfile(updatedProfile)) {
+            is Resource.Success -> uiState.copy(
+                profile = updatedProfile,
+                // Cloudinary can overwrite a stable public ID. Bump the displayed URL so
+                // Coil renders the newly uploaded image instead of an existing cache entry.
+                profilePhotoRefreshKey = System.currentTimeMillis(),
+                isSaving = false,
+                infoMessage = "Profile photo updated.",
+                errorMessage = null
+            )
+            is Resource.Error -> uiState.copy(
+                profilePhotoPreviewUri = null,
+                isSaving = false,
+                errorMessage = "Photo uploaded, but its profile link could not be saved."
+            )
+            is Resource.Loading -> uiState.copy(isSaving = true)
+        }
+        onPhotoHandled()
     }
 
     Surface(color = XtremeBg, modifier = Modifier.fillMaxSize()) {
@@ -149,7 +224,14 @@ private fun ProfileScreen(useCases: AuthUseCases, onBack: () -> Unit) {
                         ProfileStatusLine(uiState)
                     }
                     Spacer(Modifier.height(10.dp))
-                    HeroProfileCard(uiState.profile, uiState.stats)
+                    HeroProfileCard(
+                        profile = uiState.profile,
+                        stats = uiState.stats,
+                        profilePhotoPreviewUri = uiState.profilePhotoPreviewUri,
+                        profilePhotoRefreshKey = uiState.profilePhotoRefreshKey,
+                        editEnabled = !uiState.isSaving,
+                        onEditAvatar = onPickPhoto
+                    )
                     Spacer(Modifier.height(14.dp))
                     HostedSummary(uiState.profile)
                     Spacer(Modifier.height(18.dp))
@@ -451,7 +533,14 @@ private fun TopIcon(text: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun HeroProfileCard(profile: UserProfile, stats: UserProfileStats) {
+private fun HeroProfileCard(
+    profile: UserProfile,
+    stats: UserProfileStats,
+    profilePhotoPreviewUri: Uri?,
+    profilePhotoRefreshKey: Long,
+    editEnabled: Boolean,
+    onEditAvatar: () -> Unit
+) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -486,7 +575,13 @@ private fun HeroProfileCard(profile: UserProfile, stats: UserProfileStats) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
             Text("SPORTSXTREME PLAYER PASS", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(15.dp))
-            Avatar()
+            Avatar(
+                photoUrl = profile.profilePhotoUrl,
+                previewUri = profilePhotoPreviewUri,
+                profilePhotoRefreshKey = profilePhotoRefreshKey,
+                editEnabled = editEnabled,
+                onEditAvatar = onEditAvatar
+            )
             Spacer(Modifier.height(16.dp))
             Text(profile.name, color = Platinum, fontSize = 27.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
             Text(
@@ -516,7 +611,13 @@ private fun HeroProfileCard(profile: UserProfile, stats: UserProfileStats) {
 }
 
 @Composable
-private fun Avatar() {
+private fun Avatar(
+    photoUrl: String?,
+    previewUri: Uri?,
+    profilePhotoRefreshKey: Long,
+    editEnabled: Boolean,
+    onEditAvatar: () -> Unit
+) {
     Box(contentAlignment = Alignment.BottomEnd) {
         Box(
             modifier = Modifier
@@ -526,16 +627,42 @@ private fun Avatar() {
                 .border(4.dp, Gold, CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Canvas(Modifier.size(104.dp)) {
-                drawCircle(Color(0xFFE9F2F4), radius = size.minDimension * 0.22f, center = center.copy(y = size.height * 0.28f))
-                drawCircle(Color(0xFF26323B), radius = size.minDimension * 0.31f, center = center.copy(y = size.height * 0.7f))
-                drawArc(Color(0xFFE93B38), 205f, 130f, false, style = Stroke(width = 10f, cap = StrokeCap.Round))
-                drawArc(Lime, 18f, 68f, false, style = Stroke(width = 7f, cap = StrokeCap.Round))
-                drawLine(Gold, Offset(size.width * 0.23f, size.height * 0.86f), Offset(size.width * 0.8f, size.height * 0.36f), strokeWidth = 6f, cap = StrokeCap.Round)
+            val photoModel = previewUri ?: photoUrl?.withProfilePhotoRefreshKey(profilePhotoRefreshKey)
+            if (photoModel == null) {
+                Canvas(Modifier.size(104.dp)) {
+                    drawCircle(Color(0xFFE9F2F4), radius = size.minDimension * 0.22f, center = center.copy(y = size.height * 0.28f))
+                    drawCircle(Color(0xFF26323B), radius = size.minDimension * 0.31f, center = center.copy(y = size.height * 0.7f))
+                    drawArc(Color(0xFFE93B38), 205f, 130f, false, style = Stroke(width = 10f, cap = StrokeCap.Round))
+                    drawArc(Lime, 18f, 68f, false, style = Stroke(width = 7f, cap = StrokeCap.Round))
+                    drawLine(Gold, Offset(size.width * 0.23f, size.height * 0.86f), Offset(size.width * 0.8f, size.height * 0.36f), strokeWidth = 6f, cap = StrokeCap.Round)
+                }
+            } else {
+                AsyncImage(
+                    model = photoModel,
+                    contentDescription = "Profile photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
         Box(
             modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(if (editEnabled) Lime else SoftText)
+                .border(2.dp, XtremeBg, CircleShape)
+                .clickable(enabled = editEnabled, onClick = onEditAvatar),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(R.drawable.baseline_edit_24),
+                contentDescription = "Change profile photo",
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
                 .clip(RoundedCornerShape(30.dp))
                 .background(Brush.horizontalGradient(listOf(Platinum, Gold)))
                 .border(1.dp, Color(0x66101416), RoundedCornerShape(30.dp))
@@ -544,6 +671,11 @@ private fun Avatar() {
             Text("PRO", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Black)
         }
     }
+}
+
+private fun String.withProfilePhotoRefreshKey(refreshKey: Long): String {
+    if (refreshKey == 0L) return this
+    return "$this${if (contains("?")) "&" else "?"}profile_updated=$refreshKey"
 }
 
 @Composable

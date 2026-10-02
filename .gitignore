@@ -16,3 +16,4 @@ local.properties
 
 .gradle-local/
 functions/node_modules/
+functions/.secret.local

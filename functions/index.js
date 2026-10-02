@@ -3,6 +3,7 @@ const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { HttpsError, onCall } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 
 initializeApp();
 
@@ -13,6 +14,36 @@ const TEAM_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TOURNAMENT_INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_TEAM_MEMBERS = 18;
 const ROLES = Object.freeze({ ADMIN: "ADMIN", CAPTAIN: "CAPTAIN", VICE_CAPTAIN: "VICE_CAPTAIN" });
+const cloudinaryCloudName = defineSecret("CLOUDINARY_CLOUD_NAME");
+const cloudinaryApiKey = defineSecret("CLOUDINARY_API_KEY");
+const cloudinaryApiSecret = defineSecret("CLOUDINARY_API_SECRET");
+
+/**
+ * Signs one deterministic Cloudinary profile-photo upload for the calling user.
+ * The API secret never leaves Firebase Functions or the user's device.
+ */
+exports.createProfilePhotoUploadSignature = onCall({
+  secrets: [cloudinaryCloudName, cloudinaryApiKey, cloudinaryApiSecret],
+}, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before updating your profile photo.");
+
+  // Secret Manager preserves pasted whitespace; Cloudinary treats it as part
+  // of the credential, so normalize values before creating the signature.
+  const cloudName = String(cloudinaryCloudName.value() || "").trim();
+  const apiKey = String(cloudinaryApiKey.value() || "").trim();
+  const apiSecret = String(cloudinaryApiSecret.value() || "").trim();
+  if (!cloudName || !apiKey || !apiSecret) {
+    throw new HttpsError("failed-precondition", "Cloudinary is not configured on the server.");
+  }
+
+  const folder = "profile_photos";
+  const publicId = request.auth.uid;
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signaturePayload = `folder=${folder}&overwrite=true&public_id=${publicId}&timestamp=${timestamp}`;
+  const signature = crypto.createHash("sha1").update(`${signaturePayload}${apiSecret}`).digest("hex");
+
+  return { cloudName, apiKey, folder, publicId, timestamp, signature };
+});
 
 function memberRoles(member) {
   if (Array.isArray(member?.roles)) return member.roles.filter((role) => Object.values(ROLES).includes(role));
