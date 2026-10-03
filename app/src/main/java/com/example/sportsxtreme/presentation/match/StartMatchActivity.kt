@@ -37,7 +37,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -97,11 +96,10 @@ class StartMatchActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val isScheduleFlow = intent.getBooleanExtra(EXTRA_SCHEDULE_FLOW, false)
         val tournamentOnlyFlow = intent.getBooleanExtra(EXTRA_TOURNAMENT_ONLY_FLOW, false)
-        val isTournamentSetupFlow = isScheduleFlow || tournamentOnlyFlow
         val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
         val tournamentName = androidx.compose.runtime.mutableStateOf<String?>(null)
         val hostTournaments = androidx.compose.runtime.mutableStateOf<List<Tournament>>(emptyList())
-        if (!isTournamentSetupFlow) {
+        if (!isScheduleFlow && !tournamentOnlyFlow) {
             FirebaseAuth.getInstance().currentUser?.uid?.takeIf { it.isNotBlank() }?.let { hostUid ->
                 lifecycleScope.launch {
                     tournamentRepository.observeHostTournaments(hostUid).collect { result ->
@@ -110,10 +108,16 @@ class StartMatchActivity : ComponentActivity() {
                 }
             }
         }
-        if (isTournamentSetupFlow && tournamentId.isNotBlank()) {
+        if ((isScheduleFlow || tournamentOnlyFlow) && tournamentId.isNotBlank()) {
             lifecycleScope.launch {
                 when (val result = tournamentRepository.getTournament(tournamentId)) {
-                    is Resource.Success -> tournamentName.value = result.data?.name?.takeIf { it.isNotBlank() }
+                    is Resource.Success -> {
+                        val tournament = result.data
+                        tournamentName.value = tournament?.name?.takeIf { it.isNotBlank() }
+                        if (tournamentOnlyFlow && tournament != null) {
+                            hostTournaments.value = listOf(tournament)
+                        }
+                    }
                     is Resource.Error -> Unit
                     is Resource.Loading -> Unit
                 }
@@ -122,7 +126,7 @@ class StartMatchActivity : ComponentActivity() {
         val restoredMatchId = savedInstanceState?.getString(EXTRA_SCHEDULE_MATCH_ID)
             ?: intent.getStringExtra(EXTRA_SCHEDULE_MATCH_ID)
         val scheduleMatchCreation: Deferred<Resource<com.example.sportsxtreme.domain.model.Match>>? =
-            if (isTournamentSetupFlow && tournamentId.isNotBlank() && restoredMatchId.isNullOrBlank()) {
+            if (isScheduleFlow && tournamentId.isNotBlank() && restoredMatchId.isNullOrBlank()) {
                 lifecycleScope.async {
                     val now = System.currentTimeMillis()
                     val suffix = now.toString()
@@ -142,19 +146,16 @@ class StartMatchActivity : ComponentActivity() {
             } else null
         var isOpeningScheduleSetup = false
         var scheduleMatchId = restoredMatchId
-        if (isTournamentSetupFlow && tournamentId.isBlank()) {
+        if (isScheduleFlow && tournamentId.isBlank()) {
             Toast.makeText(this, "Tournament details are unavailable", Toast.LENGTH_LONG).show()
             if (isScheduleFlow) finish()
         }
-        if (isTournamentSetupFlow && scheduleMatchCreation != null) {
+        if (isScheduleFlow && scheduleMatchCreation != null) {
             lifecycleScope.launch {
                 when (val result = scheduleMatchCreation.await()) {
                     is Resource.Success -> {
                         scheduleMatchId = result.data?.id
                         scheduleMatchId?.let { intent.putExtra(EXTRA_SCHEDULE_MATCH_ID, it) }
-                        if (isScheduleFlow && !scheduleMatchId.isNullOrBlank()) {
-                            startTournamentStageSetup(tournamentId, scheduleMatchId!!)
-                        }
                     }
                     is Resource.Error -> Toast.makeText(
                         this@StartMatchActivity,
@@ -165,14 +166,8 @@ class StartMatchActivity : ComponentActivity() {
                 }
             }
         }
-        if (isScheduleFlow && !scheduleMatchId.isNullOrBlank() && scheduleMatchCreation == null) {
-            startTournamentStageSetup(tournamentId, scheduleMatchId!!)
-        }
         val resolvedInitialMatchId = scheduleMatchId
         setContent {
-            if (isScheduleFlow) {
-                TournamentScheduleLoadingScreen(tournamentName.value)
-            } else {
             val uiState by viewModel.uiState.collectAsState()
             LaunchedEffect(Unit) {
                 viewModel.events.collect { event ->
@@ -191,7 +186,7 @@ class StartMatchActivity : ComponentActivity() {
             StartMatchScreen(
                 onBack = { finish() },
                 onContinue = { selectedType, selectedTournament ->
-                    if (isTournamentSetupFlow) {
+                    if (isScheduleFlow) {
                         if (!isOpeningScheduleSetup) {
                             isOpeningScheduleSetup = true
                             lifecycleScope.launch {
@@ -216,7 +211,10 @@ class StartMatchActivity : ComponentActivity() {
                         }
                     } else {
                         if (selectedType == MatchType.TOURNAMENT) {
-                            if (selectedTournament.id.isBlank()) {
+                            val tournamentForMatch = if (tournamentOnlyFlow) {
+                                hostTournaments.value.firstOrNull { it.id == tournamentId }
+                            } else selectedTournament
+                            if (tournamentForMatch == null || tournamentForMatch.id.isBlank()) {
                                 Toast.makeText(this@StartMatchActivity, "Choose one of your tournaments to continue", Toast.LENGTH_SHORT).show()
                             } else {
                                 lifecycleScope.launch {
@@ -227,10 +225,10 @@ class StartMatchActivity : ComponentActivity() {
                                             matchType = MatchType.TOURNAMENT,
                                             sport = SportType.CRICKET,
                                             organiserId = FirebaseAuth.getInstance().currentUser?.uid ?: "local-organiser",
-                                            title = "${selectedTournament.name} Match",
+                                            title = "${tournamentForMatch.name} Match",
                                             teamA = MatchTeam("tournament-team-a-$suffix", "Team A", "A", TeamSide.TEAM_A),
                                             teamB = MatchTeam("tournament-team-b-$suffix", "Team B", "B", TeamSide.TEAM_B),
-                                            tournamentId = selectedTournament.id,
+                                            tournamentId = tournamentForMatch.id,
                                             createdAtEpochMs = now
                                         )
                                     )) {
@@ -241,7 +239,8 @@ class StartMatchActivity : ComponentActivity() {
                                             } else {
                                                 startActivity(
                                                     Intent(this@StartMatchActivity, LeagueMatchSetupActivity::class.java)
-                                                        .putExtra("tournament_id", selectedTournament.id)
+                                                        .putExtra("tournament_id", tournamentForMatch.id)
+                                                        .putExtra(LeagueMatchSetupActivity.EXTRA_TOURNAMENT_MATCH_FLOW, true)
                                                         .putExtra(StartMatchActivity.EXTRA_SCHEDULE_MATCH_ID, matchId)
                                                 )
                                             }
@@ -257,22 +256,12 @@ class StartMatchActivity : ComponentActivity() {
                     }
                 },
                 isLoading = uiState.isLoading,
-                isScheduleFlow = isScheduleFlow || tournamentOnlyFlow,
-                tournamentOnlyFlow = isTournamentSetupFlow,
+                isScheduleFlow = isScheduleFlow,
+                tournamentOnlyFlow = isScheduleFlow || tournamentOnlyFlow,
                 tournamentName = tournamentName.value,
                 tournaments = hostTournaments.value
             )
-            }
         }
-    }
-
-    private fun startTournamentStageSetup(tournamentId: String, matchId: String) {
-        startActivity(
-            Intent(this, LeagueMatchSetupActivity::class.java)
-                .putExtra("tournament_id", tournamentId)
-                .putExtra(EXTRA_SCHEDULE_MATCH_ID, matchId)
-        )
-        finish()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -284,26 +273,6 @@ class StartMatchActivity : ComponentActivity() {
         const val EXTRA_SCHEDULE_FLOW = "schedule_flow"
         const val EXTRA_TOURNAMENT_ONLY_FLOW = "tournament_only_flow"
         const val EXTRA_SCHEDULE_MATCH_ID = "schedule_match_id"
-    }
-}
-
-@Composable
-private fun TournamentScheduleLoadingScreen(tournamentName: String?) {
-    Box(
-        Modifier.fillMaxSize().background(Color(0xFF020A15)),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(color = Color(0xFFC1FF00))
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = tournamentName?.takeIf { it.isNotBlank() }?.let { "Preparing $it schedule…" }
-                    ?: "Preparing tournament schedule…",
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
     }
 }
 
@@ -356,9 +325,9 @@ private fun StartMatchScreen(
                 MatchHeroCard()
                 PremiumMetricRow()
                 SectionTitle("MATCH FORMAT")
-                MatchTypeCard("Tournament Match", "Part of a tournament or league competition.", MatchIcon.BAT, selectedType == 0 || isScheduleFlow) { selectedType = 0 }
-                MatchTypeCard("Series Match", "Create a multi-match series between teams.", MatchIcon.BAT, selectedType == 1, enabled = !isScheduleFlow) { selectedType = 1 }
-                MatchTypeCard("Friendly Match", "Casual, Practice & Quick Setup", MatchIcon.HANDSHAKE, selectedType == 2, enabled = !isScheduleFlow) { selectedType = 2 }
+                MatchTypeCard("Tournament Match", "Part of a tournament or league competition.", MatchIcon.BAT, selectedType == 0 || isScheduleFlow || tournamentOnlyFlow) { selectedType = 0 }
+                MatchTypeCard("Series Match", "Create a multi-match series between teams.", MatchIcon.BAT, selectedType == 1, enabled = !isScheduleFlow && !tournamentOnlyFlow) { selectedType = 1 }
+                MatchTypeCard("Friendly Match", "Casual, Practice & Quick Setup", MatchIcon.HANDSHAKE, selectedType == 2, enabled = !isScheduleFlow && !tournamentOnlyFlow) { selectedType = 2 }
                 if (selectedType != 2) {
                     if (tournamentOnlyFlow) {
                         if (!tournamentName.isNullOrBlank()) {

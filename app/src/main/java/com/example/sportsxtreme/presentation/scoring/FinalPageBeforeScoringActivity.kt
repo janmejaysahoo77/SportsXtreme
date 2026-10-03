@@ -96,6 +96,8 @@ class FinalPageBeforeScoringActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
 
         val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
+        val tournamentId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID).orEmpty()
+        val tournamentName = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_NAME).orEmpty()
         val viewModel: OpeningPlayersViewModel by viewModels {
             OpeningPlayersViewModel.factory(matchId, matchUseCases, teamRepository, firestore)
         }
@@ -116,6 +118,8 @@ class FinalPageBeforeScoringActivity : ComponentActivity() {
                             startActivity(
                                 Intent(this, MainScoringActivity::class.java)
                                     .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                                    .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                                    .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_NAME, tournamentName)
                                     .putExtra(MainScoringActivity.EXTRA_INNINGS_ID, "${matchId}_innings_1")
                             )
                             finish()

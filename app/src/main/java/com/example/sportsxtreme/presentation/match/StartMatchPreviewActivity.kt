@@ -82,7 +82,9 @@ class StartMatchPreviewActivity : ComponentActivity() {
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
-        val tournamentName = intent.getStringExtra(EXTRA_TOURNAMENT_NAME).orEmpty()
+        val tournamentName = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_NAME)
+            ?: intent.getStringExtra(EXTRA_TOURNAMENT_NAME).orEmpty()
+        val tournamentId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID).orEmpty()
         val selectedStage = intent.getStringExtra(EXTRA_SELECTED_STAGE).orEmpty()
         val viewModel: StartMatchPreviewViewModel by viewModels {
             StartMatchPreviewViewModel.factory(matchId, matchUseCases)
@@ -98,6 +100,8 @@ class StartMatchPreviewActivity : ComponentActivity() {
                     startActivity(
                         Intent(this, TossActivity::class.java)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_NAME, tournamentName)
                     )
                 }
             )

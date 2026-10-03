@@ -190,7 +190,10 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
             }
             return
         }
+        val isTournamentMatchFlow = intent.getBooleanExtra(EXTRA_TOURNAMENT_MATCH_FLOW, false)
         val matchId = intent.getStringExtra(EXTRA_MATCH_ID).orEmpty()
+        val tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID).orEmpty()
+        val tournamentName = intent.getStringExtra(EXTRA_TOURNAMENT_NAME).orEmpty()
         val teamA = intent.toSelectedTeam(EXTRA_TEAM_A_ID, EXTRA_TEAM_A_NAME)
         val teamB = intent.toSelectedTeam(EXTRA_TEAM_B_ID, EXTRA_TEAM_B_NAME)
         val viewModel: TeamSelectionViewModel by viewModels {
@@ -201,18 +204,23 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         ) { result ->
             if (result.resultCode != RESULT_OK) return@registerForActivityResult
             val data = result.data ?: return@registerForActivityResult
-            val selectedId = when (data.getStringExtra(EXTRA_TEAM_SLOT)) {
+            val slot = data.getStringExtra(EXTRA_TEAM_SLOT)
+            val selectedId = if (isTournamentMatchFlow) {
+                data.getStringExtra(EXTRA_SELECTED_TEAM_ID).orEmpty()
+            } else when (slot) {
                 "A" -> data.getStringExtra(EXTRA_TEAM_A_ID).orEmpty()
                 "B" -> data.getStringExtra(EXTRA_TEAM_B_ID).orEmpty()
                 else -> ""
             }
-            val selectedName = when (data.getStringExtra(EXTRA_TEAM_SLOT)) {
+            val selectedName = if (isTournamentMatchFlow) {
+                data.getStringExtra(EXTRA_SELECTED_TEAM_NAME).orEmpty()
+            } else when (slot) {
                 "A" -> data.getStringExtra(EXTRA_TEAM_A_NAME).orEmpty()
                 "B" -> data.getStringExtra(EXTRA_TEAM_B_NAME).orEmpty()
                 else -> ""
             }
             if (selectedId.isBlank() || selectedName.isBlank()) return@registerForActivityResult
-            if (data.getStringExtra(EXTRA_TEAM_SLOT) == "A") {
+            if (slot == "A") {
                 viewModel.setSelectedTeamA(SelectedTeam(selectedId, selectedName))
             } else {
                 viewModel.setSelectedTeamB(SelectedTeam(selectedId, selectedName))
@@ -226,6 +234,7 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                 teamA = uiState.selectedTeamA,
                 teamB = uiState.selectedTeamB,
                 isTournamentScheduleFlow = false,
+                tournamentName = tournamentName.takeIf { isTournamentMatchFlow && it.isNotBlank() },
                 onBack = { finish() },
                 onOpenStartMatchPreview = { selectedTeamA, selectedTeamB ->
                     viewModel.updateMatchTeams(
@@ -236,6 +245,9 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                             startActivity(
                                 Intent(this, StartMatchPreviewActivity::class.java)
                                     .putExtra(EXTRA_MATCH_ID, matchId)
+                                    .putExtra(EXTRA_TOURNAMENT_ID, tournamentId)
+                                    .putExtra(EXTRA_TOURNAMENT_NAME, tournamentName)
+                                    .putExtra(StartMatchPreviewActivity.EXTRA_SELECTED_STAGE, intent.getStringExtra(EXTRA_SELECTED_STAGE).orEmpty())
                             )
                             finish()
                         },
@@ -244,8 +256,14 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                         }
                     )
                 },
-                onSelectTeamA = { openInviteScreen("A", matchId, teamPickerLauncher) },
-                onSelectTeamB = { openInviteScreen("B", matchId, teamPickerLauncher) }
+                onSelectTeamA = {
+                    if (isTournamentMatchFlow) openRegisteredTeams(tournamentId, "A", uiState.selectedTeamA, uiState.selectedTeamB, teamPickerLauncher)
+                    else openInviteScreen("A", matchId, teamPickerLauncher)
+                },
+                onSelectTeamB = {
+                    if (isTournamentMatchFlow) openRegisteredTeams(tournamentId, "B", uiState.selectedTeamA, uiState.selectedTeamB, teamPickerLauncher)
+                    else openInviteScreen("B", matchId, teamPickerLauncher)
+                }
             )
         }
     }
@@ -293,7 +311,9 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         const val EXTRA_TEAM_B_ID = "team_b_id"
         const val EXTRA_TEAM_B_NAME = "team_b_name"
         const val EXTRA_TOURNAMENT_SCHEDULE_FLOW = "tournament_schedule_flow"
+        const val EXTRA_TOURNAMENT_MATCH_FLOW = "tournament_match_flow"
         const val EXTRA_TOURNAMENT_ID = "tournament_id"
+        const val EXTRA_TOURNAMENT_NAME = "tournament_name"
         const val EXTRA_SELECTED_STAGE = "selected_stage"
     }
 }
