@@ -8,6 +8,7 @@ data class UserProfileStats(
     val runs: Int = 0,
     val wickets: Int = 0,
     val bestScore: String = "",
+    val bestBowling: String = "",
     val trophies: Int = 0,
     val topPerformerStreak: Boolean = false,
     val battingAverage: Double = 0.0,

@@ -76,11 +76,22 @@ class CloudinaryProfilePhotoUploader(
                     }
                     JSONObject(responseBody).optString("secure_url")
                         .takeIf { it.isNotBlank() }
+                        ?.toProfilePhotoDeliveryUrl()
                         ?: throw IOException("Cloudinary did not return an image URL.")
                 }
             } finally {
                 temporaryFile.delete()
             }
         }
+    }
+
+    private fun String.toProfilePhotoDeliveryUrl(): String {
+        val transformedUploadPath = "/image/upload/c_fill,g_auto,h_512,w_512,f_jpg,q_auto/"
+        if (contains(transformedUploadPath, ignoreCase = true)) return this
+        return replace(
+            oldValue = "/image/upload/",
+            newValue = transformedUploadPath,
+            ignoreCase = true
+        )
     }
 }

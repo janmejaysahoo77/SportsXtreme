@@ -129,11 +129,29 @@ class ScorecardActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
 
         val match = mutableStateOf(readMatch())
+        val resolvablePlayerIds = mutableMapOf<String, String>()
+        val playerProfilePhotoUrls = mutableMapOf<String, String>()
+        val rosterUserIdsByName = mutableMapOf<String, String>()
+        val rosterPhotoUrlsByName = mutableMapOf<String, String>()
         setContent {
             ScorecardScreen(
                 match = match.value,
                 onBack = { finish() },
-                onShare = { shareScorecard(match.value) }
+                onShare = { shareScorecard(match.value) },
+                onOpenPlayer = { playerId, displayName ->
+                    val normalizedName = displayName.normalizePlayerProfileName()
+                    val userId = resolvablePlayerIds[playerId]
+                        ?: rosterUserIdsByName[normalizedName]
+                        ?: playerId.substringAfter("::", missingDelimiterValue = playerId)
+                    startActivity(Intent(this, ProfileActivity::class.java).apply {
+                        putExtra(ProfileActivity.EXTRA_USER_ID, userId)
+                        putExtra(ProfileActivity.EXTRA_DISPLAY_NAME, displayName)
+                        putExtra(
+                            ProfileActivity.EXTRA_PROFILE_PHOTO_URL,
+                            playerProfilePhotoUrls[playerId] ?: rosterPhotoUrlsByName[normalizedName]
+                        )
+                    })
+                }
             )
         }
 
@@ -196,20 +214,44 @@ class ScorecardActivity : ComponentActivity() {
 
                     lookupsToStart.forEach { teamId ->
                         lifecycleScope.launch {
-                            val names = runCatching {
+                            val members = runCatching {
                                 val response = functions.getHttpsCallable("getTeamMemberProfiles")
                                     .call(mapOf("teamId" to teamId)).await().data as? Map<*, *>
                                 (response?.get("members") as? List<*>).orEmpty()
                                     .mapNotNull { it as? Map<*, *> }
-                                    .mapNotNull { member ->
-                                        val userId = member["userId"] as? String ?: return@mapNotNull null
-                                        val name = (member["displayName"] as? String)?.trim()
-                                            ?.takeIf(String::isNotBlank) ?: return@mapNotNull null
-                                        listOf(userId, "$teamId::$userId").map { it to name }
-                                    }.flatten().toMap()
-                            }.getOrDefault(emptyMap())
+                            }.onFailure { error ->
+                                Log.w("ScorecardActivity", "Could not load roster profiles for $teamId", error)
+                            }.getOrDefault(emptyList())
                             if (!isFinishing && !isDestroyed) {
-                                if (names.isNotEmpty()) playerNames.putAll(names)
+                                members.mapNotNull { it["userId"] as? String }
+                                    .forEach { userId ->
+                                        resolvablePlayerIds[userId] = userId
+                                        resolvablePlayerIds["$teamId::$userId"] = userId
+                                    }
+                                members.forEach { member ->
+                                    val userId = member["userId"] as? String ?: return@forEach
+                                    val profilePhotoUrl = (member["profilePhotoUrl"] as? String)
+                                        ?.trim()
+                                        ?.takeIf(String::isNotBlank) ?: return@forEach
+                                    playerProfilePhotoUrls[userId] = profilePhotoUrl
+                                    playerProfilePhotoUrls["$teamId::$userId"] = profilePhotoUrl
+                                    val name = (member["displayName"] as? String).normalizePlayerProfileName()
+                                    if (name.isNotBlank()) rosterPhotoUrlsByName[name] = profilePhotoUrl
+                                }
+                                val names = members.mapNotNull { member ->
+                                    val userId = member["userId"] as? String ?: return@mapNotNull null
+                                    val name = (member["displayName"] as? String)?.trim()
+                                        ?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+                                    listOf(userId, "$teamId::$userId").map { it to name }
+                                }.flatten().toMap()
+                                if (names.isNotEmpty()) {
+                                    playerNames.putAll(names)
+                                }
+                                members.forEach { member ->
+                                    val userId = member["userId"] as? String ?: return@forEach
+                                    val name = (member["displayName"] as? String).normalizePlayerProfileName()
+                                    if (name.isNotBlank()) rosterUserIdsByName[name] = userId
+                                }
                                 pendingPlayerNameLookups.remove(teamId)
                                 match.value = match.value.copy(playerNamesLoading = pendingPlayerNameLookups.isNotEmpty())
                                 refreshPartnership()
@@ -559,6 +601,7 @@ private data class CurrentBowlingFigures(
 
 private data class BallOutcome(val label: String, val kind: String)
 private data class ScorecardBattingRow(
+    val playerId: String,
     val name: String,
     val runs: Int,
     val balls: Int,
@@ -567,7 +610,7 @@ private data class ScorecardBattingRow(
     val strikeRate: String,
     val active: Boolean
 )
-private data class ScorecardBowlingRow(val name: String, val overs: String, val runs: Int, val wickets: Int, val economy: String)
+private data class ScorecardBowlingRow(val playerId: String, val name: String, val overs: String, val runs: Int, val wickets: Int, val economy: String)
 
 private fun Map<String, String>.resolvePlayerName(playerId: String?, candidate: String?): String {
     playerId?.let { this[it]?.takeIf(String::isNotBlank) }?.let { return it }
@@ -578,6 +621,12 @@ private fun Map<String, String>.resolvePlayerName(playerId: String?, candidate: 
     if (value.isNotBlank() && !looksLikeId) return value
     return "Player"
 }
+
+private fun String?.normalizePlayerProfileName(): String = this
+    ?.trim()
+    ?.lowercase()
+    ?.replace(Regex("\\s+"), " ")
+    .orEmpty()
 
 private fun List<DocumentSnapshot>.activeMatchDeliveries(): List<Map<String, Any?>> {
     val all = mapNotNull { it.data }.sortedWith(compareBy<Map<String, Any?>> { (it["sequenceNumber"] as? Number)?.toLong() ?: 0L })
@@ -601,6 +650,7 @@ private fun List<Map<String, Any?>>.scorecardBattingRows(
                     val deliveryName = balls.firstNotNullOfOrNull { it["batsmanName"] as? String }
                     val resolvedName = playerNames.resolvePlayerName(playerId, knownName ?: deliveryName)
                     ScorecardBattingRow(
+                        playerId = playerId,
                         name = resolvedName + if (batter?.isStriker == true) "*" else "",
                         runs = runs,
                         balls = faced,
@@ -638,6 +688,7 @@ private fun List<Map<String, Any?>>.scorecardBowlingRows(
                     val deliveryName = balls.firstNotNullOfOrNull { it["bowlerName"] as? String }
                     val knownName = if (playerId == match.currentBowlerId) match.currentBowlerName else deliveryName
                     ScorecardBowlingRow(
+                        playerId = playerId,
                         name = playerNames.resolvePlayerName(playerId, knownName),
                         overs = "${legalBalls / 6}.${legalBalls % 6}",
                         runs = conceded,
@@ -784,7 +835,7 @@ private enum class DetailIcon { BACK, SEARCH, BELL, MESSAGE, SHIELD, BOLT, DOTS 
 private enum class MetricIcon { SPEED, TARGET, TREND, TROPHY }
 
 @Composable
-private fun ScorecardScreen(match: MatchDetail, onBack: () -> Unit, onShare: () -> Unit) {
+private fun ScorecardScreen(match: MatchDetail, onBack: () -> Unit, onShare: () -> Unit, onOpenPlayer: (String, String) -> Unit) {
     var selectedTab by remember { mutableIntStateOf(1) }
     val tabs = listOf("INFO", "LIVE", "SCORECARD", "SUMMARY", "COMMENTARY")
 
@@ -845,7 +896,7 @@ private fun ScorecardScreen(match: MatchDetail, onBack: () -> Unit, onShare: () 
                         when (tab) {
                             0 -> InfoTab(match)
                             1 -> LiveTab(match)
-                            2 -> ScorecardTab(match)
+                            2 -> ScorecardTab(match, onOpenPlayer)
                             3 -> SummaryTab(match)
                             else -> CommentaryTab(match)
                         }
@@ -1329,7 +1380,7 @@ private fun WinPredictorPanel(match: MatchDetail) {
 }
 
 @Composable
-private fun ScorecardTab(match: MatchDetail) {
+private fun ScorecardTab(match: MatchDetail, onOpenPlayer: (String, String) -> Unit) {
     var selectedTeamTab by remember { mutableIntStateOf(0) }
     
     Row(
@@ -1398,6 +1449,7 @@ private fun ScorecardTab(match: MatchDetail) {
                 battingRows.forEachIndexed { index, row ->
                     if (index > 0) ThinRule()
                     BatterTableRow(
+                        playerId = row.playerId,
                         name = row.name,
                         runs = row.runs.toString(),
                         balls = row.balls.toString(),
@@ -1405,7 +1457,8 @@ private fun ScorecardTab(match: MatchDetail) {
                         sixes = row.sixes.toString(),
                         sr = row.strikeRate,
                         active = row.active,
-                        nameLoading = match.playerNamesLoading && row.name == "Player"
+                        nameLoading = match.playerNamesLoading && row.name == "Player",
+                        onOpenPlayer = onOpenPlayer
                     )
                 }
             }
@@ -1420,7 +1473,7 @@ private fun ScorecardTab(match: MatchDetail) {
             } else {
                 bowlingRows.forEachIndexed { index, row ->
                     if (index > 0) ThinRule()
-                    ScoreLine(row.name, row.overs, row.runs.toString(), row.wickets.toString(), if (index == 0) CyanLine else Color.White, match.playerNamesLoading && row.name == "Player")
+                    ScoreLine(row.playerId, row.name, row.overs, row.runs.toString(), row.wickets.toString(), if (index == 0) CyanLine else Color.White, match.playerNamesLoading && row.name == "Player") { playerId, name -> onOpenPlayer(playerId, name) }
                 }
             }
         }
@@ -1555,6 +1608,7 @@ private fun CurrentBattingCard(batters: List<CurrentBatter>, namesLoading: Boole
             batters.forEachIndexed { index, batter ->
                 if (index > 0) ThinRule()
                 BatterTableRow(
+                    playerId = batter.id.orEmpty(),
                     name = batter.name + if (batter.isStriker) "*" else "",
                     runs = batter.runs.toString(),
                     balls = batter.balls.toString(),
@@ -1562,7 +1616,8 @@ private fun CurrentBattingCard(batters: List<CurrentBatter>, namesLoading: Boole
                     sixes = batter.sixes.toString(),
                     sr = batter.strikeRate,
                     active = batter.isStriker,
-                    nameLoading = namesLoading && batter.name == "Player"
+                    nameLoading = namesLoading && batter.name == "Player",
+                    onOpenPlayer = { _, _ -> }
                 )
             }
         }
@@ -1587,7 +1642,7 @@ private fun PlayerTableHeader(first: String, columns: List<String>) {
 }
 
 @Composable
-private fun BatterTableRow(name: String, runs: String, balls: String, fours: String, sixes: String, sr: String, active: Boolean, nameLoading: Boolean = false) {
+private fun BatterTableRow(playerId: String, name: String, runs: String, balls: String, fours: String, sixes: String, sr: String, active: Boolean, nameLoading: Boolean = false, onOpenPlayer: (String, String) -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.985f else 1f, label = "batterRowPress")
@@ -1597,14 +1652,14 @@ private fun BatterTableRow(name: String, runs: String, balls: String, fours: Str
             .graphicsLayer(scaleX = scale, scaleY = scale)
             .clip(RoundedCornerShape(14.dp))
             .background(if (active) Accent.copy(alpha = 0.105f) else Color.Transparent)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = {})
+            .clickable(interactionSource = interactionSource, indication = null, onClick = { if (playerId.isNotBlank()) onOpenPlayer(playerId, name.removeSuffix("*")) })
             .padding(horizontal = 10.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (nameLoading) PlayerNameSkeleton(Modifier.weight(1.9f)) else Text(
             name, color = if (active) Accent else Color(0xFFE4ECE8), fontSize = 14.sp,
             fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic,
-            modifier = Modifier.weight(1.9f), maxLines = 1, overflow = TextOverflow.Ellipsis
+            modifier = Modifier.weight(1.9f).clickable(enabled = playerId.isNotBlank()) { onOpenPlayer(playerId, name.removeSuffix("*")) }, maxLines = 1, overflow = TextOverflow.Ellipsis
         )
         listOf(runs, balls, fours, sixes, sr).forEachIndexed { index, value ->
             Text(
@@ -2077,10 +2132,10 @@ private fun TableHeader(first: String, second: String, third: String, fourth: St
 }
 
 @Composable
-private fun ScoreLine(name: String, a: String, b: String, c: String, color: Color, nameLoading: Boolean = false) {
+private fun ScoreLine(playerId: String, name: String, a: String, b: String, c: String, color: Color, nameLoading: Boolean = false, onOpenPlayer: (String, String) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (nameLoading) PlayerNameSkeleton(Modifier.weight(1.9f))
-        else Text(name, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.9f))
+        else Text(name, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.9f).clickable(enabled = playerId.isNotBlank()) { onOpenPlayer(playerId, name) })
         listOf(a, b, c).forEach {
             Text(it, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End, modifier = Modifier.weight(0.7f))
         }
