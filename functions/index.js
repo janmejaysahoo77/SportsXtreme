@@ -60,6 +60,14 @@ function requireTeamId(value) {
   if (!teamId || teamId.length > 150) throw new HttpsError("invalid-argument", "A valid team ID is required.");
   return teamId;
 }
+function isGoogleAccountPhotoUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === "googleusercontent.com" || host.endsWith(".googleusercontent.com");
+  } catch (_) {
+    return false;
+  }
+}
 function storedMember(member, roles = memberRoles(member), playingRole = member?.playingRole || "PLAYER") {
   return { userId: member.userId, roles: [...new Set(roles)], playingRole, joinedAtEpochMs: member.joinedAtEpochMs || Date.now() };
 }
@@ -71,8 +79,9 @@ async function teamInTransaction(transaction, teamId) {
 }
 
 /**
- * Returns only the display data needed by a team roster. User profiles remain
- * private in Firestore; callers must already belong to the requested team.
+ * Returns the public display data needed by a scorecard or team roster.
+ * The callable only exposes a member's user ID, display name, profile photo URL,
+ * and playing role.
  */
 exports.getTeamMemberProfiles = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before viewing team members.");
@@ -80,18 +89,35 @@ exports.getTeamMemberProfiles = onCall(async (request) => {
   const team = await db.collection("teams").doc(teamId).get();
   if (!team.exists) throw new HttpsError("not-found", "Team not found.");
   const members = Array.isArray(team.get("members")) ? team.get("members") : [];
-  if (!findMember(members, request.auth.uid)) {
-    throw new HttpsError("permission-denied", "Only team members can view this roster.");
-  }
-  const userSnapshots = await db.getAll(
-    ...members.map((member) => db.collection("users").doc(member.userId))
-  );
   const authUsers = await Promise.all(members.map(async (member) => {
     try {
       return await getAuth().getUser(member.userId);
     } catch (_) {
       return null;
     }
+  }));
+  const userSnapshots = await Promise.all(members.map(async (member, index) => {
+    const directProfile = await db.collection("users").doc(member.userId).get();
+    if (directProfile.exists) return directProfile;
+    // Legacy accounts can have an auto-generated document ID, while the
+    // team member and Firebase Auth use the UID stored in users.id.
+    const legacyProfiles = await db.collection("users")
+      .where("id", "==", member.userId)
+      .limit(1)
+      .get();
+    if (!legacyProfiles.empty) return legacyProfiles.docs[0];
+    // Some early phone-auth accounts were recreated with a new Auth UID.
+    // Their profile remains associated with the verified phone number, which
+    // lets scorecards resolve the correct manually uploaded photo securely.
+    const phoneNumber = authUsers[index]?.phoneNumber;
+    if (typeof phoneNumber === "string" && phoneNumber.trim()) {
+      const phoneProfiles = await db.collection("users")
+        .where("phoneNumber", "==", phoneNumber.trim())
+        .limit(1)
+        .get();
+      if (!phoneProfiles.empty) return phoneProfiles.docs[0];
+    }
+    return directProfile;
   }));
   return {
     members: members.map((member, index) => {
@@ -107,9 +133,14 @@ exports.getTeamMemberProfiles = onCall(async (request) => {
       const profilePlayingRole = profile.exists && typeof profile.get("role") === "string"
         ? profile.get("role").trim()
         : "";
+      const storedPhotoUrl = profile.exists && typeof profile.get("profilePhotoUrl") === "string"
+        ? profile.get("profilePhotoUrl").trim()
+        : "";
       return {
         userId: member.userId,
         displayName: displayName || "",
+        // A Google identity image is not a manually selected SportsXtreme photo.
+        profilePhotoUrl: isGoogleAccountPhotoUrl(storedPhotoUrl) ? "" : storedPhotoUrl,
         playingRole: member.playingRole || profilePlayingRole || "Player"
       };
     })

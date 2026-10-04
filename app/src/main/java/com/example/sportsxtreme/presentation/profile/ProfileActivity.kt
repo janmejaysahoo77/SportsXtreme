@@ -2,6 +2,8 @@ package com.example.sportsxtreme.presentation.profile
 
 import android.os.Bundle
 import android.net.Uri
+import android.content.Intent
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
@@ -28,12 +30,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +67,7 @@ import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
+import com.example.sportsxtreme.presentation.auth.MainActivity
 import com.example.sportsxtreme.data.remote.cloudinary.CloudinaryProfilePhotoUploader
 import com.example.sportsxtreme.domain.model.User
 import com.example.sportsxtreme.domain.model.PendingUserProfile
@@ -70,7 +75,14 @@ import com.example.sportsxtreme.domain.model.UserProfile
 import com.example.sportsxtreme.domain.model.UserProfileSettings
 import com.example.sportsxtreme.domain.model.UserProfileStats
 import com.example.sportsxtreme.domain.usecase.AuthUseCases
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import coil3.compose.AsyncImage
 import androidx.compose.ui.platform.LocalContext
 
@@ -124,10 +136,28 @@ class ProfileActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val viewedUserId = intent.getStringExtra(EXTRA_USER_ID)?.trim().orEmpty()
+        val fallbackName = intent.getStringExtra(EXTRA_DISPLAY_NAME)?.trim().orEmpty()
+        val fallbackPhotoUrl = intent.getStringExtra(EXTRA_PROFILE_PHOTO_URL)
+            ?.trim()
+            ?.takeUnless { it.isGoogleAccountPhotoUrl() }
+            .orEmpty()
         setContent {
             ProfileScreen(
                 useCases = AuthDependencies.authUseCases(),
+                viewedUserId = viewedUserId,
+                fallbackName = fallbackName,
+                fallbackPhotoUrl = fallbackPhotoUrl,
                 onBack = { finish() },
+                onLogout = {
+                    FirebaseAuth.getInstance().signOut()
+                    startActivity(
+                        Intent(this, MainActivity::class.java)
+                            .putExtra(MainActivity.EXTRA_FORCE_LOGIN, true)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    )
+                    finish()
+                },
                 selectedPhotoUri = selectedProfilePhotoUri,
                 onPhotoHandled = { selectedProfilePhotoUri = null },
                 onPickPhoto = {
@@ -140,13 +170,23 @@ class ProfileActivity : ComponentActivity() {
             )
         }
     }
+
+    companion object {
+        const val EXTRA_USER_ID = "profile.extra.USER_ID"
+        const val EXTRA_DISPLAY_NAME = "profile.extra.DISPLAY_NAME"
+        const val EXTRA_PROFILE_PHOTO_URL = "profile.extra.PROFILE_PHOTO_URL"
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProfileScreen(
     useCases: AuthUseCases,
+    viewedUserId: String,
+    fallbackName: String,
+    fallbackPhotoUrl: String,
     onBack: () -> Unit,
+    onLogout: () -> Unit,
     selectedPhotoUri: Uri?,
     onPhotoHandled: () -> Unit,
     onPickPhoto: () -> Unit
@@ -157,14 +197,85 @@ private fun ProfileScreen(
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val context = LocalContext.current
+    val isOwnProfile = remember(viewedUserId) {
+        viewedUserId.isBlank() || viewedUserId == useCases.getCurrentUser()?.id
+    }
 
-    LaunchedEffect(Unit) {
-        uiState = loadProfileUiState(useCases)
+    LaunchedEffect(viewedUserId) {
+        uiState = if (isOwnProfile) {
+            loadProfileUiState(useCases)
+        } else {
+            loadOtherProfileUiState(useCases, viewedUserId, fallbackName, fallbackPhotoUrl)
+        }
+    }
+
+    // A scorecard opens another player's profile.  Show their identity and avatar
+    // immediately, then calculate match totals separately.  Older accounts do not
+    // have the cached /users/{id}/stats/summary document, so that document alone
+    // would always render zeros for those players.
+    LaunchedEffect(viewedUserId, isOwnProfile, uiState.profile.id) {
+        if (isOwnProfile || uiState.profile.id.isBlank()) return@LaunchedEffect
+        val refreshedStats = loadLivePlayerStats(uiState.profile.id, uiState.stats)
+        if (refreshedStats != uiState.stats) {
+            uiState = uiState.copy(stats = refreshedStats)
+        }
+    }
+
+    DisposableEffect(uiState.profile.id) {
+        if (!isOwnProfile) return@DisposableEffect onDispose { }
+        val userId = uiState.profile.id
+        if (userId.isBlank()) return@DisposableEffect onDispose { }
+
+        val firestore = FirebaseFirestore.getInstance()
+        var hostedTournaments = uiState.profile.hostedTournaments
+        var hostedSeries = uiState.profile.hostedSeries
+        var hostedMatches = uiState.profile.hostedMatches
+
+        fun publishHostedCounts() {
+            uiState = uiState.copy(
+                profile = uiState.profile.copy(
+                    hostedTournaments = hostedTournaments,
+                    hostedSeries = hostedSeries,
+                    hostedMatches = hostedMatches
+                )
+            )
+        }
+
+        val tournamentsListener = firestore.collection("tournaments")
+            .whereEqualTo("hostUid", userId)
+            .addSnapshotListener { snapshot, error ->
+                if (error == null && snapshot != null) {
+                    hostedTournaments = snapshot.documents.count {
+                        !it.getString("type").equals("Series", ignoreCase = true)
+                    }
+                    hostedSeries = snapshot.documents.count {
+                        it.getString("type").equals("Series", ignoreCase = true)
+                    }
+                    publishHostedCounts()
+                }
+            }
+        val matchesListener = firestore.collection("matches")
+            .addSnapshotListener { snapshot, error ->
+                if (error == null && snapshot != null) {
+                    hostedMatches = snapshot.documents.count { match ->
+                        match.getString("ownerId") == userId ||
+                            match.getString("ownerUserId") == userId ||
+                            match.getString("organiserId") == userId ||
+                            match.getString("organizerId") == userId
+                    }
+                    publishHostedCounts()
+                }
+            }
+
+        onDispose {
+            tournamentsListener.remove()
+            matchesListener.remove()
+        }
     }
 
     LaunchedEffect(selectedPhotoUri) {
         val photoUri = selectedPhotoUri ?: return@LaunchedEffect
-        if (uiState.profile.id.isBlank()) {
+        if (!isOwnProfile || uiState.profile.id.isBlank()) {
             onPhotoHandled()
             return@LaunchedEffect
         }
@@ -188,6 +299,9 @@ private fun ProfileScreen(
         uiState = when (useCases.updateUserProfile(updatedProfile)) {
             is Resource.Success -> uiState.copy(
                 profile = updatedProfile,
+                // Stop showing the local content URI after saving so this device verifies
+                // the same remote URL every other player will receive.
+                profilePhotoPreviewUri = null,
                 // Cloudinary can overwrite a stable public ID. Bump the displayed URL so
                 // Coil renders the newly uploaded image instead of an existing cache entry.
                 profilePhotoRefreshKey = System.currentTimeMillis(),
@@ -229,7 +343,7 @@ private fun ProfileScreen(
                         stats = uiState.stats,
                         profilePhotoPreviewUri = uiState.profilePhotoPreviewUri,
                         profilePhotoRefreshKey = uiState.profilePhotoRefreshKey,
-                        editEnabled = !uiState.isSaving,
+                        editEnabled = isOwnProfile && !uiState.isSaving,
                         onEditAvatar = onPickPhoto
                     )
                     Spacer(Modifier.height(14.dp))
@@ -245,27 +359,29 @@ private fun ProfileScreen(
                             .padding(bottom = 10.dp)
                     )
                     ProfileStats(uiState.profile)
-                    SectionTitle(
-                        title = "Personal Details",
-                        onEdit = {
-                            draftProfile = uiState.profile
-                            activeEditSection = ProfileEditSection.PersonalDetails
-                        },
-                        editEnabled = !uiState.isSaving
-                    )
-                    DetailGrid(
-                        listOf(
-                            "Mobile Number" to uiState.profile.phoneNumber.ifBlank { "Not added" },
-                            "Gender" to uiState.profile.gender.ifBlank { "Not added" },
-                            "Email Address" to uiState.profile.email.ifBlank { "Not added" }
+                    if (isOwnProfile) {
+                        SectionTitle(
+                            title = "Personal Details",
+                            onEdit = {
+                                draftProfile = uiState.profile
+                                activeEditSection = ProfileEditSection.PersonalDetails
+                            },
+                            editEnabled = !uiState.isSaving
                         )
-                    )
+                        DetailGrid(
+                            listOf(
+                                "Mobile Number" to uiState.profile.phoneNumber.ifBlank { "Not added" },
+                                "Gender" to uiState.profile.gender.ifBlank { "Not added" },
+                                "Email Address" to uiState.profile.email.ifBlank { "Not added" }
+                            )
+                        )
+                    }
                     SectionTitle(
                         title = "Playing Profile",
-                        onEdit = {
+                        onEdit = if (isOwnProfile) ({
                             draftProfile = uiState.profile
                             activeEditSection = ProfileEditSection.PlayingProfile
-                        },
+                        }) else null,
                         editEnabled = !uiState.isSaving
                     )
                     DetailGrid(
@@ -276,14 +392,15 @@ private fun ProfileScreen(
                         )
                     )
                     Spacer(Modifier.height(18.dp))
-                    SettingsCard(uiState.settings)
-                    Text(
-                        "Version 1.0.0",
-                        color = SoftText,
-                        fontSize = 9.sp,
-                        modifier = Modifier.padding(top = 12.dp, bottom = 10.dp)
-                    )
-                    Spacer(Modifier.height(100.dp))
+                    if (isOwnProfile) {
+                        SettingsCard(onLogout)
+                        Text(
+                            "Version 1.0.0",
+                            color = SoftText,
+                            fontSize = 9.sp,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 10.dp)
+                        )
+                    }
                 }
             }
 
@@ -400,7 +517,8 @@ private suspend fun loadProfileUiState(useCases: AuthUseCases): ProfileUiState {
     val settingsResult = useCases.getUserProfileSettings(userId)
 
     val profile = profileResult.successData() ?: fallbackProfile
-    val stats = statsResult.successData() ?: profile.toFallbackStats()
+    val storedStats = statsResult.successData() ?: profile.toFallbackStats()
+    val stats = loadLivePlayerStats(userId, storedStats)
     val settings = settingsResult.successData() ?: UserProfileSettings(userId = userId)
     val errorMessage = listOf(
         profileResult.errorText(),
@@ -416,6 +534,168 @@ private suspend fun loadProfileUiState(useCases: AuthUseCases): ProfileUiState {
         errorMessage = if (errorMessage == null) null else "Some profile data could not refresh."
     )
 }
+
+private suspend fun loadOtherProfileUiState(
+    useCases: AuthUseCases,
+    userId: String,
+    fallbackName: String,
+    fallbackPhotoUrl: String
+): ProfileUiState {
+    val profileResult = useCases.getUserProfile(userId)
+    val profile = profileResult.successData()
+    if (profile == null) {
+        return ProfileUiState(
+            profile = fallbackProfile().copy(
+                id = userId,
+                name = fallbackName.ifBlank { "Player" },
+                profilePhotoUrl = fallbackPhotoUrl.takeIf { it.isNotBlank() }
+            ),
+            stats = UserProfileStats(userId = userId),
+            isLoading = false,
+            errorMessage = if (profileResult.errorText()?.contains("PERMISSION_DENIED", true) == true) {
+                profileResult.errorText()
+            } else null
+        )
+    }
+    // A viewed profile must appear as soon as its document and photo URL arrive.
+    // Match totals are refreshed separately after this state is displayed.
+    val storedStats = useCases.getUserProfileStats(userId).successData() ?: profile.toFallbackStats()
+    return ProfileUiState(
+        profile = profile.copy(
+            name = profile.name.takeIf { it.isNotBlank() }
+                ?: fallbackName.ifBlank { "Player" },
+            profilePhotoUrl = profile.profilePhotoUrl
+                ?.takeIf { it.isNotBlank() }
+                ?: fallbackPhotoUrl.takeIf { it.isNotBlank() }
+        ),
+        stats = storedStats,
+        isLoading = false
+    )
+}
+
+private suspend fun loadLivePlayerStats(userId: String, stored: UserProfileStats): UserProfileStats = runCatching {
+    val firestore = FirebaseFirestore.getInstance()
+    val indexedTeamDocuments = firestore.collection("teams")
+        .whereArrayContains("memberIds", userId)
+        .get()
+        .await()
+        .documents
+    // Teams created before memberIds was added only contain members[].  Include
+    // those documents too; otherwise phone-auth players from those teams cannot
+    // be linked to their scorecard rows.
+    val legacyTeamDocuments = firestore.collection("teams")
+        .get()
+        .await()
+        .documents
+        .filter { team ->
+            (team.get("members") as? List<*>)
+                .orEmpty()
+                .filterIsInstance<Map<*, *>>()
+                .any { it["userId"] == userId }
+        }
+    val teamIds = (indexedTeamDocuments + legacyTeamDocuments).mapTo(linkedSetOf()) { it.id }
+    val playerIds = teamIds.mapTo(linkedSetOf()) { "$it::$userId" }.apply { add(userId) }
+    val allMatches = firestore.collection("matches").get().await().documents
+    val relevantMatches = allMatches.filter { match ->
+        val teamA = (match.get("teamA") as? Map<*, *>)?.get("teamId") as? String ?: match.getString("teamAId")
+        val teamB = (match.get("teamB") as? Map<*, *>)?.get("teamId") as? String ?: match.getString("teamBId")
+        val lineupIds = (match.get("playingXI") as? Map<*, *>)?.values.orEmpty()
+            .flatMap { ((it as? Map<*, *>)?.get("playerIds") as? List<*>).orEmpty().filterIsInstance<String>() }
+        val squadPlayerIds = (match.get("matchSquads") as? Map<*, *>)?.values.orEmpty()
+            .flatMap { ((it as? Map<*, *>)?.get("players") as? List<*>).orEmpty() }
+            .filterIsInstance<Map<*, *>>()
+            .mapNotNull { it["userId"] as? String }
+        listOfNotNull(teamA, teamB).any { it in teamIds } ||
+            lineupIds.any { it in playerIds } || squadPlayerIds.any { it == userId }
+    }
+
+    val scorecardRows = coroutineScope {
+        relevantMatches.map { match ->
+            async {
+                val scorecard = match.reference.collection("scorecard")
+                val savedBatting = scorecard.document("batting").collection("entries").get().await().documents
+                    .map { it.data.orEmpty() }.filter { it["playerId"] in playerIds }
+                val savedBowling = scorecard.document("bowling").collection("entries").get().await().documents
+                    .map { it.data.orEmpty() }.filter { it["playerId"] in playerIds }
+                // Some completed matches were recorded before scorecard entries
+                // were synced.  Their deliveries are still the source used by
+                // ScorecardActivity, so derive a player row from them as fallback.
+                val deliveries = if (savedBatting.isEmpty() && savedBowling.isEmpty()) {
+                    match.reference.collection("deliveries").get().await().documents
+                        .mapNotNull { it.data }
+                        .filter { delivery ->
+                            delivery["eventType"] != "REVERSAL" &&
+                                delivery["reversedEventId"] !is String
+                        }
+                } else {
+                    emptyList()
+                }
+                val batting = savedBatting.ifEmpty {
+                    deliveries.filter { it["batsmanId"] in playerIds }
+                        .groupBy { "${it["inningsId"]}:${it["batsmanId"]}" }
+                        .values
+                        .map { balls ->
+                            mapOf(
+                                "runs" to balls.sumOf { (it["runs"] as? Number)?.toInt() ?: 0 },
+                                "balls" to balls.count { it["extraType"] != "WIDE" }
+                            )
+                        }
+                }
+                val bowling = savedBowling.ifEmpty {
+                    deliveries.filter { it["bowlerId"] in playerIds }
+                        .groupBy { "${it["inningsId"]}:${it["bowlerId"]}" }
+                        .values
+                        .map { balls ->
+                            mapOf(
+                                "runs" to balls.sumOf { (it["runs"] as? Number)?.toInt() ?: 0 },
+                                "wickets" to balls.count { ball ->
+                                    (ball["dismissedPlayerId"] as? String).orEmpty().isNotBlank() &&
+                                        (ball["dismissalType"] as? String) !in setOf("", "NONE", "RUN_OUT", "RETIRED_OUT", "RETIRED_HURT")
+                                }
+                            )
+                        }
+                }
+                Triple(match, batting, bowling)
+            }
+        }.awaitAll()
+    }
+    val playedMatches = scorecardRows.filter { (_, batting, bowling) -> batting.isNotEmpty() || bowling.isNotEmpty() }
+    fun number(row: Map<String, Any?>, key: String) = (row[key] as? Number)?.toInt() ?: 0
+    fun matchResult(match: DocumentSnapshot): Int? {
+        if ((match.getString("status") ?: "").uppercase() !in setOf("COMPLETED", "FINISHED")) return null
+        val scores = (match.get("innings") as? List<*>).orEmpty()
+            .filterIsInstance<Map<*, *>>()
+            .mapNotNull { inning ->
+                val teamId = inning["battingTeamId"] as? String ?: return@mapNotNull null
+                teamId to ((inning["score"] as? Number)?.toInt() ?: 0)
+            }
+            .groupBy({ it.first }, { it.second })
+            .mapValues { (_, innings) -> innings.sum() }
+        if (scores.size < 2) return null
+        val teamA = (match.get("teamA") as? Map<*, *>)?.get("teamId") as? String ?: match.getString("teamAId")
+        val teamB = (match.get("teamB") as? Map<*, *>)?.get("teamId") as? String ?: match.getString("teamBId")
+        val ownTeam = listOfNotNull(teamA, teamB).firstOrNull { it in teamIds } ?: return null
+        val otherTeam = listOfNotNull(teamA, teamB).firstOrNull { it != ownTeam } ?: return null
+        return (scores[ownTeam] ?: return null).compareTo(scores[otherTeam] ?: return null)
+    }
+    val allBattingRows = playedMatches.flatMap { it.second }
+    val bestBattingRow = allBattingRows.maxByOrNull { number(it, "runs") }
+    val bestBatting = bestBattingRow?.let {
+        number(it, "runs").toString() + if ((it["status"] as? String).equals("NOT_OUT", true)) "*" else ""
+    }.orEmpty()
+    val bestBowling = playedMatches.flatMap { it.third }
+        .maxWithOrNull(compareBy<Map<String, Any?>> { number(it, "wickets") }.thenByDescending { number(it, "runs") })
+        ?.let { "${number(it, "wickets")}/${number(it, "runs")}" }
+        .orEmpty()
+    val wins = playedMatches.count { matchResult(it.first)?.let { result -> result > 0 } == true }
+
+    stored.copy(
+        matchesPlayed = if (playedMatches.isNotEmpty()) playedMatches.size else stored.matchesPlayed,
+        wins = if (playedMatches.isNotEmpty()) wins else stored.wins,
+        bestScore = bestBatting.ifBlank { stored.bestScore },
+        bestBowling = bestBowling.ifBlank { stored.bestBowling }
+    )
+}.getOrDefault(stored)
 
 private fun User?.toFallbackProfile(): UserProfile {
     return if (this == null) {
@@ -485,15 +765,20 @@ private fun ProfileBackdrop() {
                     listOf(Color(0xFF0A151B), XtremeBg, Color(0xFF020609))
                 )
             )
-            drawCircle(Color(0x22FFD66B), radius = size.width * 0.42f, center = Offset(size.width * 0.86f, size.height * 0.02f))
-            drawCircle(Color(0x1845E9FF), radius = size.width * 0.34f, center = Offset(size.width * 0.06f, size.height * 0.26f))
-            drawLine(Color(0x44FFD66B), Offset(0f, size.height * 0.12f), Offset(size.width, size.height * 0.055f), strokeWidth = 2.4f)
-            drawLine(Color(0x3345E9FF), Offset(0f, size.height * 0.32f), Offset(size.width, size.height * 0.23f), strokeWidth = 1.8f)
-            drawLine(Color(0x20EAF2F4), Offset(0f, size.height * 0.58f), Offset(size.width, size.height * 0.52f), strokeWidth = 1.2f)
-            for (i in 0..7) {
-                val y = size.height * (0.16f + i * 0.1f)
-                drawLine(Color(0x08000000), Offset(0f, y), Offset(size.width, y - 26f), strokeWidth = 18f)
-            }
+            drawRect(
+                Brush.radialGradient(
+                    colors = listOf(Color(0x2545E9FF), Color(0x1045E9FF), Color.Transparent),
+                    center = Offset(size.width * 0.08f, size.height * 0.12f),
+                    radius = size.width * 0.85f
+                )
+            )
+            drawRect(
+                Brush.radialGradient(
+                    colors = listOf(Color(0x20C7FF1A), Color(0x0CC7FF1A), Color.Transparent),
+                    center = Offset(size.width * 0.94f, size.height * 0.58f),
+                    radius = size.width * 0.72f
+                )
+            )
         }
     }
 }
@@ -563,14 +848,6 @@ private fun HeroProfileCard(
                 )
             )
             drawCircle(Color(0x25FFD66B), radius = size.minDimension * 0.42f, center = Offset(size.width * 0.5f, size.height * 0.36f))
-            drawLine(Gold.copy(alpha = 0.92f), Offset(size.width * 0.08f, size.height * 0.06f), Offset(size.width * 0.92f, size.height * 0.06f), strokeWidth = 3.2f)
-            drawLine(Aqua.copy(alpha = 0.46f), Offset(size.width * 0.06f, size.height * 0.16f), Offset(size.width * 0.94f, size.height * 0.1f), strokeWidth = 2.2f)
-            drawRoundRect(
-                brush = Brush.horizontalGradient(listOf(Color(0x22EAF2F4), Color.Transparent)),
-                topLeft = Offset(size.width * 0.03f, size.height * 0.8f),
-                size = Size(size.width * 0.94f, 1.5f),
-                cornerRadius = CornerRadius(1f, 1f)
-            )
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
             Text("SPORTSXTREME PLAYER PASS", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.Black)
@@ -604,7 +881,9 @@ private fun HeroProfileCard(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HeroMetric(stats.matchesPlayed.toString(), "Played", Lime, Modifier.weight(1f))
                 HeroMetric(stats.wins.toString(), "Wins", Gold, Modifier.weight(1f))
-                HeroMetric(stats.bestScore, "Best", Aqua, Modifier.weight(1f))
+                val isBowler = profile.role.contains("bowl", ignoreCase = true)
+                val roleBest = if (isBowler) stats.bestBowling else stats.bestScore
+                HeroMetric(roleBest.ifBlank { "—" }, "Best", Aqua, Modifier.weight(1f))
             }
         }
     }
@@ -622,15 +901,25 @@ private fun Avatar(
         Box(
             modifier = Modifier
                 .size(124.dp)
+                .shadow(
+                    elevation = 20.dp,
+                    shape = CircleShape,
+                    clip = false,
+                    ambientColor = Color(0xFF168DFF),
+                    spotColor = Color(0xFF168DFF)
+                )
                 .clip(CircleShape)
-                .background(Brush.radialGradient(listOf(Color(0xFFEAF2F4), Color(0xFF576369), Color(0xFF11171B))))
-                .border(4.dp, Gold, CircleShape),
+                .background(Brush.radialGradient(listOf(Color(0xFFEAF2F4), Color(0xFF576369), Color(0xFF11171B)))),
             contentAlignment = Alignment.Center
         ) {
-            val photoModel = previewUri ?: photoUrl
-                ?.takeIf { it.isNotBlank() }
-                ?.withProfilePhotoRefreshKey(profilePhotoRefreshKey)
-            if (photoModel == null) {
+            val originalPhotoUrl = photoUrl?.trim()?.takeIf { it.isNotBlank() }
+            var useOriginalPhotoUrl by remember(originalPhotoUrl, profilePhotoRefreshKey) { mutableStateOf(false) }
+            var hasPhotoLoadFailed by remember(originalPhotoUrl, profilePhotoRefreshKey) { mutableStateOf(false) }
+            val photoModel: Any? = previewUri ?: originalPhotoUrl?.let { sourceUrl ->
+                val deliveryUrl = if (useOriginalPhotoUrl) sourceUrl else sourceUrl.toProfilePhotoDeliveryUrl()
+                deliveryUrl.withProfilePhotoRefreshKey(profilePhotoRefreshKey)
+            }
+            if (photoModel == null || hasPhotoLoadFailed) {
                 Canvas(Modifier.size(104.dp)) {
                     drawCircle(Color(0xFFE9F2F4), radius = size.minDimension * 0.22f, center = center.copy(y = size.height * 0.28f))
                     drawCircle(Color(0xFF26323B), radius = size.minDimension * 0.31f, center = center.copy(y = size.height * 0.7f))
@@ -643,8 +932,29 @@ private fun Avatar(
                     model = photoModel,
                     contentDescription = "Profile photo",
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    onError = { error ->
+                        if (!useOriginalPhotoUrl && originalPhotoUrl != null) {
+                            useOriginalPhotoUrl = true
+                        } else {
+                            Log.w("ProfileActivity", "Could not load profile photo", error.result.throwable)
+                            hasPhotoLoadFailed = true
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize().clip(CircleShape)
                 )
+            }
+            if (editEnabled && previewUri != null) {
+                Box(
+                    modifier = Modifier.fillMaxSize().background(Color(0x88010407), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(42.dp),
+                        color = Lime,
+                        trackColor = Color(0x668A969B),
+                        strokeWidth = 4.dp
+                    )
+                }
             }
         }
         Box(
@@ -662,22 +972,30 @@ private fun Avatar(
                 modifier = Modifier.size(18.dp)
             )
         }
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .clip(RoundedCornerShape(30.dp))
-                .background(Brush.horizontalGradient(listOf(Platinum, Gold)))
-                .border(1.dp, Color(0x66101416), RoundedCornerShape(30.dp))
-                .padding(horizontal = 13.dp, vertical = 5.dp)
-        ) {
-            Text("PRO", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Black)
-        }
     }
 }
 
 private fun String.withProfilePhotoRefreshKey(refreshKey: Long): String {
     if (refreshKey == 0L) return this
     return "$this${if (contains("?")) "&" else "?"}profile_updated=$refreshKey"
+}
+
+private fun String.toProfilePhotoDeliveryUrl(): String {
+    val normalizedUrl = trim()
+        .replaceFirst("http://", "https://", ignoreCase = true)
+        .let { if (it.startsWith("//")) "https:$it" else it }
+    val transformedUploadPath = "/image/upload/c_fill,g_auto,h_512,w_512,f_jpg,q_auto/"
+    if (normalizedUrl.contains(transformedUploadPath, ignoreCase = true)) return normalizedUrl
+    return normalizedUrl.replace(
+        oldValue = "/image/upload/",
+        newValue = transformedUploadPath,
+        ignoreCase = true
+    )
+}
+
+private fun String.isGoogleAccountPhotoUrl(): Boolean {
+    val host = runCatching { Uri.parse(this).host.orEmpty() }.getOrDefault("").lowercase()
+    return host == "googleusercontent.com" || host.endsWith(".googleusercontent.com")
 }
 
 @Composable
@@ -887,7 +1205,7 @@ private fun DetailCard(label: String, value: String) {
 }
 
 @Composable
-private fun SettingsCard(settings: UserProfileSettings) {
+private fun SettingsCard(onLogout: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -897,25 +1215,13 @@ private fun SettingsCard(settings: UserProfileSettings) {
             .border(1.dp, Color(0xFF344249), RoundedCornerShape(14.dp))
             .padding(16.dp)
     ) {
-        SettingsRow("Change Language", settings.language, Platinum)
-        SettingsDivider()
-        SettingsRow("Purchase History", ">", Platinum)
-        SettingsDivider()
-        SettingsRow("Logout", "", Color(0xFFFF8D8D))
+        Row(
+            Modifier.fillMaxWidth().height(34.dp).clickable(onClick = onLogout),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Logout", color = Color(0xFFFF8D8D), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
     }
-}
-
-@Composable
-private fun SettingsRow(title: String, value: String, titleColor: Color) {
-    Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = titleColor, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        Text(value, color = SoftText, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End)
-    }
-}
-
-@Composable
-private fun SettingsDivider() {
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF202C34)))
 }
 
 @Composable

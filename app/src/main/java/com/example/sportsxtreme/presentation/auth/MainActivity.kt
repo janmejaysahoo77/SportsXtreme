@@ -133,7 +133,10 @@ class MainActivity : ComponentActivity() {
         requestLocationPermissionAndUpdate()
         receiveIncomingInviteToken(intent)
         val hasIncomingAuthLink = handleIncomingAuthLink(intent)
-        if (intent.getStringExtra(EXTRA_START_DESTINATION) == DESTINATION_SPORT_SELECTION) {
+        if (intent.getBooleanExtra(EXTRA_FORCE_LOGIN, false)) {
+            isCustomSplashReady = true
+            currentScreen = Screen.Login
+        } else if (intent.getStringExtra(EXTRA_START_DESTINATION) == DESTINATION_SPORT_SELECTION) {
             isCustomSplashReady = true
             currentScreen = Screen.SportSelection
         } else if (hasIncomingAuthLink) {
@@ -446,6 +449,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_FORCE_LOGIN, false)) {
+            homeScreenView = null
+            currentScreen = Screen.Login
+            return
+        }
         receiveIncomingInviteToken(intent)
         if (handleIncomingAuthLink(intent)) {
             showLoginScreen()
@@ -626,6 +634,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_START_DESTINATION = "extra_start_destination"
+        const val EXTRA_FORCE_LOGIN = "extra_force_login"
         const val DESTINATION_SPORT_SELECTION = "sport_selection"
         private const val INVITE_SCHEME = "https"
         private const val INVITE_HOST = "sportsxtreme-95fbb.web.app"

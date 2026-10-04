@@ -23,7 +23,6 @@ class AuthDataSource(
             name = firebaseUser.displayName.orEmpty(),
             mobileNumber = firebaseUser.phoneNumber.orEmpty(),
             email = firebaseUser.email.orEmpty(),
-            profilePhotoUrl = firebaseUser.photoUrl?.toString(),
             authProvider = AuthProvider.EMAIL_PASSWORD,
             isEmailVerified = firebaseUser.isEmailVerified,
             isPhoneVerified = !firebaseUser.phoneNumber.isNullOrBlank()
@@ -82,7 +81,6 @@ class AuthDataSource(
                         name = firebaseUser?.displayName.orEmpty(),
                         mobileNumber = firebaseUser?.phoneNumber.orEmpty(),
                         email = firebaseUser?.email ?: email,
-                        profilePhotoUrl = firebaseUser?.photoUrl?.toString(),
                         authProvider = AuthProvider.EMAIL_PASSWORD,
                         isEmailVerified = firebaseUser?.isEmailVerified == true,
                         isPhoneVerified = !firebaseUser?.phoneNumber.isNullOrBlank()
@@ -121,7 +119,6 @@ class AuthDataSource(
                         name = firebaseUser?.displayName.orEmpty(),
                         mobileNumber = firebaseUser?.phoneNumber.orEmpty(),
                         email = firebaseUser?.email ?: email,
-                        profilePhotoUrl = firebaseUser?.photoUrl?.toString(),
                         authProvider = AuthProvider.EMAIL_PASSWORD,
                         isEmailVerified = true,
                         isPhoneVerified = !firebaseUser?.phoneNumber.isNullOrBlank()
@@ -239,7 +236,6 @@ class AuthDataSource(
                     name = firebaseUser?.displayName.orEmpty(),
                     mobileNumber = firebaseUser?.phoneNumber.orEmpty(),
                     email = firebaseUser?.email.orEmpty(),
-                    profilePhotoUrl = firebaseUser?.photoUrl?.toString(),
                     authProvider = provider,
                     isEmailVerified = provider == AuthProvider.GOOGLE || firebaseUser?.isEmailVerified == true,
                     isPhoneVerified = !firebaseUser?.phoneNumber.isNullOrBlank()

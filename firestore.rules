@@ -137,13 +137,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // ---------- User profiles: private to the owner ----------
+    // ---------- User profiles: readable by signed-in players ----------
     match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == userId;
     }
     match /users/{userId}/{document=**} {
-      allow read: if request.auth != null && request.auth.uid == userId;
+      // Stats are shown on player profiles; settings and achievements remain owner-only.
+      allow read: if request.auth != null
+        && (request.auth.uid == userId || document == 'stats/summary');
       allow write: if request.auth != null && request.auth.uid == userId;
     }
   }

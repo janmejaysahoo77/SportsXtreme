@@ -1,5 +1,6 @@
 package com.example.sportsxtreme.data.remote.firestore
 
+import android.net.Uri
 import com.example.sportsxtreme.domain.model.PendingUserProfile
 import com.example.sportsxtreme.domain.model.User
 import com.example.sportsxtreme.domain.model.UserAchievement
@@ -171,7 +172,25 @@ class FirebaseFirestoreUserDataSource(
                     if (snapshot.exists()) {
                         continuation.resume(Result.success(snapshot.toUserProfile(userId)))
                     } else {
-                        continuation.resume(Result.failure(NoSuchElementException("User profile not found")))
+                        // Older profile documents were sometimes created with an
+                        // auto-generated document ID while retaining the Firebase
+                        // Auth UID in their `id` field. Scorecards always hold the
+                        // Auth UID, so support that legacy shape as well.
+                        firestore.collection(USERS_COLLECTION)
+                            .whereEqualTo("id", userId)
+                            .limit(1)
+                            .get()
+                            .addOnSuccessListener { legacyProfiles ->
+                                val legacyProfile = legacyProfiles.documents.firstOrNull()
+                                if (legacyProfile != null) {
+                                    continuation.resume(Result.success(legacyProfile.toUserProfile(userId)))
+                                } else {
+                                    continuation.resume(Result.failure(NoSuchElementException("User profile not found")))
+                                }
+                            }
+                            .addOnFailureListener { exception ->
+                                continuation.resume(Result.failure(exception))
+                            }
                     }
                 }
                 .addOnFailureListener { exception ->
@@ -234,7 +253,7 @@ class FirebaseFirestoreUserDataSource(
             name = getString("name").orEmpty(),
             email = getString("email").orEmpty(),
             phoneNumber = getString("phoneNumber").orEmpty(),
-            profilePhotoUrl = getString("profilePhotoUrl"),
+            profilePhotoUrl = getString("profilePhotoUrl").takeUnless { it.isGoogleAccountPhotoUrl() },
             location = getString("location").orEmpty(),
             joinedLabel = getString("joinedLabel").orEmpty(),
             gender = getString("gender").orEmpty(),
@@ -271,6 +290,7 @@ class FirebaseFirestoreUserDataSource(
             "runs" to runs,
             "wickets" to wickets,
             "bestScore" to bestScore,
+            "bestBowling" to bestBowling,
             "trophies" to trophies,
             "topPerformerStreak" to topPerformerStreak,
             "battingAverage" to battingAverage,
@@ -289,6 +309,7 @@ class FirebaseFirestoreUserDataSource(
             runs = getLong("runs")?.toInt() ?: 0,
             wickets = getLong("wickets")?.toInt() ?: 0,
             bestScore = getString("bestScore").orEmpty(),
+            bestBowling = getString("bestBowling").orEmpty(),
             trophies = getLong("trophies")?.toInt() ?: 0,
             topPerformerStreak = getBoolean("topPerformerStreak") ?: false,
             battingAverage = getDouble("battingAverage") ?: 0.0,
@@ -296,6 +317,13 @@ class FirebaseFirestoreUserDataSource(
             strikeRate = getDouble("strikeRate") ?: 0.0,
             mvpCount = getLong("mvpCount")?.toInt() ?: 0
         )
+    }
+
+    private fun String?.isGoogleAccountPhotoUrl(): Boolean {
+        val host = this?.let { value -> runCatching { Uri.parse(value).host.orEmpty() }.getOrDefault("") }
+            ?.lowercase()
+            .orEmpty()
+        return host == "googleusercontent.com" || host.endsWith(".googleusercontent.com")
     }
 
     private fun UserProfileSettings.toFirestorePayload(): Map<String, Any?> {
