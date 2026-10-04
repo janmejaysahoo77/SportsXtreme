@@ -60,7 +60,7 @@ class SportsSplashView @JvmOverloads constructor(
     private val logoSource = Rect()
     private val logoBounds = RectF()
     private val iconBounds = RectF()
-    private val imageLogo: Bitmap? = BitmapFactory.decodeResource(resources, R.drawable.logosss)
+    private val imageLogo: Bitmap? = BitmapFactory.decodeResource(resources, R.drawable.splash_brand_tight_logo)
     private val sportLogos: List<Bitmap?> = listOf(
         BitmapFactory.decodeResource(resources, R.drawable.cricketlogo),
         BitmapFactory.decodeResource(resources, R.drawable.footballlogo),
@@ -74,10 +74,10 @@ class SportsSplashView @JvmOverloads constructor(
     private var iconGlowGradient: RadialGradient? = null
     private var animatorSet: AnimatorSet? = null
 
-    // Animation Properties
-    private var logoScale = 0f
+    // Animation Properties: logo starts visible from frame 1 so there is NEVER an empty screen
+    private var logoScale = 1f
     private var textAlpha = 0
-    private var textTranslateY = 80f
+    private var textTranslateY = 50f
     private var subtitleAlpha = 0
     private var iconsAlpha = 0
     private var iconsMotionProgress = 0f
@@ -113,12 +113,7 @@ class SportsSplashView @JvmOverloads constructor(
         sportIconPaint.alpha = 0 // Will be animated
 
         imageLogo?.let { bitmap ->
-            logoSource.set(
-                (bitmap.width * 0.18f).toInt(),
-                (bitmap.height * 0.29f).toInt(),
-                (bitmap.width * 0.84f).toInt(),
-                (bitmap.height * 0.53f).toInt()
-            )
+            logoSource.set(0, 0, bitmap.width, bitmap.height)
         }
     }
 
@@ -194,9 +189,9 @@ class SportsSplashView @JvmOverloads constructor(
     private fun startAnimations() {
         if (animatorSet?.isStarted == true) return
 
-        val logoAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 1000
-            interpolator = OvershootInterpolator(1.5f)
+        val logoAnim = ValueAnimator.ofFloat(1f, 1.08f, 1f).apply {
+            duration = 900
+            interpolator = DecelerateInterpolator()
             addUpdateListener {
                 logoScale = it.animatedValue as Float
                 postInvalidateOnAnimation()
@@ -204,20 +199,20 @@ class SportsSplashView @JvmOverloads constructor(
         }
 
         val textAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 800
-            startDelay = 600
+            duration = 650
+            startDelay = 150
             interpolator = DecelerateInterpolator()
             addUpdateListener {
                 val fraction = it.animatedValue as Float
                 textAlpha = (fraction * 255).toInt()
-                textTranslateY = 80f * (1f - fraction)
+                textTranslateY = 50f * (1f - fraction)
                 postInvalidateOnAnimation()
             }
         }
 
         val subtitleAnim = ValueAnimator.ofInt(0, 175).apply {
-            duration = 800
-            startDelay = 1000
+            duration = 650
+            startDelay = 350
             addUpdateListener {
                 subtitleAlpha = it.animatedValue as Int
                 postInvalidateOnAnimation()
@@ -225,8 +220,8 @@ class SportsSplashView @JvmOverloads constructor(
         }
 
         val bottomAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 800
-            startDelay = 1400
+            duration = 750
+            startDelay = 600
             addUpdateListener {
                 val fraction = it.animatedValue as Float
                 iconsAlpha = (fraction * 235).toInt()

@@ -10,7 +10,9 @@ import com.example.sportsxtreme.presentation.scoring.*
 import com.example.sportsxtreme.presentation.match.*
 import com.example.sportsxtreme.presentation.media.*
 import com.example.sportsxtreme.presentation.home.CommunityScreen
+import com.sportsxtreme.v2features.CommunityScreen2
 import com.example.sportsxtreme.presentation.home.LeaderboardScreen
+import com.sportsxtreme.v2features.LeaderBoardScreen2
 import com.example.sportsxtreme.presentation.home.MyCricketScreen
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
@@ -696,7 +698,7 @@ class HomeScreenView @JvmOverloads constructor(
     private fun createCommunityContent(context: Context): View {
         return ComposeView(context).apply {
             setContent {
-                CommunityScreen(onMenuClick = { openDrawer() })
+                CommunityScreen2(onMenuClick = { openDrawer() })
             }
         }
     }
@@ -717,7 +719,7 @@ class HomeScreenView @JvmOverloads constructor(
     private fun createLeaderboardContent(context: Context): View {
         return ComposeView(context).apply {
             setContent {
-                LeaderboardScreen(onMenuClick = { openDrawer() })
+                LeaderBoardScreen2(onMenuClick = { openDrawer() })
             }
         }
     }
