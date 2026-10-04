@@ -1,4 +1,4 @@
-package com.example.sportsxtreme.presentation.home
+package com.sportsxtreme.v2features
 
 import com.example.sportsxtreme.presentation.ui.theme.XtremeBgBlueHex
 import com.example.sportsxtreme.presentation.ui.theme.XtremeCardBlueHex
@@ -80,7 +80,7 @@ import java.time.format.DateTimeParseException
 import kotlin.math.abs
 import kotlin.math.max
 
-class HomeScreenView @JvmOverloads constructor(
+class HomeScreenViewV2 @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     private val topMode: TopMode = TopMode.SPORTS,
@@ -1912,6 +1912,8 @@ class HomeScreenView @JvmOverloads constructor(
             // Removed standard elevation to use custom gradient shadow/glow below
             setPadding(dp(16), dp(10), dp(16), dp(18)) // Taller top bar for the mode buttons
             WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
+
+            addView(xtremeTopBarButtons(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)))
 
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -4906,3 +4908,4 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 }
+
