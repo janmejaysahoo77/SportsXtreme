@@ -91,6 +91,8 @@ class TossActivity : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
 
         val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
+        val tournamentId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID).orEmpty()
+        val tournamentName = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_NAME).orEmpty()
         val viewModel: TossViewModel by viewModels {
             TossViewModel.factory(matchId, matchUseCases)
         }
@@ -110,6 +112,8 @@ class TossActivity : ComponentActivity() {
                             startActivity(
                                 Intent(this, FinalPageBeforeScoringActivity::class.java)
                                     .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
+                                    .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                                    .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_NAME, tournamentName)
                             )
                             finish()
                         },

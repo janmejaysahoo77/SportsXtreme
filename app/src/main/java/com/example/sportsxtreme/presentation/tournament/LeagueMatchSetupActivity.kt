@@ -83,6 +83,7 @@ class LeagueMatchSetupActivity : ComponentActivity() {
         val tournamentId = intent.getStringExtra("tournament_id").orEmpty()
         val fallbackTournamentName = intent.getStringExtra(EXTRA_TOURNAMENT_NAME).orEmpty()
         val matchId = intent.getStringExtra(StartMatchActivity.EXTRA_SCHEDULE_MATCH_ID).orEmpty()
+        val isTournamentMatchFlow = intent.getBooleanExtra(EXTRA_TOURNAMENT_MATCH_FLOW, false)
         val tournamentState = mutableStateOf<Tournament?>(null)
         val selectedStage = mutableStateOf("League Stage")
         val isSavingStage = mutableStateOf(false)
@@ -136,8 +137,10 @@ class LeagueMatchSetupActivity : ComponentActivity() {
                 onContinue = {
                     startActivity(
                         Intent(this, SelectPlayingTeamsActivity::class.java)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_SCHEDULE_FLOW, true)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_SCHEDULE_FLOW, !isTournamentMatchFlow)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_MATCH_FLOW, isTournamentMatchFlow)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_NAME, tournament?.name ?: fallbackTournamentName)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_STAGE, stage)
                     )
@@ -148,6 +151,7 @@ class LeagueMatchSetupActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_TOURNAMENT_NAME = "tournament_name"
+        const val EXTRA_TOURNAMENT_MATCH_FLOW = "tournament_match_flow"
     }
 }
 
