@@ -10,4 +10,9 @@
                 android:centerY="0.54" />
         </shape>
     </item>
+    <item
+        android:gravity="center"
+        android:width="220dp"
+        android:height="160dp"
+        android:drawable="@drawable/splash_brand_tight_logo" />
 </layer-list>

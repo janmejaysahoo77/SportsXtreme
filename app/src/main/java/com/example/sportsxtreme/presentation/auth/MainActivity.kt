@@ -12,10 +12,14 @@ import android.location.LocationManager
 import android.os.Bundle
 import android.os.Looper
 import android.util.Log
+import android.animation.ObjectAnimator
+import android.view.View
 import android.view.ViewTreeObserver
+import android.view.animation.DecelerateInterpolator
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.core.animation.doOnEnd
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -97,7 +101,7 @@ class MainActivity : ComponentActivity() {
         Members
     }
 
-    private var isCustomSplashReady = false
+    private var isComposeInitialized = false
     private var homeScreenView: HomeScreenView? = null
     private var emailVerificationScreenView: EmailVerificationScreenView? = null
     private var pendingOtpContact = ""
@@ -123,29 +127,22 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
-        AuthDependencies.initialize(applicationContext)
         val splashScreen = installSplashScreen()
-
-        // Keep the system splash on screen until our custom splash view has drawn
-        splashScreen.setKeepOnScreenCondition { !isCustomSplashReady }
+        // Instantly dismiss the OS system splash overlay without any animation or icon zoom
+        splashScreen.setOnExitAnimationListener { splashScreenViewProvider ->
+            splashScreenViewProvider.remove()
+        }
 
         super.onCreate(savedInstanceState)
-        requestLocationPermissionAndUpdate()
         receiveIncomingInviteToken(intent)
         val hasIncomingAuthLink = handleIncomingAuthLink(intent)
-        if (intent.getBooleanExtra(EXTRA_FORCE_LOGIN, false)) {
-            isCustomSplashReady = true
-            currentScreen = Screen.Login
-        } else if (intent.getStringExtra(EXTRA_START_DESTINATION) == DESTINATION_SPORT_SELECTION) {
-            isCustomSplashReady = true
-            currentScreen = Screen.SportSelection
-        } else if (hasIncomingAuthLink) {
-            isCustomSplashReady = true
-            currentScreen = Screen.Login
-        }
+        val forceLogin = intent.getBooleanExtra(EXTRA_FORCE_LOGIN, false)
+        val startSportSelection = intent.getStringExtra(EXTRA_START_DESTINATION) == DESTINATION_SPORT_SELECTION
+
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when (currentScreen) {
@@ -164,6 +161,35 @@ class MainActivity : ComponentActivity() {
                 }
             }
         })
+
+        if (forceLogin) {
+            currentScreen = Screen.Login
+            initComposeContent()
+        } else if (startSportSelection) {
+            currentScreen = Screen.SportSelection
+            initComposeContent()
+        } else if (hasIncomingAuthLink) {
+            currentScreen = Screen.Login
+            initComposeContent()
+        } else {
+            showSplashDirectly()
+        }
+    }
+
+    private fun showSplashDirectly() {
+        currentScreen = Screen.Splash
+        setContentView(R.layout.activity_splash)
+        val splash = findViewById<SportsSplashView>(R.id.sportsSplashView)
+        splash?.postDelayed({
+            if (currentScreen == Screen.Splash) {
+                routeAfterSplash()
+            }
+        }, 2800L)
+    }
+
+    private fun initComposeContent() {
+        if (isComposeInitialized) return
+        isComposeInitialized = true
         setContent {
             Scaffold(
                 containerColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.8f)
@@ -191,6 +217,12 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    private fun ensureComposeInitialized() {
+        if (!isComposeInitialized) {
+            initComposeContent()
         }
     }
 
@@ -264,19 +296,10 @@ class MainActivity : ComponentActivity() {
         }
         when (currentScreen) {
             Screen.Splash -> AndroidView(
+                modifier = Modifier.fillMaxSize(),
                 factory = { context ->
                     homeScreenView = null
                     SportsSplashView(context).apply {
-                        viewTreeObserver.addOnPreDrawListener(
-                            object : ViewTreeObserver.OnPreDrawListener {
-                                override fun onPreDraw(): Boolean {
-                                    isCustomSplashReady = true
-                                    viewTreeObserver.removeOnPreDrawListener(this)
-                                    return true
-                                }
-                            }
-                        )
-
                         postDelayed({
                             routeAfterSplash()
                         }, 2800L)
@@ -365,6 +388,7 @@ class MainActivity : ComponentActivity() {
     private fun showMainScreen() {
         homeScreenView = null
         currentScreen = Screen.Onboarding
+        ensureComposeInitialized()
     }
 
     private fun routeAfterSplash() {
@@ -379,46 +403,54 @@ class MainActivity : ComponentActivity() {
         homeScreenView = null
         pendingPhoneSignupNumber = verifiedPhoneNumber
         currentScreen = Screen.Signup
+        ensureComposeInitialized()
     }
 
     fun showLoginScreen() {
         homeScreenView = null
         currentScreen = Screen.Login
+        ensureComposeInitialized()
     }
 
     fun showEmailVerificationScreen() {
         homeScreenView = null
         emailVerificationScreenView = null
         currentScreen = Screen.EmailVerification
+        ensureComposeInitialized()
     }
 
     fun showPhoneAuthScreen() {
         homeScreenView = null
         pendingPhoneSignupNumber = null
         currentScreen = Screen.PhoneAuth
+        ensureComposeInitialized()
     }
 
     fun showOtpVerificationScreen(contact: String) {
         homeScreenView = null
         pendingOtpContact = contact
         currentScreen = Screen.OtpVerification
+        ensureComposeInitialized()
     }
 
     fun showVerificationCompleteScreen() {
         homeScreenView = null
         emailVerificationScreenView = null
         currentScreen = Screen.VerificationComplete
+        ensureComposeInitialized()
     }
 
     fun showSportSelectionScreen() {
         homeScreenView = null
         currentScreen = Screen.SportSelection
+        ensureComposeInitialized()
     }
 
     fun showHomeScreen() {
         homeScreenView = null
         emailVerificationScreenView = null
         currentScreen = Screen.Home
+        ensureComposeInitialized()
         requestLocationPermissionAndUpdate()
     }
 
@@ -426,6 +458,7 @@ class MainActivity : ComponentActivity() {
         homeScreenView = null
         emailVerificationScreenView = null
         currentScreen = Screen.Members
+        ensureComposeInitialized()
     }
 
     fun showXtremeMediaScreen() {
