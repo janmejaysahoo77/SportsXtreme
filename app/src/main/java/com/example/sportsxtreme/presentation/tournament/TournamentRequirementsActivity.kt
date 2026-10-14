@@ -110,6 +110,7 @@ class TournamentRequirementsActivity : ComponentActivity() {
                 summary = TournamentRequirementSummary(
                     tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID).orEmpty(),
                     date = intent.getStringExtra(EXTRA_START_DATE).orEmpty(),
+                    dateToBeAnnounced = intent.getBooleanExtra(EXTRA_DATE_TO_BE_ANNOUNCED, false),
                     matchForm = intent.getStringExtra(EXTRA_MATCH_FORM).orEmpty(),
                     ballType = intent.getStringExtra(EXTRA_BALL_TYPE).orEmpty()
                 ),
@@ -128,6 +129,7 @@ class TournamentRequirementsActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_START_DATE = "tournament_start_date"
+        const val EXTRA_DATE_TO_BE_ANNOUNCED = "tournament_date_to_be_announced"
         const val EXTRA_TOURNAMENT_ID = "tournament_id"
         const val EXTRA_MATCH_FORM = "tournament_match_form"
         const val EXTRA_BALL_TYPE = "tournament_ball_type"
@@ -157,6 +159,7 @@ class TournamentRequirementsActivity : ComponentActivity() {
 private data class TournamentRequirementSummary(
     val tournamentId: String,
     val date: String,
+    val dateToBeAnnounced: Boolean,
     val matchForm: String,
     val ballType: String
 )
@@ -224,6 +227,7 @@ private fun TournamentRequirementsScreen(
                             Tournament(
                                 id = summary.tournamentId,
                                 startDate = summary.date,
+                                dateToBeAnnounced = summary.dateToBeAnnounced,
                                 matchForm = summary.matchForm,
                                 ballType = summary.ballType
                             ),
@@ -430,7 +434,7 @@ private fun TournamentDetailsSection(requirements: TournamentRequirements, onLoc
 @Composable
 private fun WinningPrizeSection(requirements: TournamentRequirements, showErrors: Boolean, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Winning Prize", "REWARDS", iconRes = R.drawable.tournamentlogo) {
-        RequiredCheckLine("Trophy Included", requirements.trophyIncluded, showErrors && !requirements.trophyIncluded) { onChange(requirements.copy(trophyIncluded = !requirements.trophyIncluded)) }
+        OptionalCheckLine("Trophy Included (Optional)", requirements.trophyIncluded) { onChange(requirements.copy(trophyIncluded = !requirements.trophyIncluded)) }
         ReqInput("Prize Pool", "Rs 50,000", requirements.prizePool, showError = showErrors && requirements.prizePool.isBlank()) { onChange(requirements.copy(prizePool = it)) }
         ReqInput("Runner-up Prize", "Rs 10,000", requirements.runnerUpPrize, showError = showErrors && requirements.runnerUpPrize.isBlank()) { onChange(requirements.copy(runnerUpPrize = it)) }
     }
@@ -450,7 +454,7 @@ private fun FormatSection(requirements: TournamentRequirements, onChange: (Tourn
 @Composable
 private fun NotesSection(requirements: TournamentRequirements, showErrors: Boolean, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Tournament Notes", "RULES") {
-        ReqInput("Notes", "Add rules, prize breakdown, reporting time, dress code, or important instructions", requirements.notes, minHeight = 96.dp, showError = showErrors && requirements.notes.isBlank()) { onChange(requirements.copy(notes = it)) }
+        OptionalReqInput("Notes", "Add rules, prize breakdown, reporting time, dress code, or important instructions", requirements.notes, minHeight = 96.dp) { onChange(requirements.copy(notes = it)) }
     }
 }
 
@@ -580,6 +584,36 @@ private fun ReqInput(label: String, placeholder: String, value: String, modifier
     }
 }
 
+@Composable
+private fun OptionalReqInput(label: String, placeholder: String, value: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp, onValueChange: (String) -> Unit) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text(label, color = Color(0xFF99A9A5), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            textStyle = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+            singleLine = minHeight <= 56.dp,
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(minHeight)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(Brush.verticalGradient(listOf(Color(0xFF172033), ReqField)))
+                        .border(1.dp, Color(0xFF42526F), RoundedCornerShape(13.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    contentAlignment = if (minHeight > 56.dp) Alignment.TopStart else Alignment.CenterStart
+                ) {
+                    if (value.isEmpty()) {
+                        Text(placeholder, color = Color(0xFF768784), fontSize = 14.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    innerTextField()
+                }
+            }
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RequiredDateInput(label: String, value: String, showError: Boolean, onValueChange: (String) -> Unit) {
@@ -631,14 +665,24 @@ private fun RequiredCheckLine(text: String, checked: Boolean, showError: Boolean
 }
 
 @Composable
+private fun OptionalCheckLine(text: String, checked: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SmallBadge(active = checked)
+        Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(start = 10.dp).weight(1f))
+    }
+}
+
+@Composable
 private fun RequiredLabel(label: String) {
     Text("$label *", color = Color(0xFF99A9A5), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
 }
 
 private fun TournamentRequirements.isComplete(): Boolean =
     location.isNotBlank() && entryFee.isNotBlank() && numberOfTeams.isNotBlank() &&
-        expectedEndDate.isNotBlank() && trophyIncluded && prizePool.isNotBlank() &&
-        runnerUpPrize.isNotBlank() && notes.isNotBlank()
+        expectedEndDate.isNotBlank() && prizePool.isNotBlank() && runnerUpPrize.isNotBlank()
 
 @Composable
 private fun SelectBox(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {

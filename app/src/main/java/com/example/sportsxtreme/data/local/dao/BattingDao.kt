@@ -24,4 +24,7 @@ interface BattingDao {
 
     @Query("SELECT * FROM batting_scorecards WHERE matchId = :matchId AND inningsId = :inningsId ORDER BY status = 'NOT_BATTED', runs DESC, balls ASC")
     fun observeScorecard(matchId: String, inningsId: String): Flow<List<BattingEntity>>
+
+    @Query("SELECT * FROM batting_scorecards WHERE matchId = :matchId AND inningsId = :inningsId")
+    suspend fun getScorecard(matchId: String, inningsId: String): List<BattingEntity>
 }

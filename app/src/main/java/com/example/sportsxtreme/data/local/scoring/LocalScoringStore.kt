@@ -49,10 +49,29 @@ class LocalScoringStore @Inject constructor(
 
         val inserted = ballEventDao.insertBall(event.copy(syncState = SyncState.PENDING).toEntity()) != -1L
         val events = ballEventDao.getBallEvents(event.matchId, event.inningsId).map { it.toDomain() }
-        val projection = resolveBattingPair(innings, InningsProjectionCalculator.calculate(events))
+        val projection = InningsProjectionCalculator.calculate(events)
         val updatedAtEpochMs = events.maxOfOrNull { it.timestampEpochMs } ?: event.timestampEpochMs
 
         persistProjection(innings, projection, updatedAtEpochMs)
+        val match = matchDao.getMatch(event.matchId)
+        val wicketLimit = playerDao.getPlayingXI(event.matchId, innings.battingTeamId).size.let { if (it > 1) it - 1 else 10 }
+        val inningsComplete = (match?.overs?.let { projection.legalBalls >= it * 6 } == true) ||
+            projection.wickets >= wicketLimit ||
+            (innings.target?.let { projection.totalScore >= it } == true)
+        if (inningsComplete && innings.status == "LIVE") {
+            val completedAt = System.currentTimeMillis()
+            inningsDao.updateInnings(innings.copy(
+                strikerId = projection.strikerId,
+                nonStrikerId = projection.nonStrikerId,
+                currentBowlerId = projection.bowlerId,
+                score = projection.totalScore,
+                wickets = projection.wickets,
+                legalBalls = projection.legalBalls,
+                status = "COMPLETED",
+                completedAtEpochMs = completedAt
+            ))
+            match?.let { matchDao.updateMatch(it.copy(status = "INNINGS_BREAK", updatedAtEpochMs = completedAt)) }
+        }
         if (inserted) enqueueDeliverySync(event)
 
         LocalScoringResult(inserted = inserted, projection = projection)
@@ -88,7 +107,7 @@ class LocalScoringStore @Inject constructor(
         check(ballEventDao.insertBall(reversal.toEntity()) != -1L) { "Unable to record delivery reversal" }
         val innings = requireNotNull(inningsDao.getInnings(originalDelivery.inningsId)) { "Innings not found" }
         val events = ballEventDao.getBallEvents(matchId, originalDelivery.inningsId).map { it.toDomain() }
-        val projection = resolveBattingPair(innings, InningsProjectionCalculator.calculate(events))
+        val projection = InningsProjectionCalculator.calculate(events)
         persistProjection(innings, projection, timestampEpochMs)
         enqueueDeliverySync(reversal)
 
@@ -110,7 +129,7 @@ class LocalScoringStore @Inject constructor(
             val events = ballEventDao.getBallEvents(innings.matchId, inningsId).map { it.toDomain() }
             persistProjection(
                 innings = innings,
-                projection = resolveBattingPair(innings, InningsProjectionCalculator.calculate(events)),
+            projection = InningsProjectionCalculator.calculate(events),
                 updatedAtEpochMs = events.maxOfOrNull { it.timestampEpochMs } ?: 0L
             )
         }
@@ -190,23 +209,6 @@ class LocalScoringStore @Inject constructor(
                 bowlerId = projection.bowlerId,
                 updatedAtEpochMs = updatedAtEpochMs
             )
-        )
-    }
-
-    private suspend fun resolveBattingPair(
-        innings: com.example.sportsxtreme.data.local.entity.InningsEntity,
-        projection: InningsProjection
-    ): InningsProjection {
-        if (projection.strikerId != null && projection.nonStrikerId != null) return projection
-
-        val selectedPlayers = playerDao.getPlayingXI(innings.matchId, innings.battingTeamId)
-            .map { it.playerId }
-            .ifEmpty { playerDao.getPlayers(innings.battingTeamId).map { it.playerId } }
-        val availablePlayers = selectedPlayers.filterNot { it in projection.batting.map { batting -> batting.playerId } }
-            .iterator()
-        return projection.copy(
-            strikerId = projection.strikerId ?: availablePlayers.takeIf { it.hasNext() }?.next(),
-            nonStrikerId = projection.nonStrikerId ?: availablePlayers.takeIf { it.hasNext() }?.next()
         )
     }
 

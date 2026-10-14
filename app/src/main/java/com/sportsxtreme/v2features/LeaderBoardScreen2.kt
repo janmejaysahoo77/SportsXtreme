@@ -6,6 +6,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -46,8 +54,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.Locale
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.presentation.profile.Lime
+import coil3.compose.AsyncImage
+import com.google.firebase.firestore.FirebaseFirestore
 
 // Color Palette matching pixel-perfect screenshots
 private val GreenAccent = Color(0xFFC1FF00)
@@ -82,7 +93,9 @@ data class PlayerRank(
     val country: String,
     val teamCode: String,
     val points: Int,
-    val avatarBorderColor: Color
+    val avatarBorderColor: Color,
+    val photoUrl: String = "",
+    val statistics: String = ""
 )
 
 data class ClubRank(
@@ -90,35 +103,10 @@ data class ClubRank(
     val trend: Trend,
     val code: String,
     val fullName: String,
-    val points: Int
-)
-
-// Default Data for Players (Image 1 & Image 2)
-private val playerLeaderboardData = listOf(
-    PlayerRank(1, Trend(TrendType.UP, 2), "VK", "Virat Kohli", "India", "RCB", 9120, GreenAccent),
-    PlayerRank(2, Trend(TrendType.DOWN, 1), "RG", "Rohit Sharma", "India", "MI", 8950, CyanAccent),
-    PlayerRank(3, Trend(TrendType.SAME), "SS", "Suryakumar Yadav", "India", "MI", 8786, CyanAccent),
-    PlayerRank(4, Trend(TrendType.UP, 3), "SK", "Shubman Gill", "India", "GT", 8643, CyanAccent),
-    PlayerRank(5, Trend(TrendType.DOWN, 1), "RR", "Riyan Parag", "India", "RR", 8421, CyanAccent),
-    PlayerRank(6, Trend(TrendType.SAME), "PV", "Pat Cummins", "Australia", "SRH", 8215, GoldAccent),
-    PlayerRank(7, Trend(TrendType.UP, 4), "MS", "Marcus Stoinis", "Australia", "LSG", 7980, CyanAccent),
-    PlayerRank(8, Trend(TrendType.DOWN, 2), "HD", "Heinrich Klaasen", "South Africa", "SRH", 7763, GoldAccent),
-    PlayerRank(9, Trend(TrendType.SAME), "SA", "Sanju Samson", "India", "RR", 7541, CyanAccent),
-    PlayerRank(10, Trend(TrendType.UP, 1), "DJ", "David Miller", "South Africa", "GT", 7310, CyanAccent)
-)
-
-// Default Data for Clubs & Teams (Image 3)
-private val clubLeaderboardData = listOf(
-    ClubRank(1, Trend(TrendType.UP, 2), "RCB", "Royal Challengers Bengaluru", 9120),
-    ClubRank(2, Trend(TrendType.DOWN, 1), "MI", "Mumbai Indians", 8950),
-    ClubRank(3, Trend(TrendType.SAME), "GT", "Gujarat Titans", 8786),
-    ClubRank(4, Trend(TrendType.UP, 1), "RR", "Rajasthan Royals", 8643),
-    ClubRank(5, Trend(TrendType.DOWN, 1), "SRH", "Sunrisers Hyderabad", 8421),
-    ClubRank(6, Trend(TrendType.SAME), "LSG", "Lucknow Super Giants", 8215),
-    ClubRank(7, Trend(TrendType.UP, 2), "CSK", "Chennai Super Kings", 7980),
-    ClubRank(8, Trend(TrendType.DOWN, 1), "KKR", "Kolkata Knight Riders", 7763),
-    ClubRank(9, Trend(TrendType.SAME), "PBKS", "Punjab Kings", 7541),
-    ClubRank(10, Trend(TrendType.UP, 1), "DC", "Delhi Capitals", 7310)
+    val points: Int,
+    val logoUrl: String = "",
+    val statistics: String = "",
+    val tieBreakValue: Double = 0.0
 )
 
 @Composable
@@ -129,17 +117,110 @@ fun LeaderBoardScreen2(
     
     // Filter states
     var selectedSkill by remember { mutableStateOf("Batting") }
-    var selectedType by remember { mutableStateOf("Leather") }
-    var selectedFormat by remember { mutableStateOf("Limited Over") }
+    var selectedType by remember { mutableStateOf("Leather Ball") }
+    var selectedFormat by remember { mutableStateOf("Limited Overs") }
+    var selectedTournamentId by remember { mutableStateOf("") }
+    var selectedTournamentName by remember { mutableStateOf("Overall") }
 
     // Dropdown visibility states
     var isSkillDropdownOpen by remember { mutableStateOf(false) }
     var isTypeDropdownOpen by remember { mutableStateOf(false) }
     var isFormatDropdownOpen by remember { mutableStateOf(false) }
+    var isTournamentDropdownOpen by remember { mutableStateOf(false) }
 
-    val skills = listOf("Batting", "Bowling", "All rounder")
-    val types = listOf("Leather", "Tennis", "Others")
-    val formats = listOf("Limited Over", "T20", "T10", "Test Cricket", "Box / Tuf")
+    val skills = listOf("Batting", "Bowling", "All-rounder")
+    val types = listOf("Tennis Ball", "Leather Ball", "Other Ball")
+    val formats = listOf("Limited Overs", "T20", "T10", "Test")
+    val playerRows = remember { androidx.compose.runtime.mutableStateListOf<PlayerRank>() }
+    val teamRows = remember { androidx.compose.runtime.mutableStateListOf<ClubRank>() }
+    val tournamentOptions = remember { androidx.compose.runtime.mutableStateListOf<Pair<String, String>>() }
+    var leaderboardError by remember { mutableStateOf<String?>(null) }
+    val firestore = remember { FirebaseFirestore.getInstance() }
+
+    DisposableEffect(firestore) {
+        val registration = firestore.collection("tournaments").addSnapshotListener { snapshot, _ ->
+            tournamentOptions.clear()
+            tournamentOptions.add("" to "Overall")
+            tournamentOptions.addAll(snapshot?.documents.orEmpty().map { it.id to (it.getString("name") ?: "Tournament") }.sortedBy { it.second })
+        }
+        onDispose { registration.remove() }
+    }
+
+    DisposableEffect(firestore, selectedTab, selectedType, selectedFormat, selectedSkill, selectedTournamentId) {
+        val ballKey = when (selectedType) { "Tennis Ball" -> "TENNIS"; "Other Ball" -> "OTHER"; else -> "LEATHER" }
+        val formatKey = when (selectedFormat) { "Limited Overs" -> "LIMITED_OVERS"; "Test" -> "TEST"; else -> selectedFormat.uppercase() }
+        val activeTournamentId = if (selectedTab == LeaderboardTab.PLAYER) "" else selectedTournamentId
+        val registrations = mutableListOf<com.google.firebase.firestore.ListenerRegistration>()
+        if (selectedTab == LeaderboardTab.PLAYER) {
+            val registration = firestore.collection("leaderboards").document("playerAggregates").collection("entries")
+                .whereEqualTo("sport", "CRICKET")
+                .addSnapshotListener { snapshot, error ->
+                    playerRows.clear()
+                    if (error != null) {
+                        leaderboardError = "${error.code}: ${error.localizedMessage ?: "Unable to load player leaderboard"} (leaderboards/playerAggregates/entries)"
+                        return@addSnapshotListener
+                    }
+                    leaderboardError = null
+                    val documents = snapshot?.documents.orEmpty().filter { doc ->
+                        doc.getString("ballType") == ballKey &&
+                            doc.getString("format") == formatKey &&
+                            doc.getString("tournamentId").orEmpty() == activeTournamentId
+                    }
+                    val records = documents.map { doc ->
+                        val id = doc.getString("playerId").orEmpty()
+                        val value = when (selectedSkill) {
+                            "Bowling" -> doc.getLong("bowlingPoints") ?: 0L
+                            "All-rounder" -> doc.getLong("allRounderPoints") ?: 0L
+                            else -> doc.getLong("battingPoints") ?: 0L
+                        }
+                        val name = doc.getString("name").orEmpty().ifBlank { id }
+                        val stats = when (selectedSkill) {
+                            "Bowling" -> "W ${doc.getLong("wickets") ?: 0} • ECO ${rate((doc.getLong("runsConceded") ?: 0L).toDouble() * 6 / (doc.getLong("legalBalls") ?: 0L).coerceAtLeast(1))} • AVG ${rate((doc.getLong("runsConceded") ?: 0L).toDouble() / (doc.getLong("wickets") ?: 0L).coerceAtLeast(1))}"
+                            "All-rounder" -> "BAT ${doc.getLong("battingPoints") ?: 0} • BOWL ${doc.getLong("bowlingPoints") ?: 0} • FIELD ${doc.getLong("fieldingPoints") ?: 0}"
+                            else -> "RUNS ${doc.getLong("runs") ?: 0} • AVG ${rate((doc.getLong("runs") ?: 0L).toDouble() / (doc.getLong("outs") ?: 0L).coerceAtLeast(1))} • SR ${rate((doc.getLong("runs") ?: 0L).toDouble() * 100 / (doc.getLong("balls") ?: 0L).coerceAtLeast(1))}"
+                        }
+                        val displayStats = if (selectedSkill == "All-rounder") stats else "$stats • FIELD ${doc.getLong("fieldingPoints") ?: 0}"
+                        Triple(value, id, PlayerRank(0, Trend(TrendType.SAME), name.initials(), name,
+                            "", doc.getString("teamShortName").orEmpty().ifBlank { doc.getString("teamName").orEmpty() },
+                            value.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), CyanAccent,
+                            doc.getString("profilePhotoUrl").orEmpty(), displayStats))
+                    }.sortedWith(compareByDescending<Triple<Long, String, PlayerRank>> { it.first }.thenBy { it.third.name.lowercase(Locale.ROOT) }.thenBy { it.second })
+                    playerRows.addAll(records.mapIndexed { index, row -> row.third.copy(rank = index + 1) })
+                }
+            registrations += registration
+        } else {
+            val registration = firestore.collection("leaderboards").document("teamAggregates").collection("entries")
+                .whereEqualTo("sport", "CRICKET")
+                .addSnapshotListener { snapshot, error ->
+                    teamRows.clear()
+                    if (error != null) {
+                        leaderboardError = "${error.code}: ${error.localizedMessage ?: "Unable to load team leaderboard"} (leaderboards/teamAggregates/entries)"
+                        return@addSnapshotListener
+                    }
+                    leaderboardError = null
+                    val documents = snapshot?.documents.orEmpty().filter { doc ->
+                        doc.getString("ballType") == ballKey &&
+                            doc.getString("format") == formatKey &&
+                            doc.getString("tournamentId").orEmpty() == activeTournamentId
+                    }
+                    val records = documents.map { doc ->
+                        val id = doc.getString("teamId").orEmpty()
+                        val points = doc.getLong("points") ?: 0L
+                        val wins = doc.getLong("wins") ?: 0L
+                        val nrr = doc.getDouble("netRunRate") ?: 0.0
+                        val stats = "M ${doc.getLong("matchesPlayed") ?: 0} • W $wins • L ${doc.getLong("losses") ?: 0} • T ${doc.getLong("ties") ?: 0}"
+                        Triple(points, wins, ClubRank(0, Trend(TrendType.SAME), doc.getString("shortName").orEmpty().ifBlank { id.take(3) },
+                            doc.getString("name").orEmpty().ifBlank { id }, points.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), doc.getString("logoUrl").orEmpty(), "$stats • NRR ${rate(nrr)}", nrr) to id)
+                    }.sortedWith(compareByDescending<Triple<Long, Long, Pair<ClubRank, String>>> { it.first }
+                        .thenByDescending { it.second }
+                        .thenByDescending { if (selectedTournamentId.isNotBlank() && formatKey != "TEST") it.third.first.tieBreakValue else 0.0 }
+                        .thenBy { it.third.second })
+                    teamRows.addAll(records.mapIndexed { index, row -> row.third.first.copy(rank = index + 1) })
+                }
+            registrations += registration
+        }
+        onDispose { registrations.forEach { it.remove() } }
+    }
 
     Box(
         modifier = Modifier
@@ -198,6 +279,7 @@ fun LeaderBoardScreen2(
                             isSkillDropdownOpen = false
                             isTypeDropdownOpen = false
                             isFormatDropdownOpen = false
+                            isTournamentDropdownOpen = false
                         }
                     )
                 }
@@ -208,28 +290,41 @@ fun LeaderBoardScreen2(
                         Spacer(modifier = Modifier.height(14.dp))
                         FilterSection(
                             selectedSkill = selectedSkill,
+                            selectedTournament = selectedTournamentName,
+                            showTournament = selectedTab != LeaderboardTab.PLAYER,
                             selectedType = selectedType,
                             selectedFormat = selectedFormat,
                             isSkillDropdownOpen = isSkillDropdownOpen,
                             isTypeDropdownOpen = isTypeDropdownOpen,
                             isFormatDropdownOpen = isFormatDropdownOpen,
+                            isTournamentDropdownOpen = isTournamentDropdownOpen,
                             skills = skills,
+                            tournaments = tournamentOptions.map { it.second },
                             types = types,
                             formats = formats,
                             onToggleSkill = {
                                 isSkillDropdownOpen = !isSkillDropdownOpen
                                 isTypeDropdownOpen = false
                                 isFormatDropdownOpen = false
+                                isTournamentDropdownOpen = false
                             },
                             onToggleType = {
                                 isTypeDropdownOpen = !isTypeDropdownOpen
                                 isSkillDropdownOpen = false
                                 isFormatDropdownOpen = false
+                                isTournamentDropdownOpen = false
                             },
                             onToggleFormat = {
                                 isFormatDropdownOpen = !isFormatDropdownOpen
                                 isSkillDropdownOpen = false
                                 isTypeDropdownOpen = false
+                                isTournamentDropdownOpen = false
+                            },
+                            onToggleTournament = {
+                                isTournamentDropdownOpen = !isTournamentDropdownOpen
+                                isSkillDropdownOpen = false
+                                isTypeDropdownOpen = false
+                                isFormatDropdownOpen = false
                             },
                             onSelectSkill = {
                                 selectedSkill = it
@@ -242,6 +337,11 @@ fun LeaderBoardScreen2(
                             onSelectFormat = {
                                 selectedFormat = it
                                 isFormatDropdownOpen = false
+                            },
+                            onSelectTournament = { name ->
+                                selectedTournamentName = name
+                                selectedTournamentId = tournamentOptions.firstOrNull { it.second == name }?.first.orEmpty()
+                                isTournamentDropdownOpen = false
                             }
                         )
                     }
@@ -253,17 +353,32 @@ fun LeaderBoardScreen2(
                     TableHeader(tab = selectedTab)
                 }
 
+                leaderboardError?.let { error ->
+                    item {
+                        Text(error, color = Color(0xFFFF7A7A), fontSize = 12.sp,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), textAlign = TextAlign.Center)
+                    }
+                }
+
                 // 6. Ranking Rows
                 when (selectedTab) {
                     LeaderboardTab.PLAYER -> {
-                        items(playerLeaderboardData) { player ->
+                        items(playerRows) { player ->
                             PlayerRankingRow(player = player)
                         }
                     }
                     LeaderboardTab.TEAMS, LeaderboardTab.CLUBS -> {
-                        items(clubLeaderboardData) { club ->
+                        items(teamRows) { club ->
                             ClubRankingRow(club = club)
                         }
+                    }
+                }
+
+                if (leaderboardError == null && ((selectedTab == LeaderboardTab.PLAYER && playerRows.isEmpty()) ||
+                    (selectedTab != LeaderboardTab.PLAYER && teamRows.isEmpty()))) {
+                    item {
+                        Text("No finalized match rankings for these filters yet.", color = MutedText, fontSize = 12.sp,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), textAlign = TextAlign.Center)
                     }
                 }
 
@@ -436,28 +551,35 @@ private fun TabsRow(
 @Composable
 private fun FilterSection(
     selectedSkill: String,
+    selectedTournament: String,
+    showTournament: Boolean,
     selectedType: String,
     selectedFormat: String,
     isSkillDropdownOpen: Boolean,
     isTypeDropdownOpen: Boolean,
     isFormatDropdownOpen: Boolean,
+    isTournamentDropdownOpen: Boolean,
     skills: List<String>,
+    tournaments: List<String>,
     types: List<String>,
     formats: List<String>,
     onToggleSkill: () -> Unit,
     onToggleType: () -> Unit,
     onToggleFormat: () -> Unit,
+    onToggleTournament: () -> Unit,
     onSelectSkill: (String) -> Unit,
     onSelectType: (String) -> Unit,
-    onSelectFormat: (String) -> Unit
+    onSelectFormat: (String) -> Unit,
+    onSelectTournament: (String) -> Unit
 ) {
     Column {
         // Pills Row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Pill 1: Skill (Batting / Bowling / All rounder)
             FilterPill(
@@ -467,7 +589,7 @@ private fun FilterSection(
                 onClick = onToggleSkill
             )
 
-            // Pill 2: Type (Leather / Tennis / Others)
+            // Pill 2: Ball type
             FilterPill(
                 iconType = FilterIconType.BALL,
                 label = selectedType,
@@ -475,13 +597,21 @@ private fun FilterSection(
                 onClick = onToggleType
             )
 
-            // Pill 3: Format (Limited Over / T20 / T10 / Test Cricket / Box / Tuf)
+            // Pill 3: Match format
             FilterPill(
                 iconType = FilterIconType.TROPHY,
                 label = selectedFormat,
                 isOpen = isFormatDropdownOpen,
                 onClick = onToggleFormat
             )
+            if (showTournament) {
+                FilterPill(
+                    iconType = FilterIconType.MORE,
+                    label = selectedTournament,
+                    isOpen = isTournamentDropdownOpen,
+                    onClick = onToggleTournament
+                )
+            }
         }
 
         // Expanded Dropdown Overlay (Image 2)
@@ -517,7 +647,7 @@ private fun FilterSection(
                         DropdownItemData(
                             label = type,
                             iconType = when (type) {
-                                "Leather", "Tennis" -> FilterIconType.BALL
+                                "Leather Ball", "Tennis Ball" -> FilterIconType.BALL
                                 else -> FilterIconType.MORE
                             },
                             isSelected = type == selectedType
@@ -542,6 +672,13 @@ private fun FilterSection(
                     modifier = Modifier.weight(1f)
                 )
             }
+            if (showTournament && isTournamentDropdownOpen) {
+                DropdownMenuCard(
+                    items = tournaments.map { DropdownItemData(it, FilterIconType.TROPHY, it == selectedTournament) },
+                    onItemClick = { onSelectTournament(it.label) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
@@ -563,7 +700,7 @@ private fun FilterPill(
             .background(Color(0xFF091217))
             .border(1.2.dp, PillBorder, CircleShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -577,7 +714,8 @@ private fun FilterPill(
                 text = label,
                 color = Color.White,
                 fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
             )
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -735,11 +873,11 @@ private fun TableHeader(tab: LeaderboardTab) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "#",
+            text = "Rank",
             color = MutedText,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(48.dp)
+            modifier = Modifier.width(if (tab == LeaderboardTab.PLAYER) 36.dp else 48.dp)
         )
 
         val col2Text = when (tab) {
@@ -748,23 +886,16 @@ private fun TableHeader(tab: LeaderboardTab) {
             LeaderboardTab.CLUBS -> "CLUB"
         }
 
+        // Keep the heading aligned with the player name / team row content.
+        Spacer(modifier = Modifier.width(if (tab == LeaderboardTab.PLAYER) 47.dp else 50.dp))
+
         Text(
-            text = col2Text,
+            text = if (tab == LeaderboardTab.PLAYER) "PLAYER / TEAM" else col2Text,
             color = MutedText,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f)
         )
-
-        if (tab == LeaderboardTab.PLAYER) {
-            Text(
-                text = "TEAM",
-                color = MutedText,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.width(70.dp)
-            )
-        }
 
         Text(
             text = "POINTS",
@@ -779,47 +910,76 @@ private fun TableHeader(tab: LeaderboardTab) {
 
 @Composable
 private fun PlayerRankingRow(player: PlayerRank) {
+    val isTopThree = player.rank in 1..3
+    val rankColor = if (isTopThree) GoldAccent else Color.White
+    val rowShape = RoundedCornerShape(10.dp)
+    val goldSweepProgress = if (isTopThree) {
+        val transition = rememberInfiniteTransition(label = "podiumGoldSweep")
+        val progress by transition.animateFloat(
+            initialValue = -0.25f,
+            targetValue = 1.25f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 2400, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "goldSweepProgress"
+        )
+        progress
+    } else 0f
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp)
-            .background(CardBg)
-            .border(0.5.dp, TableBorder)
-            .padding(horizontal = 10.dp),
+            .height(76.dp)
+            .shadow(
+                elevation = if (isTopThree) 5.dp else 0.dp,
+                shape = rowShape,
+                ambientColor = if (isTopThree) GoldAccent.copy(alpha = 0.08f) else Color.Transparent,
+                spotColor = if (isTopThree) GoldAccent.copy(alpha = 0.16f) else Color.Transparent,
+                clip = false
+            )
+            .background(if (isTopThree) Color(0xFF100F0A) else CardBg, rowShape)
+            .drawBehind {
+                if (isTopThree) {
+                    drawRoundRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(Color.Transparent, GoldAccent.copy(alpha = 0.12f), Color.Transparent),
+                            start = Offset(size.width * (goldSweepProgress - 0.3f), -size.height * 0.3f),
+                            end = Offset(size.width * (goldSweepProgress + 0.1f), size.height * 1.3f)
+                        ),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(10.dp.toPx())
+                    )
+                }
+            }
+            .border(0.5.dp, TableBorder, rowShape)
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Rank & Trend
         Column(
-            modifier = Modifier.width(48.dp),
+            modifier = Modifier.width(36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text(
-                text = player.rank.toString(),
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Box(
+                modifier = Modifier
+                    .size(25.dp)
+                    .clip(CircleShape)
+                    .background(if (isTopThree) rankColor.copy(alpha = 0.14f) else Color.Transparent),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = player.rank.toString(),
+                    color = rankColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
             TrendBadge(trend = player.trend)
         }
 
-        // Circular Initials Avatar
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF0F1B22))
-                .border(1.5.dp, player.avatarBorderColor, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = player.initials,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
+        PlayerLeaderboardAvatar(player = player)
 
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(9.dp))
 
         // Player Name & Country
         Column(
@@ -828,45 +988,77 @@ private fun PlayerRankingRow(player: PlayerRank) {
         ) {
             Text(
                 text = player.name,
-                color = Color.White,
+                color = rankColor,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(
-                text = player.country,
-                color = MutedText,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1
-            )
-        }
-
-        // Team Logo & Code
-        Row(
-            modifier = Modifier.width(70.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TeamLogoView(teamCode = player.teamCode, modifier = Modifier.size(24.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = player.teamCode,
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = player.statistics,
+                    color = MutedText,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (player.teamCode.isNotBlank()) {
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = player.teamCode,
+                        color = CyanAccent,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .width(56.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(CyanAccent.copy(alpha = 0.10f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
+            }
         }
 
         // Points
         Text(
             text = player.points.toString(),
-            color = Color.White,
-            fontSize = 15.sp,
+            color = rankColor,
+            fontSize = 16.sp,
             fontWeight = FontWeight.ExtraBold,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(60.dp)
+            modifier = Modifier.width(54.dp)
         )
+    }
+}
+
+@Composable
+private fun PlayerLeaderboardAvatar(player: PlayerRank) {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(Color(0xFF0F1B22))
+            .border(1.5.dp, player.avatarBorderColor, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        if (player.photoUrl.isNotBlank()) {
+            AsyncImage(
+                model = player.photoUrl,
+                contentDescription = "${player.name} profile photo",
+                modifier = Modifier.fillMaxSize().clip(CircleShape)
+            )
+        } else {
+            Text(
+                text = player.initials,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 
@@ -896,7 +1088,7 @@ private fun ClubRankingRow(club: ClubRank) {
         }
 
         // Club Logo
-        TeamLogoView(teamCode = club.code, modifier = Modifier.size(38.dp))
+        TeamLogoView(teamCode = club.code, logoUrl = club.logoUrl, modifier = Modifier.size(38.dp))
 
         Spacer(modifier = Modifier.width(12.dp))
 
@@ -906,7 +1098,7 @@ private fun ClubRankingRow(club: ClubRank) {
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = club.code,
+                text = club.fullName,
                 color = Color.White,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
@@ -914,7 +1106,7 @@ private fun ClubRankingRow(club: ClubRank) {
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = club.fullName,
+                text = club.statistics,
                 color = MutedText,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
@@ -988,8 +1180,10 @@ private fun TrendBadge(trend: Trend) {
 }
 
 @Composable
-private fun TeamLogoView(teamCode: String, modifier: Modifier = Modifier) {
-    when (teamCode.uppercase()) {
+private fun TeamLogoView(teamCode: String, logoUrl: String = "", modifier: Modifier = Modifier) {
+    if (logoUrl.isNotBlank()) {
+        AsyncImage(model = logoUrl, contentDescription = "$teamCode team logo", modifier = modifier.clip(CircleShape))
+    } else when (teamCode.uppercase()) {
         "RCB" -> {
             Image(
                 painter = painterResource(id = R.drawable.rcb),
@@ -1045,3 +1239,6 @@ private fun TeamLogoView(teamCode: String, modifier: Modifier = Modifier) {
         }
     }
 }
+
+private fun String.initials(): String = trim().split(Regex("\\s+")).take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }.joinToString("").ifBlank { "?" }
+private fun rate(value: Double): String = if (!value.isFinite()) "0.00" else String.format(Locale.US, "%.2f", value)

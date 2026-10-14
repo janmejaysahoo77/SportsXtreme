@@ -64,9 +64,9 @@ fun MatchEntity.toDomain(
     status = MatchStatus.valueOf(status),
     createdAtEpochMs = createdAtEpochMs,
     updatedAtEpochMs = updatedAtEpochMs,
-    format = format?.let(MatchFormat::valueOf),
-    ballType = ballType?.let(BallType::valueOf),
-    overs = overs,
+    format = format?.let(MatchFormat::valueOf) ?: MatchFormat.T20,
+    ballType = ballType?.let(BallType::valueOf) ?: BallType.LEATHER,
+    overs = overs ?: 20,
     venue = venue,
     matchDateEpochMs = matchDateEpochMs,
     matchTime = matchTime

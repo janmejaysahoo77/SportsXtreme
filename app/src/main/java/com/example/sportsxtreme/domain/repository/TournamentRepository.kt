@@ -15,6 +15,7 @@ interface TournamentRepository {
         ground: String,
         ballType: String
     ): Resource<Unit>
+    suspend fun updateTournamentImages(tournamentId: String, logoUrl: String?, bannerUrl: String?): Resource<Unit>
     suspend fun getTournament(tournamentId: String): Resource<Tournament>
     suspend fun deleteTournament(tournamentId: String): Resource<Unit>
     fun observeHostTournaments(hostUid: String): Flow<Resource<List<Tournament>>>

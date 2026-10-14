@@ -4,12 +4,17 @@ import androidx.room.withTransaction
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.local.dao.InningsDao
 import com.example.sportsxtreme.data.local.dao.BallEventDao
+import com.example.sportsxtreme.data.local.dao.BattingDao
 import com.example.sportsxtreme.data.local.dao.MatchDao
 import com.example.sportsxtreme.data.local.dao.PlayerDao
 import com.example.sportsxtreme.data.local.dao.TeamDao
+import com.example.sportsxtreme.data.local.dao.SyncQueueDao
+import com.example.sportsxtreme.data.local.entity.SyncQueueEntity
 import com.example.sportsxtreme.data.local.database.SportsXtremeDatabase
 import com.example.sportsxtreme.data.local.entity.InningsEntity
+import com.example.sportsxtreme.data.local.entity.MatchEntity
 import com.example.sportsxtreme.data.local.entity.PlayerEntity
+import com.example.sportsxtreme.data.local.entity.PlayingXIEntity
 import com.example.sportsxtreme.data.local.entity.TeamEntity
 import com.example.sportsxtreme.data.local.mapper.toDomain
 import com.example.sportsxtreme.data.local.mapper.toEntities
@@ -44,6 +49,7 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.tasks.await
+import com.example.sportsxtreme.data.sync.DeliverySyncScheduler
 
 @Singleton
 class MatchRepositoryImpl @Inject constructor(
@@ -53,11 +59,14 @@ class MatchRepositoryImpl @Inject constructor(
     private val playerDao: PlayerDao,
     private val inningsDao: InningsDao,
     private val ballEventDao: BallEventDao,
+    private val battingDao: BattingDao,
     private val firestoreMatchSyncDataSource: FirebaseFirestoreMatchSyncDataSource,
     private val firestoreMatchClaimsDataSource: FirebaseFirestoreMatchClaimsDataSource,
     private val firestoreScoringDataSource: FirestoreScoringDataSource,
     private val firestore: FirebaseFirestore,
-    private val functions: FirebaseFunctions
+    private val functions: FirebaseFunctions,
+    private val syncQueueDao: SyncQueueDao,
+    private val deliverySyncScheduler: DeliverySyncScheduler
 ) : MatchRepository {
     override suspend fun createMatch(request: CreateMatchRequest): Resource<Match> = runCatching {
         val matchId = UUID.randomUUID().toString()
@@ -341,12 +350,103 @@ class MatchRepositoryImpl @Inject constructor(
         Resource.Success(matchStateFor(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to finish innings") }
 
-    override suspend fun finishMatch(matchId: String): Resource<Match> = runCatching {
+    override suspend fun selectNextBatter(matchId: String, playerId: String): Resource<MatchState> = runCatching {
+        database.withTransaction {
+            val innings = requireNotNull(inningsDao.getLatestInnings(matchId)) { "Innings not found" }
+            require(innings.status == InningsStatus.LIVE.name) { "This innings is not live" }
+            val player = requireNotNull(playerDao.getPlayer(playerId)) { "Selected batter was not found" }
+            require(player.teamId == innings.battingTeamId) { "Selected player is not in the batting team" }
+            require(innings.strikerId == null || innings.nonStrikerId == null) { "No batter slot is available" }
+            require(playerId != innings.strikerId && playerId != innings.nonStrikerId) { "That batter is already at the crease" }
+            val selectedIds = playerDao.getPlayingXI(matchId, innings.battingTeamId).map { it.playerId }
+            require(selectedIds.isEmpty() || playerId in selectedIds) { "Select a batter from the playing XI" }
+            val usedIds = battingDao.getScorecard(matchId, innings.inningsId).map { it.playerId }
+            require(playerId !in usedIds) { "That player has already batted in this innings" }
+            val match = requireMatch(matchId)
+            inningsDao.updateInnings(innings.copy(strikerId = innings.strikerId ?: playerId, nonStrikerId = innings.nonStrikerId ?: playerId))
+            matchDao.updateMatch(match.copy(
+                strikerId = innings.strikerId ?: playerId,
+                nonStrikerId = innings.nonStrikerId ?: playerId,
+                updatedAtEpochMs = System.currentTimeMillis()
+            ))
+        }
+        loadAndSyncMatch(matchId)
+        Resource.Success(matchStateFor(matchId))
+    }.getOrElse { Resource.Error(it.message ?: "Unable to select batter") }
+
+    override suspend fun startSecondInnings(
+        matchId: String,
+        strikerId: String,
+        nonStrikerId: String,
+        bowlerId: String
+    ): Resource<MatchState> = runCatching {
         database.withTransaction {
             val match = requireMatch(matchId)
-            matchDao.updateMatch(match.copy(status = MatchStatus.COMPLETED.name, updatedAtEpochMs = System.currentTimeMillis()))
+            val first = requireNotNull(inningsDao.getLatestInnings(matchId)) { "First innings not found" }
+            require(first.number == 1 && first.status == InningsStatus.COMPLETED.name) { "First innings is not complete" }
+            require(strikerId != nonStrikerId) { "Opening batters must be different players" }
+            val striker = requireNotNull(playerDao.getPlayer(strikerId)) { "Selected striker was not found" }
+            val nonStriker = requireNotNull(playerDao.getPlayer(nonStrikerId)) { "Selected non-striker was not found" }
+            val bowler = requireNotNull(playerDao.getPlayer(bowlerId)) { "Selected bowler was not found" }
+            require(striker.teamId == first.bowlingTeamId && nonStriker.teamId == first.bowlingTeamId) { "Openers must be from the chasing team" }
+            require(bowler.teamId == first.battingTeamId) { "Bowler must be from the first innings batting team" }
+            val battingXI = playerDao.getPlayingXI(matchId, first.bowlingTeamId).map { it.playerId }
+            val bowlingXI = playerDao.getPlayingXI(matchId, first.battingTeamId).map { it.playerId }
+            require((battingXI.isEmpty() || (strikerId in battingXI && nonStrikerId in battingXI)) &&
+                (bowlingXI.isEmpty() || bowlerId in bowlingXI)) { "Choose players from the selected playing XIs" }
+            val now = System.currentTimeMillis()
+            val secondId = "${matchId}_innings_2"
+            inningsDao.insertInnings(InningsEntity(
+                inningsId = secondId,
+                matchId = matchId,
+                number = 2,
+                battingTeamId = first.bowlingTeamId,
+                bowlingTeamId = first.battingTeamId,
+                strikerId = strikerId,
+                nonStrikerId = nonStrikerId,
+                currentBowlerId = bowlerId,
+                target = first.score + 1,
+                status = InningsStatus.LIVE.name,
+                startedAtEpochMs = now
+            ))
+            matchDao.updateMatch(match.copy(
+                status = MatchStatus.LIVE.name,
+                battingTeamId = first.bowlingTeamId,
+                bowlingTeamId = first.battingTeamId,
+                strikerId = strikerId,
+                nonStrikerId = nonStrikerId,
+                currentBowlerId = bowlerId,
+                updatedAtEpochMs = now
+            ))
         }
-        Resource.Success(loadAndSyncMatch(matchId))
+        val liveMatch = loadAndSyncMatch(matchId)
+        firestoreScoringDataSource.syncLiveScore(matchId, liveMatch.toInitialLiveScore())
+        Resource.Success(matchStateFor(matchId))
+    }.getOrElse { Resource.Error(it.message ?: "Unable to start second innings") }
+
+    override suspend fun finishMatch(matchId: String): Resource<Match> = runCatching {
+        val now = System.currentTimeMillis()
+        val latestQueuedOperation = syncQueueDao.getLatestOperationForMatch(matchId)
+        val queueAt = maxOf(now, (latestQueuedOperation?.createdAtEpochMs ?: 0L) + 1L)
+        database.withTransaction {
+            val match = requireMatch(matchId)
+            matchDao.updateMatch(match.copy(status = MatchStatus.COMPLETED.name, updatedAtEpochMs = now))
+        }
+        val finalizationOperation = SyncQueueEntity(
+            operationId = "finalize:$matchId",
+            matchId = matchId,
+            entityType = "FINALIZE_MATCH",
+            entityId = matchId,
+            operationType = "UPSERT",
+            nextAttemptAtEpochMs = now,
+            createdAtEpochMs = queueAt,
+            updatedAtEpochMs = queueAt
+        )
+        val existingFinalization = syncQueueDao.getFinalizationOperation(matchId)
+        if (existingFinalization == null) syncQueueDao.enqueue(finalizationOperation)
+        else syncQueueDao.update(existingFinalization.copy(state = "PENDING", attemptCount = 0, nextAttemptAtEpochMs = now, createdAtEpochMs = queueAt, lastError = null, updatedAtEpochMs = now))
+        deliverySyncScheduler.enqueue()
+        Resource.Success(loadMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to finish match") }
 
     override fun observeMatch(matchId: String): Flow<Resource<Match>> = combine(matchDao.observeMatch(matchId), firestoreMatchClaimsDataSource.observe(matchId)) { match, claims ->
@@ -447,6 +547,7 @@ class MatchRepositoryImpl @Inject constructor(
 
     private suspend fun loadMatch(matchId: String): Match {
         val match = requireMatch(matchId)
+        ensurePlayingXIPopulated(match)
         val teamA = requireNotNull(teamDao.getTeam(match.teamAId)) { "Team A not found" }
         val teamB = requireNotNull(teamDao.getTeam(match.teamBId)) { "Team B not found" }
         return match.toDomain(
@@ -456,6 +557,52 @@ class MatchRepositoryImpl @Inject constructor(
             teamBXI = playerDao.getPlayingXI(matchId, match.teamBId),
             innings = inningsDao.getInningsForMatch(matchId).map { it.toDomain() }
         )
+    }
+
+    private suspend fun ensurePlayingXIPopulated(match: MatchEntity) {
+        val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+            .orEmpty()
+            .ifBlank { match.createdBy }
+            .ifBlank { "local_user" }
+        val now = System.currentTimeMillis()
+
+        val teamAXI = playerDao.getPlayingXI(match.matchId, match.teamAId)
+        if (teamAXI.isEmpty()) {
+            val playersA = playerDao.getPlayers(match.teamAId)
+            if (playersA.isNotEmpty()) {
+                val entitiesA = playersA.mapIndexed { index, player ->
+                    PlayingXIEntity(
+                        matchId = match.matchId,
+                        teamId = match.teamAId,
+                        side = TeamSide.TEAM_A.name,
+                        playerId = player.playerId,
+                        battingOrder = index + 1,
+                        selectedByUserId = currentUserId,
+                        selectedAtEpochMs = now
+                    )
+                }
+                playerDao.insertPlayingXI(entitiesA)
+            }
+        }
+
+        val teamBXI = playerDao.getPlayingXI(match.matchId, match.teamBId)
+        if (teamBXI.isEmpty()) {
+            val playersB = playerDao.getPlayers(match.teamBId)
+            if (playersB.isNotEmpty()) {
+                val entitiesB = playersB.mapIndexed { index, player ->
+                    PlayingXIEntity(
+                        matchId = match.matchId,
+                        teamId = match.teamBId,
+                        side = TeamSide.TEAM_B.name,
+                        playerId = player.playerId,
+                        battingOrder = index + 1,
+                        selectedByUserId = currentUserId,
+                        selectedAtEpochMs = now
+                    )
+                }
+                playerDao.insertPlayingXI(entitiesB)
+            }
+        }
     }
 
     private suspend fun loadAndSyncMatch(matchId: String): Match {

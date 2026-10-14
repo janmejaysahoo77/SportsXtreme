@@ -65,6 +65,19 @@ class FirebaseFirestoreTournamentDataSource @Inject constructor(
         Resource.Error(e.message ?: "Unable to save tournament details")
     }
 
+    suspend fun updateTournamentImages(tournamentId: String, logoUrl: String?, bannerUrl: String?): Resource<Unit> = try {
+        require(tournamentId.isNotBlank()) { "Tournament ID is missing" }
+        val updates = buildMap<String, String> {
+            logoUrl?.let { put("logoUrl", it) }
+            bannerUrl?.let { put("bannerUrl", it) }
+        }
+        require(updates.isNotEmpty()) { "No tournament images were provided" }
+        firestore.collection("tournaments").document(tournamentId).set(updates, SetOptions.merge()).await()
+        Resource.Success(Unit)
+    } catch (e: Exception) {
+        Resource.Error(e.message ?: "Unable to save tournament images")
+    }
+
     suspend fun getTournament(tournamentId: String): Resource<Tournament> = try {
         val snapshot = firestore.collection("tournaments").document(tournamentId).get().await()
         val tournament = snapshot.toObject(Tournament::class.java)

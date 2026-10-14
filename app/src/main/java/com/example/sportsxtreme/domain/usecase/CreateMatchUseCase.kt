@@ -18,11 +18,14 @@ class CreateMatchUseCase(private val repository: MatchRepository) {
         require(matchType == MatchType.FRIENDLY) { "Only friendly matches can be created from this flow" }
 
         val createdAt = System.currentTimeMillis()
+        val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+            .orEmpty()
+            .ifBlank { LOCAL_ORGANISER_ID }
         return repository.createMatch(
             CreateMatchRequest(
                 matchType = matchType,
                 sport = SportType.CRICKET,
-                organiserId = LOCAL_ORGANISER_ID,
+                organiserId = currentUserId,
                 title = "Friendly Match",
                 teamA = MatchTeam(
                     teamId = FRIENDLY_TEAM_A_ID,

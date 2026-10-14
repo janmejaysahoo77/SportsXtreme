@@ -4,6 +4,7 @@ const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { HttpsError, onCall } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
+const leaderboardScoring = require("./leaderboardScoring");
 
 initializeApp();
 
@@ -13,6 +14,7 @@ const TOURNAMENT_INVITE_URL_PREFIX = "https://sportsxtreme-95fbb.web.app/tournam
 const TEAM_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TOURNAMENT_INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_TEAM_MEMBERS = 18;
+const FINALIZED = "FINALIZED";
 const ROLES = Object.freeze({ ADMIN: "ADMIN", CAPTAIN: "CAPTAIN", VICE_CAPTAIN: "VICE_CAPTAIN" });
 const cloudinaryCloudName = defineSecret("CLOUDINARY_CLOUD_NAME");
 const cloudinaryApiKey = defineSecret("CLOUDINARY_API_KEY");
@@ -42,6 +44,34 @@ exports.createProfilePhotoUploadSignature = onCall({
   const signaturePayload = `folder=${folder}&overwrite=true&public_id=${publicId}&timestamp=${timestamp}`;
   const signature = crypto.createHash("sha1").update(`${signaturePayload}${apiSecret}`).digest("hex");
 
+  return { cloudName, apiKey, folder, publicId, timestamp, signature };
+});
+
+exports.createTournamentLogoUploadSignature = onCall({
+  secrets: [cloudinaryCloudName, cloudinaryApiKey, cloudinaryApiSecret],
+}, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before uploading a tournament logo.");
+  const assetId = typeof request.data?.assetId === "string" ? request.data.assetId.trim() : "";
+  const assetType = typeof request.data?.assetType === "string" ? request.data.assetType.trim() : "logo";
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(assetId)) {
+    throw new HttpsError("invalid-argument", "A valid tournament logo upload ID is required.");
+  }
+  if (!["logo", "banner"].includes(assetType)) {
+    throw new HttpsError("invalid-argument", "Tournament image type must be logo or banner.");
+  }
+
+  const cloudName = String(cloudinaryCloudName.value() || "").trim();
+  const apiKey = String(cloudinaryApiKey.value() || "").trim();
+  const apiSecret = String(cloudinaryApiSecret.value() || "").trim();
+  if (!cloudName || !apiKey || !apiSecret) {
+    throw new HttpsError("failed-precondition", "Cloudinary is not configured on the server.");
+  }
+
+  const folder = assetType === "banner" ? "tournament_banners" : "tournament_logos";
+  const publicId = `${request.auth.uid}_${assetId}`;
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signaturePayload = `folder=${folder}&overwrite=false&public_id=${publicId}&timestamp=${timestamp}`;
+  const signature = crypto.createHash("sha1").update(`${signaturePayload}${apiSecret}`).digest("hex");
   return { cloudName, apiKey, folder, publicId, timestamp, signature };
 });
 
@@ -311,6 +341,9 @@ exports.deleteMatch = onCall(async (request) => {
   if (ownerId !== request.auth.uid) {
     throw new HttpsError("permission-denied", "Only the match organiser can delete it.");
   }
+  if (match.get("status") === "COMPLETED" || match.get("finalization.state") === "FINALIZED") {
+    throw new HttpsError("failed-precondition", "A finalized match cannot be deleted.");
+  }
 
   const invites = await db.collection("matchInvites").where("matchId", "==", matchId).get();
   for (let index = 0; index < invites.docs.length; index += 500) {
@@ -320,6 +353,438 @@ exports.deleteMatch = onCall(async (request) => {
   }
   await db.recursiveDelete(matchRef);
   return { matchId };
+});
+
+function failFinalization(code, message) { throw new HttpsError(code, message); }
+function safeName(value) { return typeof value === "string" ? value.trim() : ""; }
+function asNumber(value) { return typeof value === "number" && Number.isFinite(value) ? value : 0; }
+
+function validateMatchParticipantSet(match) {
+  const teamA = match.teamA?.teamId; const teamB = match.teamB?.teamId;
+  if (!teamA || !teamB || teamA === teamB) failFinalization("failed-precondition", "Match teams are incomplete or invalid.");
+  const xi = match.playingXI || {};
+  const players = new Map();
+  for (const [side, teamId, squadKey] of [["TEAM_A", teamA, "A"], ["TEAM_B", teamB, "B"]]) {
+    let selectedXi = xi[side];
+    let playerIds = selectedXi?.playerIds;
+    if (!Array.isArray(playerIds) || playerIds.length === 0) {
+      const squad = match.matchSquads?.[squadKey];
+      if (squad?.teamId === teamId && Array.isArray(squad.players)) {
+        playerIds = squad.players.map((player) => {
+          const explicitPlayerId = safeName(player?.playerId);
+          const userId = safeName(player?.userId);
+          return explicitPlayerId || (userId ? `${teamId}::${userId}` : "");
+        }).filter(Boolean);
+        selectedXi = {
+          teamId,
+          side,
+          selectedByUserId: safeName(squad.selectedByUserId) || safeName(match.ownerId) || safeName(match.organiserId),
+          playerIds
+        };
+      }
+    }
+    if (selectedXi?.teamId !== teamId || selectedXi?.side !== side || !safeName(selectedXi?.selectedByUserId)) failFinalization("failed-precondition", `A valid ${side} playing XI or match squad is required.`);
+    if (!Array.isArray(playerIds) || playerIds.length === 0 || new Set(playerIds).size !== playerIds.length) {
+      failFinalization("failed-precondition", `A valid ${side} playing XI or match squad is required.`);
+    }
+    for (const id of playerIds) {
+      const playerId = String(id);
+      if (players.has(playerId) && players.get(playerId) !== teamId) failFinalization("failed-precondition", "A player cannot represent both teams in the same match.");
+      players.set(playerId, teamId);
+    }
+  }
+  return { teamA, teamB, players };
+}
+
+async function validateMatchTournament(match, teamA, teamB) {
+  const tournamentId = safeName(match.tournamentId);
+  if (!tournamentId) {
+    if (match.matchType === "TOURNAMENT") failFinalization("failed-precondition", "A tournament match must identify its tournament.");
+    return null;
+  }
+  const tournament = await db.collection("tournaments").doc(tournamentId).get();
+  if (!tournament.exists) failFinalization("failed-precondition", "The selected tournament does not exist.");
+  const enrolledTeams = Array.isArray(tournament.get("teamIds")) ? tournament.get("teamIds") : [];
+  if (!enrolledTeams.includes(teamA) || !enrolledTeams.includes(teamB)) failFinalization("failed-precondition", "Both match teams must be registered in the selected tournament.");
+  return tournament.data();
+}
+
+function projectRemoteInnings(deliveries, matchId, inningsId, inningsNumber, battingTeamId, bowlingTeamId, participants) {
+  const rows = deliveries.map((doc) => ({ id: doc.id, ...doc.data() }))
+    .filter((row) => row.inningsId === inningsId && row.eventType !== "REVERSAL");
+  const reversals = deliveries.map((doc) => doc.data()).filter((row) => row.inningsId === inningsId && row.eventType === "REVERSAL");
+  const reversed = new Set();
+  const deliveryIds = new Set(rows.map((row) => row.deliveryId || row.id));
+  for (const row of reversals) {
+    if (!row.reversedEventId || !deliveryIds.has(row.reversedEventId) || reversed.has(row.reversedEventId)) failFinalization("data-loss", "Invalid duplicate score correction event.");
+    reversed.add(row.reversedEventId);
+  }
+  const active = rows.filter((row) => !reversed.has(row.deliveryId || row.id)).sort((a, b) => asNumber(a.sequenceNumber) - asNumber(b.sequenceNumber));
+  const usedSequences = new Set(); const bat = new Map(); const bowl = new Map(); const fielding = new Map(); const bowlerEvents = new Map();
+  let totalScore = 0; let wickets = 0; let legalBalls = 0; let expectedLegalBall = 0; let expectedOver = 0;
+  for (const row of active) {
+    if (row.matchId !== matchId || !row.deliveryId || asNumber(row.inning) !== inningsNumber || !Number.isInteger(row.sequenceNumber) || row.sequenceNumber < 0 || usedSequences.has(row.sequenceNumber)) failFinalization("data-loss", "A delivery has an invalid or duplicate sequence.");
+    usedSequences.add(row.sequenceNumber);
+    if (row.battingTeamId !== battingTeamId || row.bowlingTeamId !== bowlingTeamId || participants.players.get(row.batsmanId) !== battingTeamId || participants.players.get(row.nonStrikerId) !== battingTeamId || participants.players.get(row.bowlerId) !== bowlingTeamId) failFinalization("data-loss", "A delivery contains a player outside the selected teams.");
+    const extras = Array.isArray(row.extraBreakdown) ? row.extraBreakdown : [];
+    const knownExtras = new Set(["NONE", "WIDE", "NO_BALL", "BYE", "LEG_BYE", "PENALTY"]);
+    for (const extra of extras) if (!knownExtras.has(extra?.type) || !Number.isInteger(extra?.runs) || extra.runs < 0) failFinalization("data-loss", "A delivery contains invalid extras.");
+    const runs = asNumber(row.runs); if (!Number.isInteger(runs) || runs < 0) failFinalization("data-loss", "A delivery contains invalid batter runs.");
+    const extraTotal = extras.reduce((sum, item) => sum + item.runs, 0);
+    if (extraTotal !== asNumber(row.extras)) failFinalization("data-loss", "Delivery extras do not match their breakdown.");
+    const legal = row.isLegalDelivery === true;
+    if (legal === extras.some((item) => item.type === "WIDE" || item.type === "NO_BALL")) failFinalization("data-loss", "Wide and no-ball deliveries must be recorded as illegal deliveries.");
+    const overNumber = asNumber(row.over); const ballNumber = asNumber(row.ball);
+    if (legal) { expectedLegalBall++; legalBalls++; }
+    if (overNumber !== expectedOver || ballNumber !== (legal ? expectedLegalBall - expectedOver * 6 : expectedLegalBall - expectedOver * 6 + 1)) {
+      // Client over/ball numbering is presentation-oriented; only enforce a sane range below.
+      if (!Number.isInteger(overNumber) || overNumber < 0 || !Number.isInteger(ballNumber) || ballNumber < 0 || ballNumber > 10) failFinalization("data-loss", "A delivery has invalid over numbering.");
+    }
+    if (legal && expectedLegalBall % 6 === 0) expectedOver++;
+    totalScore += runs + extraTotal;
+    const batter = bat.get(row.batsmanId) || { runs: 0, balls: 0, fours: 0, sixes: 0, status: "NOT_OUT", dismissalType: null, dismissedByBowlerId: null, dismissedByFielderId: null };
+    batter.runs += runs; if (!(extras.some((item) => item.type === "WIDE"))) batter.balls++;
+    if (runs === 4) batter.fours++; if (runs === 6) batter.sixes++;
+    const bowler = bowl.get(row.bowlerId) || { legalBalls: 0, maidens: 0, runsConceded: 0, wickets: 0, wides: 0, noBalls: 0 };
+    if (legal) bowler.legalBalls++;
+    bowler.runsConceded += runs + extras.filter((item) => ["WIDE", "NO_BALL"].includes(item.type)).reduce((sum, item) => sum + item.runs, 0);
+    bowler.wides += extras.filter((item) => item.type === "WIDE").reduce((sum, item) => sum + item.runs, 0);
+    bowler.noBalls += extras.filter((item) => item.type === "NO_BALL").reduce((sum, item) => sum + item.runs, 0);
+    if (!bowlerEvents.has(row.bowlerId)) bowlerEvents.set(row.bowlerId, []);
+    bowlerEvents.get(row.bowlerId).push({ overNumber, legal, conceded: runs + extras.filter((item) => ["WIDE", "NO_BALL"].includes(item.type)).reduce((sum, item) => sum + item.runs, 0) });
+    if (row.wicket === true) {
+      const type = row.dismissalType; const dismissed = row.dismissedPlayerId;
+      if (!dismissed || participants.players.get(dismissed) !== battingTeamId || !new Set(["BOWLED", "CAUGHT", "LBW", "RUN_OUT", "STUMPED", "HIT_WICKET", "TIMED_OUT", "OBSTRUCTING_THE_FIELD", "RETIRED_OUT", "RETIRED_HURT", "OTHER"]).has(type)) failFinalization("data-loss", "A dismissal is invalid.");
+      if (type !== "RETIRED_HURT") wickets++;
+      batter.status = type === "RETIRED_HURT" ? "RETIRED_HURT" : "OUT"; batter.dismissalType = type;
+      const fielder = row.fielderId;
+      if (fielder && participants.players.get(fielder) !== bowlingTeamId) failFinalization("data-loss", "A dismissal credits a non-fielding player.");
+      if (["CAUGHT", "STUMPED"].includes(type) && !fielder) failFinalization("data-loss", "A catch or stumping must identify its credited fielder.");
+      // The current delivery schema stores one primary fielderId; that player
+      // alone receives a run-out credit when a dismissal records one.
+      const creditedEvent = leaderboardScoring.creditedFieldingEvent(type, fielder);
+      if (creditedEvent) {
+        const counts = fielding.get(fielder) || { catches: 0, runOuts: 0, stumpings: 0 };
+        counts[creditedEvent]++;
+        fielding.set(fielder, counts);
+      }
+      if (leaderboardScoring.isBowlerCreditedDismissal(type)) { bowler.wickets++; batter.dismissedByBowlerId = row.bowlerId; }
+      batter.dismissedByFielderId = fielder || null;
+    } else if (row.wicket === true || (row.dismissalType && row.dismissalType !== "NONE")) failFinalization("data-loss", "A wicket flag and dismissal type disagree.");
+    bat.set(row.batsmanId, batter); bowl.set(row.bowlerId, bowler);
+  }
+  for (const [playerId, events] of bowlerEvents) {
+    bowl.get(playerId).maidens = [...new Set(events.map((event) => event.overNumber))].filter((over) => {
+      const overEvents = events.filter((event) => event.overNumber === over);
+      return overEvents.filter((event) => event.legal).length === 6 && overEvents.reduce((sum, event) => sum + event.conceded, 0) === 0;
+    }).length;
+  }
+  return { active, totalScore, wickets, legalBalls, batting: bat, bowling: bowl, fielding };
+}
+
+async function validateFinalizedScorecard(matchRef, match) {
+  const participants = validateMatchParticipantSet(match);
+  const tournament = await validateMatchTournament(match, participants.teamA, participants.teamB);
+  const inningsList = Array.isArray(match.innings) ? match.innings : [];
+  if (!inningsList.length || inningsList.some((innings) => innings.status !== "COMPLETED")) failFinalization("failed-precondition", "Every match innings must be completed before finalization.");
+  if (new Set(inningsList.map((innings) => innings.inningsId || innings.id)).size !== inningsList.length || new Set(inningsList.map((innings) => innings.number)).size !== inningsList.length || inningsList.some((innings, index) => !safeName(innings.inningsId || innings.id) || innings.number !== index + 1 || (index > 0 && innings.battingTeamId === inningsList[index - 1].battingTeamId))) failFinalization("failed-precondition", "The match innings sequence is incomplete or invalid.");
+  const deliveriesSnap = await matchRef.collection("deliveries").get();
+  const allDeliveries = deliveriesSnap.docs;
+  const projections = [];
+  for (const innings of inningsList) {
+    if (![participants.teamA, participants.teamB].includes(innings.battingTeamId) || ![participants.teamA, participants.teamB].includes(innings.bowlingTeamId) || innings.battingTeamId === innings.bowlingTeamId) failFinalization("data-loss", "An innings has invalid teams.");
+    const projected = projectRemoteInnings(allDeliveries, matchRef.id, innings.inningsId || innings.id, innings.number, innings.battingTeamId, innings.bowlingTeamId, participants);
+    if (projected.totalScore !== asNumber(innings.score) || projected.wickets !== asNumber(innings.wickets) || projected.legalBalls !== asNumber(innings.legalBalls)) failFinalization("failed-precondition", "Saved innings totals do not match the delivery history.");
+    projections.push({ innings, ...projected });
+  }
+  const [batting, bowling, summaries] = await Promise.all([
+    matchRef.collection("scorecard").doc("batting").collection("entries").get(),
+    matchRef.collection("scorecard").doc("bowling").collection("entries").get(),
+    matchRef.collection("scorecard").doc("summary").collection("entries").get()
+  ]);
+  for (const projection of projections) {
+    const inningsId = projection.innings.inningsId || projection.innings.id;
+    const battingRows = batting.docs.filter((doc) => doc.get("inningsId") === inningsId);
+    const bowlingRows = bowling.docs.filter((doc) => doc.get("inningsId") === inningsId);
+    const activeBattingRows = battingRows.filter((doc) => asNumber(doc.get("runs")) !== 0 || asNumber(doc.get("balls")) !== 0 || asNumber(doc.get("fours")) !== 0 || asNumber(doc.get("sixes")) !== 0);
+    const activeBowlingRows = bowlingRows.filter((doc) => asNumber(doc.get("legalBalls")) !== 0 || asNumber(doc.get("runs")) !== 0 || asNumber(doc.get("wickets")) !== 0);
+    if (activeBattingRows.length !== projection.batting.size || activeBowlingRows.length !== projection.bowling.size) failFinalization("failed-precondition", "Scorecard contains missing or extra player rows.");
+    for (const row of projection.batting) {
+      const saved = battingRows.find((doc) => doc.get("playerId") === row[0]);
+      if (!saved || asNumber(saved.get("runs")) !== row[1].runs || asNumber(saved.get("balls")) !== row[1].balls || asNumber(saved.get("fours")) !== row[1].fours || asNumber(saved.get("sixes")) !== row[1].sixes || saved.get("status") !== row[1].status || (saved.get("dismissalType") || null) !== row[1].dismissalType || (saved.get("dismissedByBowlerId") || null) !== row[1].dismissedByBowlerId || (saved.get("dismissedByFielderId") || null) !== row[1].dismissedByFielderId) failFinalization("failed-precondition", "Batting scorecard does not match delivery history.");
+    }
+    for (const row of projection.bowling) {
+      const saved = bowlingRows.find((doc) => doc.get("playerId") === row[0]);
+      if (!saved || asNumber(saved.get("legalBalls")) !== row[1].legalBalls || asNumber(saved.get("runs")) !== row[1].runsConceded || asNumber(saved.get("wickets")) !== row[1].wickets || asNumber(saved.get("maidens")) !== row[1].maidens || asNumber(saved.get("wides")) !== row[1].wides || asNumber(saved.get("noBalls")) !== row[1].noBalls) failFinalization("failed-precondition", "Bowling scorecard does not match delivery history.");
+    }
+    const summary = summaries.docs.find((doc) => doc.get("inningsId") === inningsId);
+    if (!summary || asNumber(summary.get("totalScore")) !== projection.totalScore || asNumber(summary.get("wickets")) !== projection.wickets || asNumber(summary.get("legalBalls")) !== projection.legalBalls) failFinalization("failed-precondition", "Scorecard summary does not match delivery history.");
+  }
+  if (projections.length >= 2) {
+    const [first, second] = projections;
+    if (first.innings.battingTeamId === second.innings.battingTeamId) failFinalization("failed-precondition", "The final innings must be played by the opposing team.");
+  }
+  return { participants, projections, tournament };
+}
+
+function leaderboardId(value) { return crypto.createHash("sha256").update(String(value)).digest("hex").slice(0, 32); }
+function leaderboardScopeKey(scope) { return leaderboardId([scope.sport, scope.ballType, scope.format, scope.tournamentId].join("|")); }
+function playerTotals() {
+  return { matches: 0, battingInnings: 0, runs: 0, balls: 0, fours: 0, sixes: 0, outs: 0, battingPoints: 0,
+    bowlingInnings: 0, legalBalls: 0, runsConceded: 0, wickets: 0, maidens: 0, bowlingPoints: 0,
+    catches: 0, runOuts: 0, stumpings: 0, fieldingPoints: 0, allRounderPoints: 0 };
+}
+
+function matchPlayerProfile(match, playerId) {
+  const profile = match.playerProfiles?.[playerId] || {};
+  const separator = String(playerId).lastIndexOf("::");
+  const userId = separator >= 0 ? String(playerId).slice(separator + 2) : "";
+  const squadPlayer = Object.values(match.matchSquads || {})
+    .flatMap((squad) => Array.isArray(squad?.players) ? squad.players : [])
+    .find((player) => safeName(player?.playerId) === playerId || (userId && safeName(player?.userId) === userId));
+  return {
+    name: safeName(profile.name) || safeName(squadPlayer?.displayName),
+    linkedUserId: safeName(profile.linkedUserId) || userId
+  };
+}
+
+function buildLeaderboardContribution(match, validated, revision) {
+  const players = {};
+  const ensurePlayer = (playerId) => {
+    if (!players[playerId]) {
+      const profile = matchPlayerProfile(match, playerId);
+      const teamId = validated.participants.players.get(playerId) || "";
+      const team = teamId === match.teamA?.teamId ? match.teamA : match.teamB;
+      players[playerId] = { ...playerTotals(), playerId, name: safeName(profile.name) || playerId,
+        teamShortName: safeName(team?.shortName) || safeName(team?.name).slice(0, 3), teamName: safeName(team?.name) || teamId,
+        linkedUserId: safeName(profile.linkedUserId) || "", profilePhotoUrl: "", teamId };
+    }
+    return players[playerId];
+  };
+  const teamIds = [validated.participants.teamA, validated.participants.teamB];
+  const teamScores = Object.fromEntries(teamIds.map((id) => [id, 0]));
+  const teamBalls = Object.fromEntries(teamIds.map((id) => [id, 0]));
+  for (const projection of validated.projections) {
+    const inningsId = projection.innings.inningsId || projection.innings.id;
+    for (const [playerId, row] of projection.batting) {
+      const player = ensurePlayer(playerId); player.battingInnings++; player.runs += row.runs; player.balls += row.balls;
+      player.fours += row.fours; player.sixes += row.sixes; if (row.status === "OUT") player.outs++;
+      player.battingPoints += leaderboardScoring.scoreBatting(row);
+    }
+    for (const [playerId, row] of projection.bowling) {
+      const player = ensurePlayer(playerId); player.bowlingInnings++; player.legalBalls += row.legalBalls;
+      player.runsConceded += row.runsConceded; player.wickets += row.wickets; player.maidens += row.maidens;
+      player.bowlingPoints += leaderboardScoring.scoreBowling(row);
+    }
+    for (const [playerId, row] of projection.fielding) {
+      const player = ensurePlayer(playerId); player.catches += row.catches; player.runOuts += row.runOuts; player.stumpings += row.stumpings;
+      player.fieldingPoints += leaderboardScoring.scoreFielding(row);
+    }
+    teamScores[projection.innings.battingTeamId] += asNumber(projection.innings.score);
+    const legalBalls = asNumber(projection.innings.legalBalls);
+    const quotaBalls = match.format !== "TEST" && asNumber(match.overs) > 0 ? asNumber(match.overs) * 6 : legalBalls;
+    teamBalls[projection.innings.battingTeamId] += asNumber(projection.innings.wickets) >= 10 ? Math.max(legalBalls, quotaBalls) : legalBalls;
+  }
+  for (const player of Object.values(players)) {
+    player.matches = 1;
+    player.allRounderPoints = player.battingPoints + player.bowlingPoints;
+    delete player.linkedUserId;
+  }
+  const result = match.finalization?.result;
+  const pointRules = match.tournamentRules?.pointsRules || {};
+  const winnerTeamId = match.finalization?.winnerTeamId;
+  const rows = leaderboardScoring.rankingScopes(match).map((scope) => {
+    const teamData = {};
+    for (const teamId of teamIds) {
+      const otherTeamId = teamIds.find((id) => id !== teamId);
+      const team = teamId === (match.teamA?.teamId) ? match.teamA : match.teamB;
+      const totalRuns = teamScores[teamId] || 0;
+      const totalAgainst = teamScores[otherTeamId] || 0;
+      const points = leaderboardScoring.teamPointsForResult(result, pointRules);
+      teamData[teamId] = { teamId, name: safeName(team?.name) || teamId, shortName: safeName(team?.shortName) || safeName(team?.name).slice(0, 3),
+        logoUrl: "", matchesPlayed: 1, wins: result === "WIN" && winnerTeamId === teamId ? 1 : 0,
+        losses: result === "WIN" && winnerTeamId !== teamId ? 1 : 0,
+        ties: result === "TIE" ? 1 : 0, noResults: result === "NO_RESULT" ? 1 : 0, points, runsFor: totalRuns, ballsFaced: teamBalls[teamId] || 0,
+        runsAgainst: totalAgainst, ballsBowled: teamBalls[otherTeamId] || 0 };
+    }
+    const scopedPlayers = Object.fromEntries(Object.entries(players).map(([id, stats]) => [id, { ...stats, scopeKey: leaderboardScopeKey(scope) }]));
+    return { ...scope, scopeKey: leaderboardScopeKey(scope), players: scopedPlayers, teams: teamData };
+  });
+  return { matchId: match.matchId, revision, scoringVersion: leaderboardScoring.SCORING_VERSION,
+    scoringConfig: leaderboardScoring.SCORING, teamPointsRules: pointRules, active: true, rows };
+}
+
+async function enrichLeaderboardDisplayData(contribution, match) {
+  const teamIds = [match.teamA?.teamId, match.teamB?.teamId].filter(Boolean);
+  const playerProfiles = new Map(Object.values(contribution.rows.flatMap((row) => Object.values(row.players)))
+    .map((player) => [player.playerId, matchPlayerProfile(match, player.playerId)]));
+  const [teamSnapshots, profileSnapshots] = await Promise.all([
+    Promise.all(teamIds.map((id) => db.collection("teams").doc(id).get())),
+    Promise.all([...new Set([...playerProfiles.values()].map((profile) => profile.linkedUserId).filter(Boolean))]
+      .map((id) => db.collection("users").doc(id).get()))
+  ]);
+  const logos = new Map(teamSnapshots.map((snapshot) => [snapshot.id, safeName(snapshot.get("logoUrl") || snapshot.get("logo"))]));
+  const profiles = new Map(profileSnapshots.map((snapshot) => [snapshot.id, {
+    name: safeName(snapshot.get("name") || snapshot.get("displayName")),
+    photo: safeName(snapshot.get("profilePhotoUrl"))
+  }]));
+  for (const row of contribution.rows) {
+    for (const [id, team] of Object.entries(row.teams)) team.logoUrl = logos.get(id) || "";
+    for (const player of Object.values(row.players)) {
+      const profile = playerProfiles.get(player.playerId) || {};
+      const user = profiles.get(profile.linkedUserId) || {};
+      if (!safeName(player.name) || player.name === player.playerId) player.name = profile.name || user.name || player.playerId;
+      player.profilePhotoUrl = user.photo || "";
+    }
+  }
+  return contribution;
+}
+
+function leaderboardAggregateRef(kind, scopeKey, id) {
+  const collection = kind === "player" ? "playerAggregates" : "teamAggregates";
+  return db.collection("leaderboards").doc(collection).collection("entries").doc(`${scopeKey}_${leaderboardId(id)}`);
+}
+
+async function replaceLeaderboardContribution(transaction, contributionRef, replacement) {
+  const previousSnapshot = await transaction.get(contributionRef);
+  const previous = previousSnapshot.exists && previousSnapshot.get("active") ? previousSnapshot.data() : null;
+  const changes = new Map();
+  const addRow = (kind, scope, id, stats, multiplier) => {
+    const ref = leaderboardAggregateRef(kind, scope.scopeKey, id);
+    const key = `${kind}:${ref.path}`;
+    if (!changes.has(key)) changes.set(key, { kind, ref, scope, id, delta: {}, metadata: {} });
+    const change = changes.get(key);
+    for (const [field, value] of Object.entries(stats)) {
+      if (typeof value === "number") change.delta[field] = (change.delta[field] || 0) + value * multiplier;
+      else if (multiplier > 0 && !["scopeKey", "playerId", "teamId"].includes(field)) change.metadata[field === "name" ? "name" : field] = value;
+    }
+  };
+  for (const [source, multiplier] of [[previous, -1], [replacement, 1]]) {
+    if (!source?.active) continue;
+    for (const scope of source.rows || []) {
+      for (const [id, stats] of Object.entries(scope.players || {})) addRow("player", scope, id, stats, multiplier);
+      for (const [id, stats] of Object.entries(scope.teams || {})) addRow("team", scope, id, stats, multiplier);
+    }
+  }
+  const snapshots = await Promise.all([...changes.values()].map((change) => transaction.get(change.ref)));
+  const writes = [];
+  [...changes.values()].forEach((change, index) => {
+    const snapshot = snapshots[index]; const current = snapshot.exists ? snapshot.data() : {};
+    const aggregate = change.kind === "player"
+      ? leaderboardScoring.aggregatePlayer(current, change.delta)
+      : leaderboardScoring.aggregateTeam(current, change.delta);
+    const hasTotals = Object.entries(aggregate).some(([key, value]) => typeof value === "number" && value !== 0 && key !== "netRunRate");
+    if (!hasTotals) writes.push(() => transaction.delete(change.ref));
+    else writes.push(() => transaction.set(change.ref, { ...current, ...change.scope, ...change.metadata, ...aggregate,
+      ...(change.kind === "player" ? { playerId: change.id } : { teamId: change.id }),
+      updatedAt: FieldValue.serverTimestamp() }));
+  });
+  for (const write of writes) write();
+  if (replacement) {
+    transaction.set(contributionRef, replacement);
+    transaction.set(contributionRef.collection("revisions").doc(String(replacement.revision)), replacement);
+  } else if (previousSnapshot.exists) {
+    const prior = previousSnapshot.data();
+    transaction.set(contributionRef, { ...prior, active: false, invalidatedAt: FieldValue.serverTimestamp() });
+    if (prior.active) transaction.set(contributionRef.collection("revisions").doc(String(prior.revision)), { active: false, invalidatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  }
+}
+
+exports.finalizeMatch = onCall(async (request) => {
+  if (!request.auth) failFinalization("unauthenticated", "Sign in before finalizing a match.");
+  const matchId = requireTeamId(request.data?.matchId); const matchRef = db.collection("matches").doc(matchId);
+  const snapshot = await matchRef.get(); if (!snapshot.exists) failFinalization("not-found", "Match not found.");
+  const match = snapshot.data();
+  if ((match.ownerId || match.organiserId) !== request.auth.uid) failFinalization("permission-denied", "Only the match organiser may finalize it.");
+  if (match.finalization?.state === FINALIZED) return { matchId, finalized: true, revision: match.finalization.revision };
+  if (match.status !== "FINALIZATION_PENDING" && !["CORRECTION_OPEN", "FINALIZING"].includes(match.finalization?.state)) failFinalization("failed-precondition", "Sync the locally completed match before requesting finalization.");
+  const previousFinalization = match.finalization?.state === "FINALIZING"
+    ? (match.finalization.previousState === "CORRECTION_OPEN" ? { ...match.finalization, state: "CORRECTION_OPEN" } : null)
+    : (match.finalization || null);
+  await db.runTransaction(async (transaction) => {
+    const current = await transaction.get(matchRef);
+    if (current.get("finalization.state") === FINALIZED || current.get("finalization.state") === "FINALIZING") return;
+    if ((current.get("ownerId") || current.get("organiserId")) !== request.auth.uid || (current.get("status") !== "FINALIZATION_PENDING" && current.get("finalization.state") !== "CORRECTION_OPEN")) failFinalization("aborted", "Match changed before finalization.");
+    transaction.update(matchRef, { finalization: { ...(current.get("finalization") || {}), previousState: current.get("finalization.state") || "", state: "FINALIZING", requestedBy: request.auth.uid, validationStartedAt: FieldValue.serverTimestamp() } });
+  });
+  const lockedMatchSnap = await matchRef.get();
+  if (lockedMatchSnap.get("finalization.state") === FINALIZED) return { matchId, finalized: true, revision: lockedMatchSnap.get("finalization.revision") };
+  if (lockedMatchSnap.get("finalization.state") !== "FINALIZING") failFinalization("aborted", "Could not lock match data for finalization.");
+  let validated;
+  try {
+    validated = await validateFinalizedScorecard(matchRef, lockedMatchSnap.data());
+  } catch (error) {
+    await db.runTransaction(async (transaction) => {
+      const current = await transaction.get(matchRef);
+      if (current.get("finalization.state") === "FINALIZING") transaction.update(matchRef, { finalization: previousFinalization, status: previousFinalization?.state === "CORRECTION_OPEN" ? "IN_PROGRESS" : "FINALIZATION_PENDING" });
+    });
+    throw error;
+  }
+  const teamScores = new Map();
+  for (const item of validated.projections) teamScores.set(item.innings.battingTeamId, (teamScores.get(item.innings.battingTeamId) || 0) + asNumber(item.innings.score));
+  const scoreValues = [...teamScores.values()];
+  if (scoreValues.length !== 2) {
+    await db.runTransaction(async (transaction) => {
+      const current = await transaction.get(matchRef);
+      if (current.get("finalization.state") === "FINALIZING") transaction.update(matchRef, { finalization: previousFinalization, status: previousFinalization?.state === "CORRECTION_OPEN" ? "IN_PROGRESS" : "FINALIZATION_PENDING" });
+    });
+    failFinalization("failed-precondition", "A completed match must contain innings for both teams to determine its result.");
+  }
+  const result = scoreValues[0] === scoreValues[1] ? "TIE" : "WIN";
+  const winnerTeamId = result === "WIN" ? [...teamScores.entries()].sort((a, b) => b[1] - a[1])[0][0] : null;
+  const now = FieldValue.serverTimestamp();
+  const revision = Math.max(1, asNumber(lockedMatchSnap.get("finalization.revision")));
+  const matchForRanking = { ...lockedMatchSnap.data(), matchId, tournamentRules: validated.tournament,
+    finalization: { state: FINALIZED, revision, result, teamScores: Object.fromEntries(teamScores), winnerTeamId } };
+  let contribution;
+  try {
+    contribution = await enrichLeaderboardDisplayData(buildLeaderboardContribution(matchForRanking, validated, revision), matchForRanking);
+  } catch (error) {
+    await db.runTransaction(async (transaction) => {
+      const current = await transaction.get(matchRef);
+      if (current.get("finalization.state") === "FINALIZING") transaction.update(matchRef, { finalization: previousFinalization, status: previousFinalization?.state === "CORRECTION_OPEN" ? "IN_PROGRESS" : "FINALIZATION_PENDING" });
+    });
+    throw error;
+  }
+  const contributionRef = db.collection("leaderboards").doc("matchContributions").collection("entries").doc(matchId);
+  try {
+    await db.runTransaction(async (transaction) => {
+      const current = await transaction.get(matchRef);
+      if (current.get("finalization.state") === FINALIZED) return;
+      if ((current.get("ownerId") || current.get("organiserId")) !== request.auth.uid || current.get("finalization.state") !== "FINALIZING") failFinalization("aborted", "Match changed while finalization was being checked.");
+      await replaceLeaderboardContribution(transaction, contributionRef, contribution);
+      transaction.update(matchRef, { status: "COMPLETED", finalization: { state: FINALIZED, revision, by: request.auth.uid, finalizedAt: now, result, teamScores: Object.fromEntries(teamScores), winnerTeamId }, finalizedAt: now, finalizedBy: request.auth.uid });
+      if (previousFinalization?.state === "CORRECTION_OPEN") {
+        transaction.update(matchRef.collection("correctionAudit").doc(String(revision)), { state: FINALIZED, finalizedAt: now, finalizedBy: request.auth.uid });
+      }
+    });
+  } catch (error) {
+    await db.runTransaction(async (transaction) => {
+      const current = await transaction.get(matchRef);
+      if (current.get("finalization.state") === "FINALIZING") transaction.update(matchRef, { finalization: previousFinalization, status: previousFinalization?.state === "CORRECTION_OPEN" ? "IN_PROGRESS" : "FINALIZATION_PENDING" });
+    });
+    throw error;
+  }
+  return { matchId, finalized: true, revision: Math.max(1, asNumber(match.finalization?.revision)) };
+});
+
+exports.requestMatchCorrection = onCall(async (request) => {
+  if (!request.auth) failFinalization("unauthenticated", "Sign in before requesting a correction.");
+  const matchId = requireTeamId(request.data?.matchId); const reason = safeName(request.data?.reason);
+  if (reason.length < 8 || reason.length > 500) failFinalization("invalid-argument", "Provide a correction reason between 8 and 500 characters.");
+  const matchRef = db.collection("matches").doc(matchId);
+  await db.runTransaction(async (transaction) => {
+    const current = await transaction.get(matchRef);
+    if (!current.exists) failFinalization("not-found", "Match not found.");
+    if ((current.get("ownerId") || current.get("organiserId")) !== request.auth.uid) failFinalization("permission-denied", "Only the match organiser may request a correction.");
+    if (current.get("finalization.state") !== FINALIZED) failFinalization("failed-precondition", "Only a finalized match can be corrected.");
+    const revision = asNumber(current.get("finalization.revision")) + 1;
+    const contributionRef = db.collection("leaderboards").doc("matchContributions").collection("entries").doc(matchId);
+    await replaceLeaderboardContribution(transaction, contributionRef, null);
+    transaction.update(matchRef, { finalization: { state: "CORRECTION_OPEN", revision, correctionReason: reason, correctionBy: request.auth.uid, correctionRequestedAt: FieldValue.serverTimestamp(), previousFinalizedAt: current.get("finalization.finalizedAt") }, status: "IN_PROGRESS" });
+    transaction.create(matchRef.collection("correctionAudit").doc(String(revision)), { revision, reason, requestedBy: request.auth.uid, requestedAt: FieldValue.serverTimestamp(), state: "OPEN" });
+  });
+  return { matchId, correctionOpen: true };
 });
 
 /** Registers a captain's team in a tournament. Membership and duplicate checks are transactional. */

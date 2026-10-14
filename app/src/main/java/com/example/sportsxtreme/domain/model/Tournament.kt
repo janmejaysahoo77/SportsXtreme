@@ -4,6 +4,8 @@ data class Tournament(
     val id: String = "",
     val type: String = "Tournament", // Tournament or Series
     val name: String = "",
+    val logoUrl: String = "",
+    val bannerUrl: String = "",
     val city: String = "",
     val ground: String = "",
     val organizerName: String = "",

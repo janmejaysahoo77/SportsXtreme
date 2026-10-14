@@ -32,18 +32,40 @@ service cloud.firestore {
     // live scorecard never appears.
     match /matches/{matchId} {
       allow read: if request.auth != null;
-      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.get('status', '') != 'COMPLETED'
+        && request.resource.data.get('status', '') != 'FINALIZATION_PENDING'
+        && request.resource.data.get('status', '') != 'FINALIZING'
+        && request.resource.data.get('status', '') != 'FINALIZED'
+        && !request.resource.data.keys().hasAny(['finalization', 'finalizedAt', 'finalizedBy', 'finalizationRevision', 'correctionState']);
       allow update: if isSignedIn()
         && resource.data.ownerId == request.auth.uid
+        && (resource.data.get('status', '') != 'COMPLETED'
+          || (request.resource.data.get('status', '') == 'FINALIZATION_PENDING'
+            && request.resource.data.diff(resource.data).affectedKeys().hasAny(['status'])))
+        && resource.data.get('finalization', {}).get('state', '') != 'FINALIZING'
+        && resource.data.get('finalization', {}).get('state', '') != 'FINALIZED'
         && request.resource.data.ownerId == resource.data.ownerId
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['finalization', 'finalizedAt', 'finalizedBy', 'finalizationRevision', 'correctionState'])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status'])
+          || (request.resource.data.status != 'COMPLETED'
+            && request.resource.data.status != 'FINALIZING'
+            && request.resource.data.status != 'FINALIZED'
+            && resource.data.get('finalization', {}).get('state', '') != 'FINALIZED'))
         && unchangedClaims()
         || isSignedIn() && resource.data.get('teamAClaim', null) == null
+        && resource.data.get('status', '') != 'COMPLETED'
+        && resource.data.get('finalization', {}).get('state', '') != 'FINALIZING'
+        && resource.data.get('finalization', {}).get('state', '') != 'FINALIZED'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamAClaim', 'updatedAtEpochMs'])
         && validClaim(request.resource.data.teamAClaim)
         && resource.data.get('teamBClaim', {}).get('userId', '') != request.auth.uid
         && getAfter(/databases/$(database)/documents/matchInvites/$(matchId + '-team_a')).data.status == 'CLAIMED'
         && getAfter(/databases/$(database)/documents/matchInvites/$(matchId + '-team_a')).data.claimedByUserId == request.auth.uid
         || isSignedIn() && resource.data.get('teamBClaim', null) == null
+        && resource.data.get('status', '') != 'COMPLETED'
+        && resource.data.get('finalization', {}).get('state', '') != 'FINALIZING'
+        && resource.data.get('finalization', {}).get('state', '') != 'FINALIZED'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamBClaim', 'updatedAtEpochMs'])
         && validClaim(request.resource.data.teamBClaim)
         && resource.data.get('teamAClaim', {}).get('userId', '') != request.auth.uid
@@ -53,13 +75,31 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['scorecardViews'])
         && request.resource.data.get('scorecardViews', 0) is int
         && request.resource.data.get('scorecardViews', 0) == resource.data.get('scorecardViews', 0) + 1;
-      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid
+        && resource.data.get('status', '') != 'COMPLETED'
+        && resource.data.get('finalization', {}).get('state', '') != 'FINALIZING'
+        && resource.data.get('finalization', {}).get('state', '') != 'FINALIZED';
     }
 
     // Subcollections under a match (deliveries, scorecard, entries, …)
     match /matches/{matchId}/{document=**} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && get(/databases/$(database)/documents/matches/$(matchId)).data.ownerId == request.auth.uid;
+      allow create, update, delete: if request.auth != null
+        && get(/databases/$(database)/documents/matches/$(matchId)).data.ownerId == request.auth.uid
+        && get(/databases/$(database)/documents/matches/$(matchId)).data.get('status', '') != 'COMPLETED'
+        && get(/databases/$(database)/documents/matches/$(matchId)).data.get('finalization', {}).get('state', '') != 'FINALIZING'
+        && get(/databases/$(database)/documents/matches/$(matchId)).data.get('finalization', {}).get('state', '') != 'FINALIZED';
+    }
+
+    // Official statistics and leaderboard aggregates are public read models.
+    // Cloud Functions use the Admin SDK for writes; clients cannot modify them.
+    match /officialStats/{document=**} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+    match /leaderboards/{document=**} {
+      allow read: if true;
+      allow write: if false;
     }
 
     // ---------- Match invites: organiser-owned, creation-only in Phase 3A ----------
@@ -137,6 +177,48 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ---------- Community profiles: visible to signed-in community members ----------
+    match /communityProfiles/{profileId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          'ownerId', 'name', 'category', 'location', 'organization',
+          'experience', 'groundType', 'ballType', 'chargePerMatch', 'profilePhotoUrl', 'whatsappConsent', 'createdAt'
+        ])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.category is string
+        && request.resource.data.location is string
+        && request.resource.data.organization is string
+        && request.resource.data.experience is string
+        && request.resource.data.groundType is string
+        && request.resource.data.ballType is string
+        && request.resource.data.chargePerMatch is string
+        && request.resource.data.profilePhotoUrl is string
+        && request.resource.data.whatsappConsent == true
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+
+      match /private/{privateDocument} {
+        allow get: if isSignedIn()
+          && privateDocument == 'contact'
+          && get(/databases/$(database)/documents/communityProfiles/$(profileId)).data.whatsappConsent == true;
+        allow list: if false;
+        allow create, update: if isSignedIn()
+          && request.resource.data.keys().hasOnly(['ownerId', 'whatsappNumber'])
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.whatsappNumber is string
+          && request.resource.data.whatsappNumber.size() >= 10
+          && request.resource.data.whatsappNumber.size() <= 15
+          && getAfter(/databases/$(database)/documents/communityProfiles/$(profileId)).data.ownerId == request.auth.uid
+          && getAfter(/databases/$(database)/documents/communityProfiles/$(profileId)).data.whatsappConsent == true;
+        allow delete: if isSignedIn()
+          && resource.data.ownerId == request.auth.uid;
+      }
+    }
+
     // ---------- User profiles: readable by signed-in players ----------
     match /users/{userId} {
       allow read: if request.auth != null;
@@ -146,7 +228,7 @@ service cloud.firestore {
       // Stats are shown on player profiles; settings and achievements remain owner-only.
       allow read: if request.auth != null
         && (request.auth.uid == userId || document == 'stats/summary');
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId && document != 'stats/summary';
     }
   }
 }

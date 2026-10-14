@@ -4909,3 +4909,59 @@ class HomeScreenViewV2 @JvmOverloads constructor(
     }
 }
 
+/*
+ * COMMUNITY PAGE UI REFERENCE
+ * Active implementation: app/src/main/java/com/example/sportsxtreme/presentation/home/CommunityScreen.kt
+ * This catalog records reusable box/card patterns from the Community page.
+ *
+ * Shared visual language
+ * - Screen background: #010509 with faint olive and cyan radial glows.
+ * - Main accent: lime #C1FF00; secondary accent: cyan #00D2FF.
+ * - Muted text: #9AA7A3; subtle outline: #334E5B64.
+ * - Surfaces use near-black charcoal gradients, thin borders, and rounded corners.
+ *
+ * 1) Community category tile (CategoryTile)
+ * - Four equal columns, 7 category tiles across two rows; 132dp high, 12dp corner radius.
+ * - Linear charcoal gradient (#222830 -> #171D22 -> #11161B), 1dp muted border.
+ * - Centered 58dp rounded icon pad with category accent at 14% opacity; 42dp icon.
+ * - Bottom-aligned bold white category name (11sp) and accent uppercase subtitle (8sp).
+ * - Data-driven: icon, title, subtitle, and glow/accent color vary by category.
+ *
+ * 2) Filter control and filter chips (FilterSlidersButton, FilterRow)
+ * - 30dp dark rounded-square sliders control with thin outline and three lime slider knobs.
+ * - Horizontally scrolling chips, 30dp high, pill shaped, 8dp spacing.
+ * - Selected chip: lime fill #C1FF00, pale-lime border, near-black label.
+ * - Unselected chip: #1B2126 fill, subtle border, white label.
+ *
+ * 3) Opportunity card (OpportunityCard)
+ * - Full width, 12dp corners, 1dp subtle border, 14dp inner padding.
+ * - Charcoal gradient (#191E24 -> #14191E -> #19221B); age label at top right.
+ * - Left column: 44dp circular outlined avatar using the opportunity accent.
+ * - Right column: bold name, uppercase accent role, optional description, location/league
+ *   metadata, then a footer with price or count bubble and an action pill.
+ * - Adaptable content fields: name, role, description, age, price/meta, action, accent,
+ *   location, league, and optional count bubble.
+ *
+ * 4) Blank avatar (BlankAvatar)
+ * - 44dp circular dark base; accent halo and ring; simple white outline person glyph.
+ * - Accent is supplied by the containing opportunity card.
+ *
+ * 5) Metadata line (MetaLine)
+ * - Small outlined location pin followed by muted light text (#C8D2CE), 11sp.
+ * - Single line with ellipsis; use for venue and league details.
+ *
+ * 6) Count bubble (SmallBubble)
+ * - 28dp circle, #11161B fill, subtle outline, centered white 9sp bold count.
+ *
+ * 7) Action pill (ActionPill)
+ * - 36dp high, 10dp corners, transparent dark-green tint, 1.4dp lime outline.
+ * - Lime bold 13sp label with 18dp horizontal padding; examples: Contact, Apply Now, Join.
+ *
+ * 8) Premium signal banner (PremiumSignalCard)
+ * - Full width x 110dp, 12dp corners, subtle green border.
+ * - Dark-to-olive gradient (#101419 -> #111A12 -> #263815) with faint diagonal texture.
+ *
+ * Screen spacing: 12dp horizontal content inset, 14dp between list sections/cards,
+ * 10dp between category rows. Use CommunityScreen.kt for full Compose implementations.
+ */
+

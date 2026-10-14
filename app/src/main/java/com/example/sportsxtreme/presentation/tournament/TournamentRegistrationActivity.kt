@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,7 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -35,8 +36,11 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +61,8 @@ import androidx.core.view.WindowCompat
 import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
+import coil3.compose.AsyncImage
+import com.example.sportsxtreme.data.remote.cloudinary.CloudinaryTournamentImageUploader
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.domain.model.Tournament
@@ -64,11 +70,52 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import java.util.Locale
 
 @AndroidEntryPoint
 class TournamentRegistrationActivity : ComponentActivity() {
     private val viewModel: TournamentRegistrationViewModel by viewModels()
+    private var logoPreviewUri by mutableStateOf<android.net.Uri?>(null)
+    private var logoUploading by mutableStateOf(false)
+    private var bannerPreviewUri by mutableStateOf<android.net.Uri?>(null)
+    private var bannerUploading by mutableStateOf(false)
+    private val logoPicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            logoPreviewUri = uri
+            lifecycleScope.launch {
+                logoUploading = true
+                val result = CloudinaryTournamentImageUploader(applicationContext)
+                    .upload(uri, UUID.randomUUID().toString(), "logo")
+                logoUploading = false
+                result.onSuccess { logoUrl ->
+                    viewModel.updateField(TournamentRegistrationViewModel.Field.LOGO_URL, logoUrl)
+                    Toast.makeText(this@TournamentRegistrationActivity, "Tournament logo uploaded", Toast.LENGTH_SHORT).show()
+                }.onFailure { error ->
+                    logoPreviewUri = null
+                    Toast.makeText(this@TournamentRegistrationActivity, error.message ?: "Could not upload tournament logo", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+    private val bannerPicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            bannerPreviewUri = uri
+            lifecycleScope.launch {
+                bannerUploading = true
+                val result = CloudinaryTournamentImageUploader(applicationContext)
+                    .upload(uri, UUID.randomUUID().toString(), "banner")
+                bannerUploading = false
+                result.onSuccess { bannerUrl ->
+                    viewModel.updateField(TournamentRegistrationViewModel.Field.BANNER_URL, bannerUrl)
+                    Toast.makeText(this@TournamentRegistrationActivity, "Tournament banner uploaded", Toast.LENGTH_SHORT).show()
+                }.onFailure { error ->
+                    bannerPreviewUri = null
+                    Toast.makeText(this@TournamentRegistrationActivity, error.message ?: "Could not upload tournament banner", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
     private var pendingLocation: ((String) -> Unit)? = null
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -90,12 +137,19 @@ class TournamentRegistrationActivity : ComponentActivity() {
                     startActivity(
                         Intent(this, TournamentRequirementsActivity::class.java)
                             .putExtra(TournamentRequirementsActivity.EXTRA_START_DATE, tournament.startDate)
+                            .putExtra(TournamentRequirementsActivity.EXTRA_DATE_TO_BE_ANNOUNCED, tournament.dateToBeAnnounced)
                             .putExtra(TournamentRequirementsActivity.EXTRA_MATCH_FORM, tournament.matchForm)
                             .putExtra(TournamentRequirementsActivity.EXTRA_BALL_TYPE, tournament.ballType)
                             .putExtra(TournamentRequirementsActivity.EXTRA_TOURNAMENT_ID, tournament.id)
                     )
                 },
                 onLocationClick = { callback -> requestRegistrationLocation(callback) },
+                onPickLogo = { logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                logoPreview = logoPreviewUri ?: viewModel.tournamentState.value.logoUrl.takeIf { it.isNotBlank() },
+                logoUploading = logoUploading,
+                onPickBanner = { bannerPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                bannerPreview = bannerPreviewUri ?: viewModel.tournamentState.value.bannerUrl.takeIf { it.isNotBlank() },
+                bannerUploading = bannerUploading,
                 viewModel = viewModel
             )
         }
@@ -150,6 +204,12 @@ private fun TournamentRegistrationScreen(
     onBack: () -> Unit,
     onNavigateNext: (Tournament) -> Unit,
     onLocationClick: ((String) -> Unit) -> Unit,
+    onPickLogo: () -> Unit,
+    logoPreview: Any?,
+    logoUploading: Boolean,
+    onPickBanner: () -> Unit,
+    bannerPreview: Any?,
+    bannerUploading: Boolean,
     viewModel: TournamentRegistrationViewModel
 ) {
     val tournamentState by viewModel.tournamentState.collectAsState()
@@ -167,15 +227,24 @@ private fun TournamentRegistrationScreen(
             .fillMaxSize()
             .background(FormBg)
             .drawBehind {
-                drawCircle(
-                    color = Color(0x332C4D11),
-                    radius = size.width * 0.78f,
-                    center = Offset(size.width * 1.02f, size.height * 0.22f)
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF0A151B), FormBg, Color(0xFF020609))
+                    )
                 )
-                drawCircle(
-                    color = Color(0x1A00D2FF),
-                    radius = size.width * 0.56f,
-                    center = Offset(0f, size.height * 0.75f)
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x2545E9FF), Color(0x1045E9FF), Color.Transparent),
+                        center = Offset(size.width * 0.08f, size.height * 0.12f),
+                        radius = size.width * 0.85f
+                    )
+                )
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x20C7FF1A), Color(0x0CC7FF1A), Color.Transparent),
+                        center = Offset(size.width * 0.94f, size.height * 0.58f),
+                        radius = size.width * 0.72f
+                    )
                 )
             }
     ) {
@@ -183,11 +252,11 @@ private fun TournamentRegistrationScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) })
                 .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            BannerUploader()
+            BannerUploader(logoPreview, logoUploading, onPickLogo, bannerPreview, bannerUploading, onPickBanner)
             TournamentModePicker(
                 selectedType = tournamentState.type,
                 onModeSelected = viewModel::updateMode
@@ -202,7 +271,12 @@ private fun TournamentRegistrationScreen(
             TimelineCategorySection(
                 date = tournamentState.startDate,
                 dateToBeAnnounced = tournamentState.dateToBeAnnounced,
-                onDateChange = { viewModel.updateField(TournamentRegistrationViewModel.Field.START_DATE, it) },
+                onDateChange = {
+                    viewModel.updateField(TournamentRegistrationViewModel.Field.START_DATE, it)
+                    if (it.isNotBlank()) {
+                        viewModel.updateField(TournamentRegistrationViewModel.Field.DATE_TO_BE_ANNOUNCED, "false")
+                    }
+                },
                 onDateToBeAnnouncedChange = {
                     viewModel.updateField(TournamentRegistrationViewModel.Field.DATE_TO_BE_ANNOUNCED, it.toString())
                     if (it) viewModel.updateField(TournamentRegistrationViewModel.Field.START_DATE, "")
@@ -229,7 +303,7 @@ private fun TournamentRegistrationScreen(
             }
             
             NextButton(
-                isLoading = uiState is TournamentRegistrationViewModel.UiState.Loading,
+                isLoading = uiState is TournamentRegistrationViewModel.UiState.Loading || logoUploading || bannerUploading,
                 onClick = viewModel::saveTournament
             )
             Spacer(androidx.compose.ui.Modifier.height(100.dp))
@@ -280,7 +354,14 @@ private fun FormTopBar(onBack: () -> Unit) {
 }
 
 @Composable
-private fun BannerUploader() {
+private fun BannerUploader(
+    logoPreview: Any?,
+    logoUploading: Boolean,
+    onPickLogo: () -> Unit,
+    bannerPreview: Any?,
+    bannerUploading: Boolean,
+    onPickBanner: () -> Unit
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -294,15 +375,21 @@ private fun BannerUploader() {
             )
             .border(1.2.dp, FormAccent.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.ground),
-            contentDescription = "Tournament ground",
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .height(156.dp)
-                .width(190.dp),
-            contentScale = ContentScale.Crop
-        )
+        if (bannerPreview != null) {
+            AsyncImage(
+                model = bannerPreview,
+                contentDescription = "Tournament banner preview",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Image(
+                painter = painterResource(id = R.drawable.ground),
+                contentDescription = "Tournament ground",
+                modifier = Modifier.align(Alignment.CenterEnd).height(156.dp).width(190.dp),
+                contentScale = ContentScale.Crop
+            )
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -328,6 +415,7 @@ private fun BannerUploader() {
                 .clip(RoundedCornerShape(18.dp))
                 .background(Color(0xE60D1420))
                 .border(1.dp, Color(0x664DE9FF), RoundedCornerShape(18.dp))
+                .clickable(enabled = !bannerUploading, onClick = onPickBanner)
                 .padding(horizontal = 12.dp, vertical = 7.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -338,7 +426,7 @@ private fun BannerUploader() {
                     tint = FormCyan,
                     modifier = Modifier.size(17.dp)
                 )
-                Text("ADD BANNER", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                Text(if (bannerUploading) "UPLOADING…" else if (bannerPreview != null) "CHANGE BANNER" else "ADD BANNER", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
         Row(
@@ -347,9 +435,35 @@ private fun BannerUploader() {
                 .padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AddBadge()
+            Box(
+                modifier = Modifier.size(58.dp).clip(CircleShape).clickable(enabled = !logoUploading, onClick = onPickLogo),
+                contentAlignment = Alignment.Center
+            ) {
+                if (logoPreview != null) {
+                    AsyncImage(
+                        model = logoPreview,
+                        contentDescription = "Tournament logo preview",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                    Box(Modifier.fillMaxSize().border(2.dp, FormAccent.copy(alpha = .9f), CircleShape))
+                } else {
+                    AddBadge(Modifier.fillMaxSize())
+                }
+                if (logoUploading) {
+                    Box(Modifier.fillMaxSize().background(Color(0xAA07100B), CircleShape), contentAlignment = Alignment.Center) {
+                        Text("...", color = FormAccent, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    }
+                }
+            }
             Text(
-                "Add logo for your tournament page.",
+                when {
+                    logoUploading -> "Uploading tournament logo…"
+                    logoPreview != null -> "Tap the logo to change it."
+                    bannerUploading -> "Uploading tournament banner…"
+                    bannerPreview != null -> "Banner added. Tap the logo to add or change it."
+                    else -> "Tap + to add a logo for your tournament page."
+                },
                 color = Color(0xFFC5D0CC),
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
@@ -525,7 +639,7 @@ private fun TimelineCategorySection(
 ) {
     FormSection(title = "Timeline & Category") {
         DateBox(
-            label = "START DATE",
+            label = "START DATE (DD/MM/YYYY)",
             value = date,
             onValueChange = onDateChange
         )

@@ -16,12 +16,19 @@ import com.example.sportsxtreme.domain.usecase.ObserveMatchStateUseCase
 import com.example.sportsxtreme.domain.usecase.ObserveScorecardUseCase
 import com.example.sportsxtreme.domain.usecase.RecordBallUseCase
 import com.example.sportsxtreme.domain.usecase.UndoBallUseCase
+import com.example.sportsxtreme.domain.repository.MatchRepository
+import com.example.sportsxtreme.domain.repository.TeamRepository
+import com.example.sportsxtreme.domain.model.Player
+import com.example.sportsxtreme.data.di.AuthDependencies
+import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -30,7 +37,8 @@ data class ScoringUiState(
     val isLoading: Boolean = true,
     val scorecard: InningsScorecard? = null,
     val matchState: MatchState? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val scorerName: String = "Scorer"
 )
 
 @HiltViewModel
@@ -39,23 +47,43 @@ class ScoringViewModel @Inject constructor(
     observeScorecard: ObserveScorecardUseCase,
     observeMatchState: ObserveMatchStateUseCase,
     private val recordBall: RecordBallUseCase,
-    private val undoBall: UndoBallUseCase
+    private val undoBall: UndoBallUseCase,
+    private val matchRepository: MatchRepository,
+    private val teamRepository: TeamRepository
 ) : ViewModel() {
+    private val _scorerName = kotlinx.coroutines.flow.MutableStateFlow("Scorer")
+    private val scorerNameFlow: StateFlow<String> = _scorerName
+
+    init {
+        viewModelScope.launch {
+            val user = FirebaseAuth.getInstance().currentUser ?: return@launch
+            val profileName = runCatching {
+                AuthDependencies.authUseCases().getUserProfile(user.uid).data?.name?.trim().orEmpty()
+            }.getOrDefault("")
+            _scorerName.value = profileName.ifBlank { user.displayName?.trim().orEmpty().ifBlank { "Scorer" } }
+        }
+    }
+
     private val matchId = savedStateHandle.get<String>("match_id").orEmpty()
     private val inningsId = savedStateHandle.get<String>("inningsId").orEmpty()
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     val uiState: StateFlow<ScoringUiState> = if (matchId.isBlank() || inningsId.isBlank()) {
         flowOf(ScoringUiState(isLoading = false, errorMessage = "Match or innings id is missing"))
     } else {
-        combine(observeScorecard(matchId, inningsId), observeMatchState(matchId)) { scorecard, matchState ->
-            val scorecardError = (scorecard as? Resource.Error)?.message
-            val matchStateError = (matchState as? Resource.Error)?.message
-            ScoringUiState(
-                isLoading = scorecard is Resource.Loading || matchState is Resource.Loading,
-                scorecard = (scorecard as? Resource.Success)?.data,
-                matchState = (matchState as? Resource.Success)?.data,
-                errorMessage = scorecardError ?: matchStateError
-            )
+        observeMatchState(matchId).flatMapLatest { matchState ->
+            val activeInningsId = (matchState as? Resource.Success)?.data?.currentInnings?.id ?: inningsId
+            combine(observeScorecard(matchId, activeInningsId), scorerNameFlow) { scorecard, scorerName ->
+                val scorecardError = (scorecard as? Resource.Error)?.message
+                val matchStateError = (matchState as? Resource.Error)?.message
+                ScoringUiState(
+                    isLoading = scorecard is Resource.Loading || matchState is Resource.Loading,
+                    scorecard = (scorecard as? Resource.Success)?.data,
+                    matchState = (matchState as? Resource.Success)?.data,
+                    errorMessage = scorecardError ?: matchStateError,
+                    scorerName = scorerName
+                )
+            }
         }
     }.stateIn(
         scope = viewModelScope,
@@ -79,6 +107,51 @@ class ScoringViewModel @Inject constructor(
         viewModelScope.launch { undoBall(state.matchId, LOCAL_SCORER_ID) }
     }
 
+    fun loadPlayers(onLoaded: (List<Player>, List<Player>) -> Unit) {
+        val state = currentState() ?: return
+        val battingTeamId = state.battingTeam?.teamId ?: return
+        val bowlingTeamId = state.bowlingTeam?.teamId ?: return
+        viewModelScope.launch {
+            val batting = (teamRepository.getTeam(battingTeamId) as? Resource.Success)?.data?.players.orEmpty()
+            val bowling = (teamRepository.getTeam(bowlingTeamId) as? Resource.Success)?.data?.players.orEmpty()
+            onLoaded(batting, bowling)
+        }
+    }
+
+    fun selectNextBatter(playerId: String, onError: (String) -> Unit = {}) {
+        val state = currentState() ?: return
+        viewModelScope.launch {
+            when (val result = matchRepository.selectNextBatter(state.matchId, playerId)) {
+                is Resource.Error -> onError(result.message ?: "Unable to select batter")
+                else -> Unit
+            }
+        }
+    }
+
+    fun startSecondInnings(strikerId: String, nonStrikerId: String, bowlerId: String, onError: (String) -> Unit = {}) {
+        val state = currentState() ?: return
+        viewModelScope.launch {
+            when (val result = matchRepository.startSecondInnings(state.matchId, strikerId, nonStrikerId, bowlerId)) {
+                is Resource.Error -> onError(result.message ?: "Unable to start second innings")
+                else -> Unit
+            }
+        }
+    }
+
+    fun finishMatch(onFinished: () -> Unit, onError: (String) -> Unit = {}) {
+        val state = currentState() ?: run {
+            onError("Match state is not ready. Please reopen the match and try again.")
+            return
+        }
+        viewModelScope.launch {
+            when (val result = matchRepository.finishMatch(state.matchId)) {
+                is Resource.Success -> onFinished()
+                is Resource.Error -> onError(result.message ?: "Unable to finish match")
+                is Resource.Loading -> onError("Match is still finishing. Please try again shortly.")
+            }
+        }
+    }
+
     private fun recordDelivery(
         runsOffBat: Int = 0,
         extras: List<ExtraRun> = emptyList(),
@@ -87,6 +160,7 @@ class ScoringViewModel @Inject constructor(
     ) {
         val state = currentState() ?: return
         val innings = state.currentInnings ?: return
+        if (innings.status != com.example.sportsxtreme.domain.model.InningsStatus.LIVE) return
         val strikerId = state.striker?.id ?: return
         val nonStrikerId = state.nonStriker?.id ?: return
         val bowlerId = state.bowler?.id ?: return

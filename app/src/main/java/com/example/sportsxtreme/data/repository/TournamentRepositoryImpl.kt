@@ -27,6 +27,9 @@ class TournamentRepositoryImpl @Inject constructor(
         ballType: String
     ): Resource<Unit> = dataSource.updateTournamentDetails(tournamentId, name, startDate, ground, ballType)
 
+    override suspend fun updateTournamentImages(tournamentId: String, logoUrl: String?, bannerUrl: String?): Resource<Unit> =
+        dataSource.updateTournamentImages(tournamentId, logoUrl, bannerUrl)
+
     override suspend fun getTournament(tournamentId: String): Resource<Tournament> = dataSource.getTournament(tournamentId)
 
     override suspend fun deleteTournament(tournamentId: String): Resource<Unit> = dataSource.deleteTournament(tournamentId)

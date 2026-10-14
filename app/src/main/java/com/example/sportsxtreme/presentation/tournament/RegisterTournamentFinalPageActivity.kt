@@ -6,10 +6,12 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -79,9 +81,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import coil3.compose.AsyncImage
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.domain.model.Tournament
+import com.example.sportsxtreme.data.remote.cloudinary.CloudinaryTournamentImageUploader
 import com.example.sportsxtreme.presentation.home.HomeScreenView
 import com.example.sportsxtreme.presentation.match.StartMatchActivity
 import com.example.sportsxtreme.presentation.match.RegisteredTeamsOfATournament
@@ -91,16 +95,61 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import java.util.UUID
 
 @AndroidEntryPoint
 class RegisterTournamentFinalPageActivity : ComponentActivity() {
     private val viewModel: TournamentFlowViewModel by viewModels()
+    private var logoUploading by mutableStateOf(false)
+    private var bannerUploading by mutableStateOf(false)
+    private val logoPicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) lifecycleScope.launch {
+            logoUploading = true
+            CloudinaryTournamentImageUploader(applicationContext).upload(uri, UUID.randomUUID().toString(), "logo")
+                .onSuccess { url ->
+                    viewModel.saveTournamentImage(logoUrl = url) { result ->
+                        logoUploading = false
+                        when (result) {
+                            is com.example.sportsxtreme.common.Resource.Success -> Toast.makeText(this@RegisterTournamentFinalPageActivity, "Tournament logo updated", Toast.LENGTH_SHORT).show()
+                            is com.example.sportsxtreme.common.Resource.Error -> Toast.makeText(this@RegisterTournamentFinalPageActivity, result.message ?: "Unable to save logo", Toast.LENGTH_LONG).show()
+                            else -> Unit
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    logoUploading = false
+                    Toast.makeText(this@RegisterTournamentFinalPageActivity, error.message ?: "Could not upload tournament logo", Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+    private val bannerPicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) lifecycleScope.launch {
+            bannerUploading = true
+            CloudinaryTournamentImageUploader(applicationContext).upload(uri, UUID.randomUUID().toString(), "banner")
+                .onSuccess { url ->
+                    viewModel.saveTournamentImage(bannerUrl = url) { result ->
+                        bannerUploading = false
+                        when (result) {
+                            is com.example.sportsxtreme.common.Resource.Success -> Toast.makeText(this@RegisterTournamentFinalPageActivity, "Tournament banner updated", Toast.LENGTH_SHORT).show()
+                            is com.example.sportsxtreme.common.Resource.Error -> Toast.makeText(this@RegisterTournamentFinalPageActivity, result.message ?: "Unable to save banner", Toast.LENGTH_LONG).show()
+                            else -> Unit
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    bannerUploading = false
+                    Toast.makeText(this@RegisterTournamentFinalPageActivity, error.message ?: "Could not upload tournament banner", Toast.LENGTH_LONG).show()
+                }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val pageBackground = android.graphics.Color.rgb(10, 16, 28)
+        window.statusBarColor = pageBackground
+        window.navigationBarColor = pageBackground
         val tournamentId = intent.getStringExtra(EXTRA_TOURNAMENT_ID)
             ?.takeIf { it.isNotBlank() }
             ?: intent.data?.getQueryParameter("id").orEmpty()
@@ -113,6 +162,10 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
                 initialTab = initialTab,
                 initialMatchTab = initialMatchTab,
                 onBack = { finish() },
+                onPickLogo = { logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onPickBanner = { bannerPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                logoUploading = logoUploading,
+                bannerUploading = bannerUploading,
                 onSaveTournamentDetails = viewModel::saveTournamentDetails,
                 onSaveTeamDetails = viewModel::saveTeamDetails,
                 onDeleteTournament = {
@@ -140,9 +193,10 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
     }
 }
 
-private val FinalBg = XtremeBgBlue
-private val FinalPanel = XtremeCardBlue
-private val FinalPanelLight = XtremeCardBlue
+private val FinalBg = Color(0xFF0A101C)
+private val FinalPanel = Color(0xFF111D2D)
+private val FinalPanelLight = Color(0xFF142338)
+private val FinalCardShape = RoundedCornerShape(16.dp)
 private val FinalAccent = XtremeLime
 private val FinalMuted = XtremeMuted
 private val FinalDivider = XtremeCardBorder
@@ -153,6 +207,10 @@ private fun RegisterTournamentFinalPage(
     initialTab: Int,
     initialMatchTab: Int,
     onBack: () -> Unit,
+    onPickLogo: () -> Unit,
+    onPickBanner: () -> Unit,
+    logoUploading: Boolean,
+    bannerUploading: Boolean,
     onSaveTournamentDetails: (String, String, String, String) -> Unit,
     onSaveTeamDetails: (String, String) -> Unit,
     onDeleteTournament: () -> Unit
@@ -163,7 +221,7 @@ private fun RegisterTournamentFinalPage(
     val tabs = listOf("Overview", "Teams", "Matches", "Points", "Leaderboard")
     Column(Modifier.fillMaxSize().background(FinalBg)) {
         FinalTopBar(onBack, onDeleteTournament)
-        FinalTournamentHeader(tournament)
+        FinalTournamentHeader(tournament, onPickLogo, onPickBanner, logoUploading, bannerUploading)
         FinalTournamentTabs(tabs, selectedTab) { selectedTab = it }
         Box(
             Modifier
@@ -276,14 +334,17 @@ private fun FinalTournamentTabs(
 private fun FinalTopBar(onBack: () -> Unit, onDeleteTournament: () -> Unit) {
     var menuExpanded by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(62.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(FinalPanelLight).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
             BackGlyph(Modifier.size(21.dp))
         }
-        Spacer(Modifier.width(12.dp))
-        Column {
-            Text("Tournament hub", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text("Manage every detail in one place", color = FinalMuted, fontSize = 10.sp)
+        Spacer(Modifier.weight(1f))
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Tournament Hub", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Box(Modifier.size(6.dp).clip(CircleShape).background(FinalAccent))
+            }
+            Text("Manage every detail in one place", color = FinalMuted, fontSize = 9.sp)
         }
         Spacer(Modifier.weight(1f))
         Box(Modifier.size(40.dp).clip(CircleShape).background(FinalPanelLight), contentAlignment = Alignment.Center) {
@@ -319,35 +380,98 @@ private fun FinalTopBar(onBack: () -> Unit, onDeleteTournament: () -> Unit) {
 }
 
 @Composable
-private fun FinalTournamentHeader(tournament: Tournament?) {
+private fun FinalTournamentHeader(
+    tournament: Tournament?,
+    onPickLogo: () -> Unit,
+    onPickBanner: () -> Unit,
+    logoUploading: Boolean,
+    bannerUploading: Boolean
+) {
     val context = LocalContext.current
     val tournamentName = tournament?.name?.ifBlank { "Tournament" } ?: "Loading tournament…"
     val tournamentDate = tournament?.startDate?.ifBlank { "Date to be announced" } ?: ""
     val location = listOf(tournament?.ground, tournament?.city).filterNotNull().filter { it.isNotBlank() }.joinToString(" · ")
-    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(52.dp).clip(RoundedCornerShape(15.dp)).background(Color(0xFFECF8D2)).border(1.dp, FinalAccent.copy(alpha = .7f), RoundedCornerShape(15.dp)), contentAlignment = Alignment.Center) {
-            Text("🏏", fontSize = 23.sp)
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+            .shadow(8.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp)).background(FinalPanel)
+    ) {
+        Box(Modifier.fillMaxWidth().height(118.dp).background(FinalPanelLight)) {
+            if (!tournament?.bannerUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = tournament?.bannerUrl,
+                    contentDescription = "Tournament banner",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Image(
+                    painter = painterResource(R.drawable.batsman_onboarding2),
+                    contentDescription = "Tournament banner placeholder",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .42f)))))
+            if (bannerUploading) {
+                Text("Uploading banner…", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomStart).padding(12.dp))
+            }
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(10.dp).size(32.dp).clip(CircleShape)
+                    .background(Color.Black.copy(alpha = .62f)).clickable(enabled = !bannerUploading, onClick = onPickBanner),
+                contentAlignment = Alignment.Center
+            ) { Text("✎", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold) }
         }
-        Column(Modifier.padding(start = 12.dp).weight(1f)) {
-            Text(tournamentName, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(3.dp))
-            Text(tournamentDate.ifBlank { "Date to be announced" }, color = FinalMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (location.isNotBlank()) Text("⌖  $location", color = FinalMuted.copy(alpha = .8f), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Box(
-            Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(FinalAccent)
-                .clickable {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(58.dp)) {
+                Box(Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp)).background(FinalPanelLight), contentAlignment = Alignment.Center) {
+                    if (tournament?.logoUrl?.isNotBlank() == true) {
+                        AsyncImage(
+                            model = tournament.logoUrl,
+                            contentDescription = "Tournament logo",
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text("🏏", fontSize = 23.sp)
+                    }
+                }
+                Box(
+                    Modifier.align(Alignment.BottomEnd).size(22.dp).clip(CircleShape)
+                        .background(FinalAccent).clickable(enabled = !logoUploading, onClick = onPickLogo),
+                    contentAlignment = Alignment.Center
+                ) { Text("✎", color = FinalBg, fontSize = 12.sp, fontWeight = FontWeight.Black) }
+            }
+            Column(Modifier.padding(start = 11.dp).weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        tournamentName,
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Box(Modifier.clip(CircleShape).background(Color(0xFF063A32)).padding(horizontal = 7.dp, vertical = 4.dp)) {
+                        Text("ACTIVE", color = Color(0xFF37E0AC), fontSize = 8.sp, fontWeight = FontWeight.Black, maxLines = 1, softWrap = false)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text("▣  ${tournamentDate.ifBlank { "Date to be announced" }}", color = FinalMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (location.isNotBlank()) Text("•  $location", color = FinalMuted.copy(alpha = .9f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Box(
+                Modifier.clip(RoundedCornerShape(10.dp)).background(FinalPanelLight).clickable {
                     val tournamentId = tournament?.id.orEmpty()
                     if (tournamentId.isBlank()) {
                         Toast.makeText(context, "Tournament is still loading", Toast.LENGTH_SHORT).show()
                     } else {
                         val tournamentUrl = Uri.parse(context.getString(R.string.tournament_share_base_url))
-                            .buildUpon()
-                            .appendQueryParameter("id", tournamentId)
-                            .build()
-                            .toString()
+                            .buildUpon().appendQueryParameter("id", tournamentId).build().toString()
                         val shareText = "View $tournamentName${tournamentDate.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()}\n$tournamentUrl"
                         context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
@@ -355,10 +479,14 @@ private fun FinalTournamentHeader(tournament: Tournament?) {
                         }, "Share tournament"))
                     }
                 }
-                .padding(horizontal = 13.dp, vertical = 9.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("Share", color = FinalBg, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Image(painter = painterResource(R.drawable.ic_share), contentDescription = null, modifier = Modifier.size(14.dp))
+                    Text("Share", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
@@ -385,7 +513,6 @@ private fun AboutTab(
         OrganizerCard(tournament)
         TournamentQrCard(tournament)
         SetupHelpCard()
-        TournamentPromoCard()
         Spacer(Modifier.height(8.dp))
     }
 }
@@ -393,33 +520,37 @@ private fun AboutTab(
 @Composable
 private fun OverviewStatsCard(teams: String, matches: String, startDate: String, location: String) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(FinalPanel).border(1.dp, FinalDivider, RoundedCornerShape(13.dp)).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        Modifier.fillMaxWidth().shadow(7.dp, FinalCardShape).clip(FinalCardShape).background(FinalBg).padding(9.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(Modifier.fillMaxWidth()) {
-            OverviewMetric("TEAMS", teams, Modifier.weight(1f))
-            OverviewMetric("MATCHES", matches, Modifier.weight(1f))
+            OverviewMetric("TEAMS", teams, "registered", Modifier.weight(1f))
+            OverviewMetric("MATCHES", matches, "scheduled", Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth()) {
-            OverviewMetric("START DATE", startDate, Modifier.weight(1f))
-            OverviewMetric("LOCATION", location, Modifier.weight(1f))
+            OverviewMetric("START DATE", startDate, "", Modifier.weight(1f))
+            OverviewMetric("LOCATION", location, "", Modifier.weight(1f))
         }
     }
 }
 
 @Composable
-private fun OverviewMetric(label: String, value: String, modifier: Modifier) {
-    Column(modifier.padding(horizontal = 5.dp, vertical = 3.dp)) {
-        Text(value, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Spacer(Modifier.height(3.dp))
-        Text(label, color = FinalMuted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+private fun OverviewMetric(label: String, value: String, caption: String, modifier: Modifier) {
+    Column(modifier.padding(3.dp).shadow(5.dp, RoundedCornerShape(13.dp)).clip(RoundedCornerShape(13.dp)).background(FinalPanel).padding(12.dp)) {
+        Text(label, color = FinalMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Box(Modifier.size(7.dp).clip(CircleShape).background(FinalAccent))
+            Text(value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (caption.isNotBlank()) Text(caption, color = FinalMuted, fontSize = 8.sp, modifier = Modifier.padding(start = 12.dp), maxLines = 1)
     }
 }
 
 @Composable
 private fun SetupHelpCard() {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(FinalPanel).padding(14.dp)
+        Modifier.fillMaxWidth().shadow(7.dp, FinalCardShape).clip(FinalCardShape).background(FinalPanel).padding(16.dp)
     ) {
         Text("Tournament setup guide/help", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(13.dp))
@@ -441,24 +572,10 @@ private fun SetupHelpCard() {
 }
 
 @Composable
-private fun TournamentPromoCard() {
-    Box(
-        Modifier.fillMaxWidth().height(104.dp).clip(RoundedCornerShape(13.dp)).background(FinalPanel)
-    ) {
-        Image(
-            painter = painterResource(R.drawable.batsman_onboarding2),
-            contentDescription = "SportsXtreme tournament promotion",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
-    }
-}
-
-@Composable
 private fun OrganizerCard(tournament: Tournament?) {
     val organizerName = tournament?.organizerName?.ifBlank { "Organizer" } ?: "Organizer"
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(FinalPanel).padding(14.dp)
+        Modifier.fillMaxWidth().shadow(7.dp, FinalCardShape).clip(FinalCardShape).background(FinalPanel).padding(18.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(38.dp).clip(CircleShape).background(FinalPanelLight), contentAlignment = Alignment.Center) {
@@ -485,10 +602,11 @@ private fun TournamentDetailsCard(
     var ground by remember(tournament?.id) { mutableStateOf(tournament?.ground.orEmpty()) }
     var ballType by remember(tournament?.id) { mutableStateOf(tournament?.ballType.orEmpty()) }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(FinalPanel).padding(14.dp)
+        Modifier.fillMaxWidth().shadow(7.dp, FinalCardShape).clip(FinalCardShape).background(FinalPanel).padding(18.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Tournament details", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Box(Modifier.width(3.dp).height(14.dp).clip(CircleShape).background(FinalAccent))
+            Text("Tournament Details", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 7.dp))
             Text(
                 if (isEditing) "SAVE" else "✎ Edit",
                 color = FinalAccent,
@@ -500,13 +618,13 @@ private fun TournamentDetailsCard(
                 }.padding(4.dp)
             )
         }
-        Spacer(Modifier.height(13.dp))
+        Spacer(Modifier.height(9.dp))
         OverviewEditableDetail("Name", name, isEditing, { name = it })
         OverviewEditableDetail("Date", startDate, isEditing, { startDate = it })
-        OverviewEditableDetail("Grounds", ground, isEditing, { ground = it }, valueColor = FinalAccent)
-        OverviewEditableDetail("Ball type", ballType, isEditing, { ballType = it })
-        OverviewDetail("Category", tournament?.type?.ifBlank { "Tournament" } ?: "Tournament")
-        OverviewDetail("Tournament ID", tournament?.id?.ifBlank { "Not available" } ?: "Not available")
+        OverviewEditableDetail("Grounds", ground, isEditing, { ground = it }, locationMarker = true)
+        OverviewEditableDetail("Ball type", ballType, isEditing, { ballType = it }, chip = true)
+        OverviewEditableDetail("Category", tournament?.type?.ifBlank { "Tournament" } ?: "Tournament", false, {}, chip = true)
+        OverviewTournamentId(tournament?.id.orEmpty())
     }
 }
 
@@ -516,10 +634,11 @@ private fun TeamDetailsCard(tournament: Tournament?, onSave: (String, String) ->
     var entryFee by remember(tournament?.id) { mutableStateOf(tournament?.requirements?.entryFee.orEmpty()) }
     var teamCapacity by remember(tournament?.id) { mutableStateOf(tournament?.requirements?.numberOfTeams.orEmpty()) }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(FinalPanel).padding(14.dp)
+        Modifier.fillMaxWidth().shadow(7.dp, FinalCardShape).clip(FinalCardShape).background(FinalPanel).padding(16.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Team details", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Box(Modifier.width(3.dp).height(14.dp).clip(CircleShape).background(FinalAccent))
+            Text("Team Details", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 7.dp))
             Text(
                 if (isEditing) "SAVE" else "✎ Edit",
                 color = FinalAccent,
@@ -531,7 +650,7 @@ private fun TeamDetailsCard(tournament: Tournament?, onSave: (String, String) ->
                 }.padding(4.dp)
             )
         }
-        Spacer(Modifier.height(13.dp))
+        Spacer(Modifier.height(9.dp))
         OverviewEditableDetail("Entry fee", entryFee, isEditing, { entryFee = it }, emptyLabel = "0")
         OverviewEditableDetail("Team capacity", teamCapacity, isEditing, { teamCapacity = it })
     }
@@ -544,7 +663,9 @@ private fun OverviewEditableDetail(
     isEditing: Boolean,
     onValueChange: (String) -> Unit,
     valueColor: Color = Color.White,
-    emptyLabel: String = "Not set"
+    emptyLabel: String = "Not set",
+    chip: Boolean = false,
+    locationMarker: Boolean = false
 ) {
     if (isEditing) {
         OutlinedTextField(
@@ -552,19 +673,69 @@ private fun OverviewEditableDetail(
             onValueChange = onValueChange,
             label = { Text(label) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedContainerColor = FinalBg,
+                unfocusedContainerColor = FinalBg,
+                cursorColor = FinalAccent,
+                focusedBorderColor = FinalAccent,
+                unfocusedBorderColor = FinalDivider,
+                focusedLabelColor = FinalAccent,
+                unfocusedLabelColor = FinalMuted
+            )
         )
     } else {
-        OverviewDetail(label, value.ifBlank { emptyLabel }, valueColor)
+        val displayedValue = value.ifBlank { emptyLabel }
+        if (label == "Ball type") {
+            val ballColor = when {
+                displayedValue.contains("tennis", ignoreCase = true) -> Color(0xFF37DDEB)
+                displayedValue.contains("leather", ignoreCase = true) -> Color(0xFFFF5B5B)
+                else -> FinalAccent
+            }
+            OverviewDetail(label, displayedValue, ballColor, chip = true)
+        } else {
+            OverviewDetail(label, displayedValue, valueColor, chip, locationMarker = locationMarker)
+        }
     }
 }
 
 @Composable
-private fun OverviewDetail(label: String, value: String, valueColor: Color = Color.White) {
-    Column(Modifier.padding(bottom = 10.dp)) {
-        Text(label, color = FinalMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(2.dp))
-        Text(value, color = valueColor, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+private fun OverviewDetail(
+    label: String,
+    value: String,
+    valueColor: Color = Color.White,
+    chip: Boolean = false,
+    locationMarker: Boolean = false
+) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = FinalMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        if (locationMarker) Box(Modifier.padding(end = 5.dp).size(6.dp).clip(CircleShape).background(Color(0xFF45D9E8)))
+        Box(
+            Modifier.shadow(if (chip) 4.dp else 0.dp, RoundedCornerShape(7.dp))
+                .clip(RoundedCornerShape(7.dp)).background(if (chip) FinalPanelLight else Color.Transparent)
+                .padding(horizontal = if (chip) 8.dp else 0.dp, vertical = if (chip) 5.dp else 0.dp)
+        ) {
+            Text(value, color = valueColor, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun OverviewTournamentId(id: String) {
+    val context = LocalContext.current
+    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    Column(Modifier.fillMaxWidth().padding(top = 3.dp)) {
+        Text("Tournament ID", color = FinalMuted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(4.dp))
+        Row(Modifier.fillMaxWidth().shadow(3.dp, RoundedCornerShape(9.dp)).clip(RoundedCornerShape(9.dp)).background(FinalPanelLight).padding(horizontal = 9.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(id.ifBlank { "Not available" }, color = Color.White, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (id.isNotBlank()) Text("▢ Copy", color = FinalMuted, fontSize = 9.sp, modifier = Modifier.clickable {
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Tournament ID", id))
+                Toast.makeText(context, "Tournament ID copied", Toast.LENGTH_SHORT).show()
+            }.padding(start = 8.dp))
+        }
     }
 }
 
@@ -584,7 +755,7 @@ private fun TournamentQrCard(tournament: Tournament?) {
         tournamentLink?.let(::tournamentQrBitmap)
     }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(FinalPanel).padding(14.dp),
+        Modifier.fillMaxWidth().shadow(7.dp, FinalCardShape).clip(FinalCardShape).background(FinalPanel).padding(18.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -632,7 +803,7 @@ private fun tournamentQrBitmap(value: String): Bitmap {
 
 @Composable
 private fun HelpContactButton(label: String, modifier: Modifier) {
-    Box(modifier.height(36.dp).clip(RoundedCornerShape(7.dp)).background(FinalPanelLight), contentAlignment = Alignment.Center) {
+    Box(modifier.height(36.dp).clip(RoundedCornerShape(10.dp)).background(FinalPanelLight).border(1.dp, FinalDivider, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
         Text(label, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -789,16 +960,18 @@ private fun MatchesTab(tournament: Tournament?, initialMatchTab: Int) {
 @Composable
 private fun MatchStatusTabs(tabs: List<String>, selectedTab: Int, onTabSelected: (Int) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp).clip(RoundedCornerShape(14.dp)).background(FinalPanel).padding(4.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 18.dp).clip(FinalCardShape).background(FinalPanel).border(1.dp, FinalDivider, FinalCardShape).padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         tabs.forEachIndexed { index, label ->
             val selected = selectedTab == index
             Box(
-                Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (selected) FinalAccent else Color.Transparent)
+                Modifier.weight(1f).clip(RoundedCornerShape(11.dp))
+                    .background(if (selected) Brush.horizontalGradient(listOf(FinalAccent.copy(alpha = .20f), FinalAccent.copy(alpha = .07f))) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
+                    .border(1.dp, if (selected) FinalAccent.copy(alpha = .55f) else Color.Transparent, RoundedCornerShape(11.dp))
                     .clickable { onTabSelected(index) }.padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
-            ) { Text(label, color = if (selected) FinalBg else FinalMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            ) { Text(label, color = if (selected) FinalAccent else FinalMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
         }
     }
 }
@@ -1028,7 +1201,7 @@ private fun TeamsTab(tournament: Tournament?) {
             }
         }
         Spacer(Modifier.height(12.dp))
-        if (joinedTeams.isEmpty()) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(FinalPanel).padding(horizontal = 20.dp, vertical = 26.dp), contentAlignment = Alignment.Center) {
+        if (joinedTeams.isEmpty()) Box(Modifier.fillMaxWidth().clip(FinalCardShape).background(FinalPanel).border(1.dp, FinalDivider, FinalCardShape).padding(horizontal = 20.dp, vertical = 26.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.size(84.dp).clip(CircleShape).background(FinalAccent.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
                     Text("01", color = FinalAccent, fontSize = 26.sp, fontWeight = FontWeight.Black)
@@ -1445,19 +1618,20 @@ private fun LeaderboardTab() {
         Text("Top performers from this tournament", color = FinalMuted, fontSize = 12.sp)
         Spacer(Modifier.height(18.dp))
         Row(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(FinalPanel).padding(4.dp),
+            modifier = Modifier.fillMaxWidth().clip(FinalCardShape).background(FinalPanel).border(1.dp, FinalDivider, FinalCardShape).padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             leaderboardTabs.forEachIndexed { index, label ->
                 val selected = selectedLeaderboardTab == index
                 Box(
                     modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
-                        .background(if (selected) FinalAccent else Color.Transparent)
+                        .background(if (selected) Brush.horizontalGradient(listOf(FinalAccent.copy(alpha = .20f), FinalAccent.copy(alpha = .07f))) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
+                        .border(1.dp, if (selected) FinalAccent.copy(alpha = .55f) else Color.Transparent, RoundedCornerShape(10.dp))
                         .clickable { selectedLeaderboardTab = index }
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(label, color = if (selected) FinalBg else FinalMuted, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    Text(label, color = if (selected) FinalAccent else FinalMuted, fontSize = 12.sp, fontWeight = FontWeight.Black)
                 }
             }
         }

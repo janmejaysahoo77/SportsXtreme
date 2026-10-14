@@ -10,7 +10,6 @@ import com.example.sportsxtreme.presentation.scoring.*
 import com.example.sportsxtreme.presentation.match.*
 import com.example.sportsxtreme.presentation.media.*
 import com.example.sportsxtreme.presentation.home.CommunityScreen
-import com.sportsxtreme.v2features.CommunityScreen2
 import com.example.sportsxtreme.presentation.home.LeaderboardScreen
 import com.sportsxtreme.v2features.LeaderBoardScreen2
 import com.example.sportsxtreme.presentation.home.MyCricketScreen
@@ -698,7 +697,7 @@ class HomeScreenView @JvmOverloads constructor(
     private fun createCommunityContent(context: Context): View {
         return ComposeView(context).apply {
             setContent {
-                CommunityScreen2(onMenuClick = { openDrawer() })
+                CommunityScreen(onMenuClick = { openDrawer() })
             }
         }
     }
@@ -1318,12 +1317,35 @@ class HomeScreenView @JvmOverloads constructor(
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(13), dp(13), dp(13), dp(12))
             background = roundedBackground(Color.rgb(12, 25, 43), dp(13), Color.rgb(36, 63, 85))
+            val banner = FrameLayout(context).apply {
+                val fallbackBanner = ImageView(context).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    setImageResource(R.drawable.stadium)
+                    tournament.bannerUrl.takeIf { it.isNotBlank() }?.let { load(it) }
+                }
+                addView(fallbackBanner, FrameLayout.LayoutParams(-1, -1))
+                clipToOutline = true
+                background = roundedBackground(Color.rgb(22, 36, 57), dp(10))
+                addView(View(context).apply {
+                    background = GradientDrawable(
+                        GradientDrawable.Orientation.BOTTOM_TOP,
+                        intArrayOf(Color.argb(105, 0, 0, 0), Color.TRANSPARENT)
+                    )
+                }, FrameLayout.LayoutParams(-1, -1))
+            }
+            addView(banner, LinearLayout.LayoutParams(-1, dp(112)).apply { bottomMargin = dp(10) })
             addView(LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(TextView(context).apply { text = "🏆"; textSize = 20f }, LinearLayout.LayoutParams(dp(29), dp(34)))
+                addView(ImageView(context).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    setImageResource(R.drawable.trophyfull)
+                    tournament.logoUrl.takeIf { it.isNotBlank() }?.let { load(it) }
+                    background = roundedBackground(Color.rgb(22, 36, 57), dp(8))
+                    clipToOutline = true
+                }, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(9) })
                 addView(LinearLayout(context).apply { orientation = LinearLayout.VERTICAL
-                    addView(TextView(context).apply { text = tournament.name.ifBlank { "Unnamed tournament" }; setTextColor(Color.WHITE); textSize = 13f; typeface = Typeface.DEFAULT_BOLD; maxLines = 2 })
-                    addView(TextView(context).apply { text = subtitle; setTextColor(Color.rgb(161, 185, 142)); textSize = 8f; typeface = Typeface.DEFAULT_BOLD })
+                    addView(TextView(context).apply { text = tournament.name.ifBlank { "Unnamed tournament" }; setTextColor(Color.WHITE); textSize = 14f; typeface = Typeface.DEFAULT_BOLD; maxLines = 2 })
+                    addView(TextView(context).apply { text = subtitle; setTextColor(Color.rgb(161, 185, 142)); textSize = 8f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1 })
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 addView(tournamentPill(context, status, false), LinearLayout.LayoutParams(dp(58), dp(23)))
                 addView(TextView(context).apply {

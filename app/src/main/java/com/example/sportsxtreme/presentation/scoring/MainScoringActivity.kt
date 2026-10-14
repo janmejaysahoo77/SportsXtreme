@@ -12,6 +12,7 @@ import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -34,10 +35,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -47,6 +51,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +77,7 @@ import com.example.sportsxtreme.data.sync.PausedScoringExpiryScheduler
 import com.example.sportsxtreme.domain.repository.MatchRepository
 import javax.inject.Inject
 import kotlinx.coroutines.launch
+import com.example.sportsxtreme.domain.model.Player
 
 @AndroidEntryPoint
 class MainScoringActivity : ComponentActivity() {
@@ -90,6 +97,16 @@ class MainScoringActivity : ComponentActivity() {
             val uiState by scoringViewModel.uiState.collectAsState()
             MainScoringScreen(
                 uiState = uiState,
+                scorerName = uiState.scorerName,
+                onLoadPlayers = scoringViewModel::loadPlayers,
+                onSelectNextBatter = scoringViewModel::selectNextBatter,
+                onStartSecondInnings = scoringViewModel::startSecondInnings,
+                onFinishMatch = {
+                    scoringViewModel.finishMatch(
+                        onFinished = { finish() },
+                        onError = { message -> Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
+                    )
+                },
                 onBack = ::pauseScoringAndFinish,
                 onRun = scoringViewModel::recordRuns,
                 onExtra = scoringViewModel::recordExtra,
@@ -128,6 +145,11 @@ private val ScoringBlue = Color(0xFF00D2FF)
 @Composable
 private fun MainScoringScreen(
     uiState: ScoringUiState,
+    scorerName: String,
+    onLoadPlayers: ((List<Player>, List<Player>) -> Unit) -> Unit,
+    onSelectNextBatter: (String) -> Unit,
+    onStartSecondInnings: (String, String, String, (String) -> Unit) -> Unit,
+    onFinishMatch: () -> Unit,
     onBack: () -> Unit,
     onRun: (Int) -> Unit,
     onExtra: (com.example.sportsxtreme.domain.model.ExtraType) -> Unit,
@@ -137,8 +159,21 @@ private fun MainScoringScreen(
     var showAdvanced by remember { mutableStateOf(false) }
     var showWagonWheel by remember { mutableStateOf(false) }
     var wagonRun by remember { mutableStateOf(0) }
+    var battingPlayers by remember { mutableStateOf(emptyList<Player>()) }
+    var bowlingPlayers by remember { mutableStateOf(emptyList<Player>()) }
+    var secondStrikerId by remember { mutableStateOf<String?>(null) }
+    var secondNonStrikerId by remember { mutableStateOf<String?>(null) }
+    var secondBowlerId by remember { mutableStateOf<String?>(null) }
+    var pickerError by remember { mutableStateOf<String?>(null) }
     val scorecard = uiState.scorecard
     val matchState = uiState.matchState
+    val innings = matchState?.currentInnings
+    LaunchedEffect(matchState?.matchId, matchState?.battingTeam?.teamId, matchState?.bowlingTeam?.teamId) {
+        onLoadPlayers { batting, bowling ->
+            battingPlayers = batting
+            bowlingPlayers = bowling
+        }
+    }
     val striker = scorecard?.batting?.firstOrNull { it.playerId == matchState?.striker?.id }
     val nonStriker = scorecard?.batting?.firstOrNull { it.playerId == matchState?.nonStriker?.id }
     val bowler = scorecard?.bowling?.firstOrNull { it.playerId == matchState?.bowler?.id }
@@ -154,7 +189,7 @@ private fun MainScoringScreen(
     ) {
         // ── Main content – single screen, no scroll ──
         Column(modifier = Modifier.fillMaxSize()) {
-            ScoringTopBar(onBack)
+            ScoringTopBar(scorerName, onBack)
             Spacer(Modifier.weight(0.5f))
             // Score summary
             ScoreSummaryCard(
@@ -223,12 +258,77 @@ private fun MainScoringScreen(
                 onClose = { showWagonWheel = false }
             )
         }
+
+        val needsReplacement = innings?.status?.name == "LIVE" &&
+            (matchState?.striker == null || matchState.nonStriker == null)
+        if (needsReplacement) {
+            val alreadyUsed = scorecard?.batting.orEmpty().map { it.playerId }.toSet()
+            val eligible = battingPlayers.filterNot { it.id in alreadyUsed }
+            Dialog(onDismissRequest = { /* A dismissed batter must be replaced before play resumes. */ },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                ScoringSelectionPage(
+                    title = "SELECT NEXT BATTER",
+                    subtitle = "Choose a player to continue the innings",
+                    players = eligible,
+                    selectedId = null,
+                    onSelect = { onSelectNextBatter(it) }
+                )
+            }
+        }
+
+        if (innings?.status?.name == "COMPLETED") {
+            val firstInningsComplete = innings.number == 1
+            if (firstInningsComplete) {
+                Dialog(onDismissRequest = { }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                    Column(modifier = Modifier.fillMaxSize().background(ScoringBg).verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.Center) {
+                        Text("INNINGS BREAK", color = ScoringAccent, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                        Text("${matchState?.battingTeam?.name.orEmpty()} finished on ${innings.score}/${innings.wickets}. Choose the chasing team's openers and bowler.", color = Color.White, modifier = Modifier.padding(top = 10.dp, bottom = 20.dp))
+                        ScoringSelectionPage("STRIKER", "Choose the opening striker", bowlingPlayers, secondStrikerId) { secondStrikerId = it }
+                        Spacer(Modifier.height(10.dp))
+                        ScoringSelectionPage("NON-STRIKER", "Choose the second opener", bowlingPlayers.filterNot { it.id == secondStrikerId }, secondNonStrikerId) { secondNonStrikerId = it }
+                        Spacer(Modifier.height(10.dp))
+                        ScoringSelectionPage("BOWLER", "Choose the opening bowler", battingPlayers, secondBowlerId) { secondBowlerId = it }
+                        pickerError?.let { Text(it, color = Color(0xFFFF6677), modifier = Modifier.padding(top = 8.dp)) }
+                        Text("START SECOND INNINGS", color = ScoringBg, fontWeight = FontWeight.Black,
+                            modifier = Modifier.fillMaxWidth().padding(top = 18.dp).clip(RoundedCornerShape(10.dp)).background(ScoringAccent).clickable {
+                                val striker = secondStrikerId
+                                val nonStriker = secondNonStrikerId
+                                val bowler = secondBowlerId
+                                if (striker == null || nonStriker == null || bowler == null) pickerError = "Select both openers and a bowler"
+                                else onStartSecondInnings(striker, nonStriker, bowler) { pickerError = it }
+                            }.padding(16.dp), textAlign = TextAlign.Center)
+                    }
+                }
+            } else {
+                Dialog(onDismissRequest = { }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                    Column(modifier = Modifier.fillMaxSize().background(ScoringBg).padding(24.dp), verticalArrangement = Arrangement.Center) {
+                        Text("MATCH FINISHED", color = ScoringAccent, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                        Text("${matchState?.score ?: innings.score}/${innings.wickets} • ${innings.legalBalls / 6}.${innings.legalBalls % 6} overs", color = Color.White, modifier = Modifier.padding(vertical = 16.dp))
+                        Text("DONE", color = ScoringBg, fontWeight = FontWeight.Black, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(ScoringAccent).clickable(onClick = onFinishMatch).padding(16.dp), textAlign = TextAlign.Center)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScoringSelectionPage(title: String, subtitle: String, players: List<Player>, selectedId: String?, onSelect: (String) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState()).clip(RoundedCornerShape(12.dp)).background(ScoringCard).border(1.dp, ScoringStroke, RoundedCornerShape(12.dp)).padding(12.dp)) {
+        Text(title, color = ScoringAccent, fontWeight = FontWeight.Black, fontSize = 12.sp)
+        Text(subtitle, color = ScoringMuted, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp, bottom = 6.dp))
+        players.forEach { player ->
+            Text(if (player.id == selectedId) "✓  ${player.displayName}" else player.displayName,
+                color = if (player.id == selectedId) ScoringAccent else Color.White,
+                modifier = Modifier.fillMaxWidth().clickable { onSelect(player.id) }.padding(vertical = 7.dp))
+        }
+        if (players.isEmpty()) Text("No eligible players available", color = ScoringMuted, fontSize = 11.sp)
     }
 }
 
 // ── Top Bar ──────────────────────────────────────────────
 @Composable
-private fun ScoringTopBar(onBack: () -> Unit) {
+private fun ScoringTopBar(scorerName: String, onBack: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -240,7 +340,7 @@ private fun ScoringTopBar(onBack: () -> Unit) {
         ScoreArrow(Modifier.size(22.dp).clickable(onClick = onBack), Color.White)
         Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
             Text("Scoring", color = ScoringMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            Text("Dipesh Warrior 69", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Text(scorerName, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         ScoreHelpIcon(Modifier.size(20.dp), Color.White)
         ScoreGearIcon(Modifier.padding(start = 20.dp).size(20.dp), Color.White)

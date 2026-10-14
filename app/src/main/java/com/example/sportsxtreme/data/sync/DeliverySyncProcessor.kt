@@ -1,11 +1,16 @@
 package com.example.sportsxtreme.data.sync
 
+import android.util.Log
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.local.dao.BallEventDao
 import com.example.sportsxtreme.data.local.dao.MatchDao
 import com.example.sportsxtreme.data.local.dao.PlayerDao
 import com.example.sportsxtreme.data.local.dao.SyncQueueDao
 import com.example.sportsxtreme.data.local.dao.TeamDao
+import com.example.sportsxtreme.data.remote.firestore.FirebaseFirestoreMatchSyncDataSource
+import com.example.sportsxtreme.domain.repository.MatchRepository
+import com.google.firebase.functions.FirebaseFunctions
+import kotlinx.coroutines.tasks.await
 import com.example.sportsxtreme.data.local.mapper.toDomain
 import com.example.sportsxtreme.data.remote.firestore.FirestoreScoringDataSource
 import com.example.sportsxtreme.domain.model.LiveScorePayload
@@ -24,14 +29,28 @@ class DeliverySyncProcessor @Inject constructor(
     private val firestoreScoringDataSource: FirestoreScoringDataSource,
     private val matchDao: MatchDao,
     private val teamDao: TeamDao,
-    private val playerDao: PlayerDao
+    private val playerDao: PlayerDao,
+    private val matchRepository: MatchRepository,
+    private val matchSyncDataSource: FirebaseFirestoreMatchSyncDataSource,
+    private val functions: FirebaseFunctions
 ) {
     suspend fun syncReadyDeliveries(limit: Int = MAX_BATCH_SIZE): Boolean {
         while (true) {
             val operations = syncQueueDao.getReadyOperations(System.currentTimeMillis(), limit)
             if (operations.isEmpty()) return true
+            val blockedMatchIds = mutableSetOf<String>()
+            var hadFailures = false
             for (operation in operations) {
+                if (operation.matchId in blockedMatchIds) continue
                 try {
+                    if (operation.entityType == "FINALIZE_MATCH") {
+                        val matchResult = matchRepository.observeMatch(operation.matchId).first()
+                        val match = (matchResult as? Resource.Success)?.data ?: error("Match is not available for finalization sync")
+                        matchSyncDataSource.sync(match).getOrThrow()
+                        functions.getHttpsCallable("finalizeMatch").call(mapOf("matchId" to operation.matchId)).await()
+                        syncQueueDao.delete(operation.operationId)
+                        continue
+                    }
                     val delivery = ballEventDao.getBallEvent(operation.entityId)
                     if (delivery == null) {
                         syncQueueDao.delete(operation.operationId)
@@ -56,18 +75,22 @@ class DeliverySyncProcessor @Inject constructor(
                     firestoreScoringDataSource.syncDelivery(delivery.toDomain(), scorecard)
                     ballEventDao.updateSyncState(delivery.ballId, SyncState.SYNCED.name)
                     syncQueueDao.delete(operation.operationId)
-                } catch (_: Exception) {
+                } catch (error: Exception) {
+                    blockedMatchIds += operation.matchId
+                    hadFailures = true
+                    Log.e("DeliverySync", "Sync failed for ${operation.entityType} in match ${operation.matchId}", error)
                     syncQueueDao.update(
                         operation.copy(
                             state = "FAILED",
                             attemptCount = operation.attemptCount + 1,
                             nextAttemptAtEpochMs = System.currentTimeMillis(),
+                            lastError = error.localizedMessage ?: error.javaClass.simpleName,
                             updatedAtEpochMs = System.currentTimeMillis()
                         )
                     )
-                    return false
                 }
             }
+            if (hadFailures) return false
         }
     }
 

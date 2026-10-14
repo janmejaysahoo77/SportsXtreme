@@ -6,7 +6,8 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:navigationBarColor">#05090E</item>
         <item name="android:statusBarColor">#05090E</item>
-        <item name="android:windowBackground">@drawable/splash_window_background</item>
+        <!-- Keep the splash artwork out of regular activity window backgrounds. -->
+        <item name="android:windowBackground">@drawable/ic_launcher_background</item>
         <item name="android:colorAccent">#CBFF20</item>
     </style>
 

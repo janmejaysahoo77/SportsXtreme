@@ -44,6 +44,18 @@ class TournamentFlowViewModel @Inject constructor(private val repository: Tourna
         if (result is Resource.Success) _tournament.value = current.copy(requirements = requirements)
     }
 
+    fun saveTournamentImage(logoUrl: String? = null, bannerUrl: String? = null, onResult: (Resource<Unit>) -> Unit) = viewModelScope.launch {
+        val current = _tournament.value ?: return@launch onResult(Resource.Error("Tournament is still loading"))
+        val result = repository.updateTournamentImages(current.id, logoUrl, bannerUrl)
+        if (result is Resource.Success) {
+            _tournament.value = current.copy(
+                logoUrl = logoUrl ?: current.logoUrl,
+                bannerUrl = bannerUrl ?: current.bannerUrl
+            )
+        }
+        onResult(result)
+    }
+
     fun deleteTournament(onResult: (Resource<Unit>) -> Unit) = viewModelScope.launch {
         val current = _tournament.value ?: return@launch onResult(Resource.Error("Tournament is still loading"))
         onResult(repository.deleteTournament(current.id))

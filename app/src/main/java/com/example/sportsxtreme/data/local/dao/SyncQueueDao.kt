@@ -15,6 +15,12 @@ interface SyncQueueDao {
     @Query("SELECT * FROM sync_queue WHERE state IN ('PENDING', 'FAILED') AND nextAttemptAtEpochMs <= :nowEpochMs ORDER BY createdAtEpochMs LIMIT :limit")
     suspend fun getReadyOperations(nowEpochMs: Long, limit: Int): List<SyncQueueEntity>
 
+    @Query("SELECT * FROM sync_queue WHERE matchId = :matchId ORDER BY createdAtEpochMs DESC LIMIT 1")
+    suspend fun getLatestOperationForMatch(matchId: String): SyncQueueEntity?
+
+    @Query("SELECT * FROM sync_queue WHERE matchId = :matchId AND entityType = 'FINALIZE_MATCH' LIMIT 1")
+    suspend fun getFinalizationOperation(matchId: String): SyncQueueEntity?
+
     @Update
     suspend fun update(operation: SyncQueueEntity)
 

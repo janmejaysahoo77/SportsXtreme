@@ -82,8 +82,11 @@ import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
 import com.example.sportsxtreme.presentation.tournament.RegisterTournamentFinalPageActivity
+import com.example.sportsxtreme.presentation.tournament.TournamentRegistrationActivity
+import com.example.sportsxtreme.presentation.team.CreateTeamActivity
 import com.example.sportsxtreme.presentation.team.TeamProfileActivity
 import com.example.sportsxtreme.presentation.ui.theme.*
+import coil3.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -143,7 +146,8 @@ private data class CricketTournament(
     val location: String,
     val status: String,
     val accent: Color,
-    val visual: TournamentVisual
+    val visual: TournamentVisual,
+    val bannerUrl: String? = null
 )
 
 private enum class TournamentVisual { NEON, FIELD, TROPHY, SLAM }
@@ -202,6 +206,58 @@ private fun rememberPlayerMatches(userId: String?, playerTeamIds: Set<String>): 
                         loading = false,
                         matches = matches,
                         hostedMatches = hostedMatches
+                    )
+                }
+            }
+        onDispose { registration.remove() }
+    }
+    return state
+}
+
+@Composable
+private fun rememberParticipatedTournaments(userId: String?): HostTournamentsViewModel.UiState {
+    var state by remember(userId) {
+        mutableStateOf<HostTournamentsViewModel.UiState>(HostTournamentsViewModel.UiState.Loading)
+    }
+    DisposableEffect(userId) {
+        if (userId.isNullOrBlank()) {
+            state = HostTournamentsViewModel.UiState.Content(emptyList())
+            return@DisposableEffect onDispose { }
+        }
+
+        val registration = FirebaseFirestore.getInstance()
+            .collectionGroup("teams")
+            .whereEqualTo("captainUserId", userId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    state = HostTournamentsViewModel.UiState.Error(
+                        error.message ?: "Unable to load participated tournaments"
+                    )
+                    return@addSnapshotListener
+                }
+
+                val tournamentIds = snapshot?.documents.orEmpty()
+                    .mapNotNull { it.reference.parent.parent?.id }
+                    .distinct()
+                if (tournamentIds.isEmpty()) {
+                    state = HostTournamentsViewModel.UiState.Content(emptyList())
+                    return@addSnapshotListener
+                }
+
+                val firestore = FirebaseFirestore.getInstance()
+                val tournamentRefs = tournamentIds.map { firestore.collection("tournaments").document(it) }
+                com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.DocumentSnapshot>(
+                    tournamentRefs.map { it.get() }
+                ).addOnSuccessListener { documents ->
+                    state = HostTournamentsViewModel.UiState.Content(
+                        documents.mapNotNull { document ->
+                            if (!document.exists()) null
+                            else document.toObject(Tournament::class.java)?.copy(id = document.id)
+                        }.sortedByDescending { it.createdAtEpochMs }
+                    )
+                }.addOnFailureListener { fetchError ->
+                    state = HostTournamentsViewModel.UiState.Error(
+                        fetchError.message ?: "Unable to load participated tournaments"
                     )
                 }
             }
@@ -404,41 +460,6 @@ private val sampleMatches = listOf(
     )
 )
 
-private val tournaments = listOf(
-    CricketTournament(
-        "Neon Pro League",
-        "20 Jun - 30 Jun 2026",
-        "BHUBANESWAR",
-        "UPCOMING",
-        CricketBlue,
-        TournamentVisual.NEON
-    ),
-    CricketTournament(
-        "Corporate Cricket Cup",
-        "15 Jun - 25 Jun 2026",
-        "HYDERABAD",
-        "LIVE",
-        CricketAccent,
-        TournamentVisual.FIELD
-    ),
-    CricketTournament(
-        "Balisahi Premier League (BPL)",
-        "03 Jun - 05 Jun 2026",
-        "ODISHA",
-        "PAST",
-        Color(0xFF88909A),
-        TournamentVisual.TROPHY
-    ),
-    CricketTournament(
-        "Summer Slam T20",
-        "10 Jul - 20 Jul 2026",
-        "MUMBAI",
-        "SCHEDULED",
-        Color(0xFFBFD8FF),
-        TournamentVisual.SLAM
-    )
-)
-
 @Composable
 fun MyCricketScreen(
     onMenuClick: () -> Unit = {},
@@ -457,8 +478,10 @@ fun MyCricketScreen(
     var tournamentPendingDeletion by remember { mutableStateOf<Tournament?>(null) }
     val joinedTeams = rememberJoinedTeams()
     val context = LocalContext.current
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
+    val participatedTournamentsState = rememberParticipatedTournaments(currentUserId)
     val playerMatchesState = rememberPlayerMatches(
-        FirebaseAuth.getInstance().currentUser?.uid,
+        currentUserId,
         joinedTeams.mapTo(linkedSetOf()) { it.id }
     )
     val hostedTournamentsState by if (hostTournamentsViewModel != null) {
@@ -532,10 +555,16 @@ fun MyCricketScreen(
                 }
 
                 1 -> {
-                    item { HostTournamentPrompt() }
+                    item {
+                        HostTournamentPrompt(
+                            onRegisterClick = {
+                                context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
+                            }
+                        )
+                    }
                     item {
                         SegmentPills(
-                            listOf("Your", "Participate", "Network"),
+                            listOf("Hosted", "Participated"),
                             active = selectedTournamentSegment,
                             activeColor = CricketBlue,
                             onTabClick = { selectedTournamentSegment = it }
@@ -552,13 +581,26 @@ fun MyCricketScreen(
                             },
                             onDeleteClick = { tournament -> tournamentPendingDeletion = tournament }
                         )
-                        else -> items(tournaments) { tournament -> TournamentCard(tournament) }
+                        1 -> participatedTournamentsContent(
+                            state = participatedTournamentsState,
+                            onTournamentClick = { tournamentId ->
+                                context.startActivity(
+                                    Intent(context, RegisterTournamentFinalPageActivity::class.java)
+                                        .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                                )
+                            }
+                        )
                     }
                 }
 
                 2 -> {
-                    item { CreateTeamPrompt() }
-                    item { TeamFilterPills() }
+                    item {
+                        CreateTeamPrompt(
+                            onCreateClick = {
+                                context.startActivity(Intent(context, CreateTeamActivity::class.java))
+                            }
+                        )
+                    }
                     item { QuickSearchBar() }
                     item { ActiveTeamsHeader(joinedTeams.size) }
                     if (joinedTeams.isEmpty()) {
@@ -658,6 +700,43 @@ private fun LazyListScope.hostedTournamentsContent(
     }
 }
 
+private fun LazyListScope.participatedTournamentsContent(
+    state: HostTournamentsViewModel.UiState,
+    onTournamentClick: (String) -> Unit
+) {
+    when (state) {
+        HostTournamentsViewModel.UiState.Loading -> item {
+            AndroidView(
+                factory = { context -> SkeletonMatchCardView(context) },
+                modifier = Modifier.fillMaxWidth().height(180.dp).padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
+        is HostTournamentsViewModel.UiState.Error -> item {
+            TournamentFeedbackCard(
+                title = "Couldn't load participated tournaments",
+                detail = state.message
+            )
+        }
+        is HostTournamentsViewModel.UiState.Content -> {
+            if (state.tournaments.isEmpty()) {
+                item {
+                    TournamentFeedbackCard(
+                        title = "No participated tournaments yet",
+                        detail = "Tournaments your teams join will appear here."
+                    )
+                }
+            } else {
+                items(state.tournaments, key = { tournament -> tournament.id }) { tournament ->
+                    TournamentCard(
+                        tournament = tournament.toCricketTournament(),
+                        onClick = { onTournamentClick(tournament.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
 private fun Tournament.toCricketTournament(): CricketTournament {
     val visuals = TournamentVisual.entries
     val displayLocation = city.ifBlank { ground }.ifBlank { "Location to be announced" }
@@ -672,7 +751,8 @@ private fun Tournament.toCricketTournament(): CricketTournament {
         location = displayLocation.uppercase(),
         status = "HOSTED",
         accent = CricketBlue,
-        visual = visuals[(id.hashCode() and Int.MAX_VALUE) % visuals.size]
+        visual = visuals[(id.hashCode() and Int.MAX_VALUE) % visuals.size],
+        bannerUrl = bannerUrl.takeIf { it.isNotBlank() }
     )
 }
 
@@ -1638,7 +1718,7 @@ private fun StatBox(item: StatItem, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun HostTournamentPrompt() {
+private fun HostTournamentPrompt(onRegisterClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1679,7 +1759,7 @@ private fun HostTournamentPrompt() {
                     .height(44.dp)
                     .clip(RoundedCornerShape(22.dp))
                     .background(CricketAccent)
-                    .clickable { /* Handle register */ }
+                    .clickable(onClick = onRegisterClick)
                     .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -1804,9 +1884,11 @@ private fun TournamentVisualPanel(tournament: CricketTournament) {
         TournamentVisual.SLAM -> R.drawable.cricketblast
     }
 
-    Image(
-        painter = painterResource(imageRes),
+    AsyncImage(
+        model = tournament.bannerUrl ?: imageRes,
         contentDescription = null,
+        placeholder = painterResource(imageRes),
+        error = painterResource(imageRes),
         modifier = Modifier.fillMaxSize(),
         contentScale = ContentScale.Crop
     )
@@ -1894,7 +1976,7 @@ private fun TournamentArrow(accent: Color) {
 }
 
 @Composable
-private fun CreateTeamPrompt() {
+private fun CreateTeamPrompt(onCreateClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1932,7 +2014,7 @@ private fun CreateTeamPrompt() {
                 .height(40.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(CricketAccent)
-                .clickable { /* Create team action */ }
+                .clickable(onClick = onCreateClick)
                 .padding(horizontal = 20.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -1942,43 +2024,6 @@ private fun CreateTeamPrompt() {
                 fontSize = 14.sp,
                 fontWeight = FontWeight.W800
             )
-        }
-    }
-}
-
-@Composable
-private fun TeamFilterPills() {
-    val labels = listOf("Your teams", "Opponents", "Following")
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        labels.forEachIndexed { index, label ->
-            Box(
-                modifier = Modifier
-                    .height(40.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(if (index == 0) CricketAccent else Color.White.copy(alpha = 0.1f))
-                    .then(
-                        if (index != 0) Modifier.border(
-                            1.dp,
-                            ClubCardBorder,
-                            RoundedCornerShape(20.dp)
-                        ) else Modifier
-                    )
-                    .clickable { /* Filter action */ }
-                    .padding(horizontal = 24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    label,
-                    color = if (index == 0) Color.Black else Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-            }
         }
     }
 }
