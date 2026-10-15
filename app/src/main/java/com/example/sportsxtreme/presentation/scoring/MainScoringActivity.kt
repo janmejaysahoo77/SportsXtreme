@@ -19,6 +19,7 @@ import androidx.activity.viewModels
 import androidx.activity.OnBackPressedCallback
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,6 +54,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,6 +69,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -108,7 +114,7 @@ class MainScoringActivity : ComponentActivity() {
                     )
                 },
                 onBack = ::pauseScoringAndFinish,
-                onRun = scoringViewModel::recordRuns,
+                onRun = { runs, dir, meta -> scoringViewModel.recordRuns(runs, dir, meta) },
                 onExtra = scoringViewModel::recordExtra,
                 onWicket = scoringViewModel::recordWicket,
                 onUndo = scoringViewModel::undoLastBall
@@ -151,13 +157,14 @@ private fun MainScoringScreen(
     onStartSecondInnings: (String, String, String, (String) -> Unit) -> Unit,
     onFinishMatch: () -> Unit,
     onBack: () -> Unit,
-    onRun: (Int) -> Unit,
+    onRun: (Int, String?, Map<String, String>) -> Unit,
     onExtra: (com.example.sportsxtreme.domain.model.ExtraType) -> Unit,
     onWicket: () -> Unit,
     onUndo: () -> Unit
 ) {
     var showAdvanced by remember { mutableStateOf(false) }
     var showWagonWheel by remember { mutableStateOf(false) }
+    var showBoundaryGround by remember { mutableStateOf(false) }
     var wagonRun by remember { mutableStateOf(0) }
     var battingPlayers by remember { mutableStateOf(emptyList<Player>()) }
     var bowlingPlayers by remember { mutableStateOf(emptyList<Player>()) }
@@ -218,7 +225,14 @@ private fun MainScoringScreen(
             // Run pad
             RunPad(
                 modifier = Modifier.padding(horizontal = 10.dp).padding(bottom = 4.dp),
-                onRunClick = onRun,
+                onRunClick = { runs ->
+                    if (runs == 4 || runs == 6) {
+                        wagonRun = runs
+                        showBoundaryGround = true
+                    } else {
+                        onRun(runs, null, emptyMap())
+                    }
+                },
                 onExtra = onExtra,
                 onWicket = onWicket,
                 onUndo = onUndo
@@ -256,6 +270,19 @@ private fun MainScoringScreen(
                 runs = wagonRun,
                 modifier = Modifier.align(Alignment.BottomCenter),
                 onClose = { showWagonWheel = false }
+            )
+        }
+
+        if (showBoundaryGround) {
+            GroundSelectionDialog(
+                runs = wagonRun,
+                onConfirm = { direction, metadata ->
+                    showBoundaryGround = false
+                    onRun(wagonRun, direction, metadata)
+                },
+                onCancel = {
+                    showBoundaryGround = false
+                }
             )
         }
 
@@ -901,4 +928,193 @@ private fun ScoreNoIcon(modifier: Modifier, tint: Color) {
         drawCircle(tint, radius = size.minDimension * 0.35f, center = Offset(size.width * 0.5f, size.height * 0.5f), style = stroke)
         drawLine(tint, Offset(size.width * 0.28f, size.height * 0.28f), Offset(size.width * 0.72f, size.height * 0.72f), strokeWidth = stroke.width, cap = StrokeCap.Round)
     }
+}
+
+@Composable
+private fun GroundSelectionDialog(
+    runs: Int,
+    onConfirm: (directionName: String, metadata: Map<String, String>) -> Unit,
+    onCancel: () -> Unit
+) {
+    var selectedOffset by remember { mutableStateOf<Offset?>(null) }
+    var selectedDirectionName by remember { mutableStateOf("Straight") }
+
+    Dialog(
+        onDismissRequest = onCancel,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xEE081018)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.925f)
+                    .heightIn(min = 300.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF101B2B))
+                    .border(1.dp, ScoringStroke, RoundedCornerShape(16.dp))
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("SELECT SHOT DIRECTION", color = ScoringAccent, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
+                        Text("$runs Runs Scored", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 2.dp))
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1E2D42))
+                            .clickable(onClick = onCancel),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("✕", color = ScoringMuted, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                Box(
+                    modifier = Modifier
+                        .size(340.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF000000))
+                        .pointerInput(Unit) {
+                            detectTapGestures { tapOffset ->
+                                val normX = tapOffset.x / size.width
+                                val normY = tapOffset.y / size.height
+                                determineFieldPosition(normX, normY)?.let { direction ->
+                                    selectedOffset = tapOffset
+                                    selectedDirectionName = direction
+                                }
+                            }
+                        }
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.cricketgroundforscoring),
+                        contentDescription = "Cricket ground boundary points",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val wicketStart = Offset(size.width * 0.5f, size.height * 0.50f)
+
+                        drawCircle(Color(0xFFFFD96A), radius = 6.dp.toPx(), center = wicketStart)
+                        drawCircle(Color.Black, radius = 3.dp.toPx(), center = wicketStart)
+
+                        selectedOffset?.let { target ->
+                            drawLine(
+                                color = ScoringAccent,
+                                start = wicketStart,
+                                end = target,
+                                strokeWidth = 3.dp.toPx(),
+                                cap = StrokeCap.Round
+                            )
+                            drawCircle(Color(0xFFC1FF00), radius = 8.dp.toPx(), center = target)
+                            drawCircle(Color.Black, radius = 4.dp.toPx(), center = target)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Text(
+                    text = "Selected: $selectedDirectionName${if (selectedOffset != null) " (Tap ground to change)" else " (Tap ground to select direction)"}",
+                    color = ScoringMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF1B273A))
+                            .border(1.dp, ScoringStroke, RoundedCornerShape(10.dp))
+                            .clickable(onClick = onCancel),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Cancel", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(ScoringAccent)
+                            .clickable(onClick = {
+                                val direction = selectedDirectionName
+                                val meta = mapOf(
+                                    "shotDirection" to direction,
+                                    "shotX" to (selectedOffset?.x?.toString() ?: "0"),
+                                    "shotY" to (selectedOffset?.y?.toString() ?: "0")
+                                )
+                                onConfirm(direction, meta)
+                            }),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Confirm", color = ScoringBg, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class FieldPositionHotspot(
+    val name: String,
+    val x: Float,
+    val y: Float
+)
+
+// Positions are normalized to the labeled markers in cricketgroundforscoring.png.
+private val fieldPositionHotspots = listOf(
+    FieldPositionHotspot("Third Man", 0.365f, 0.167f),
+    FieldPositionHotspot("Deep Fine Leg", 0.632f, 0.165f),
+    FieldPositionHotspot("Deep Square Leg", 0.778f, 0.315f),
+    FieldPositionHotspot("Deep Mid Wicket", 0.779f, 0.567f),
+    FieldPositionHotspot("Long On", 0.620f, 0.742f),
+    FieldPositionHotspot("Long Off", 0.380f, 0.742f),
+    FieldPositionHotspot("Deep Cover", 0.222f, 0.567f),
+    FieldPositionHotspot("Deep Point", 0.226f, 0.315f)
+)
+
+private fun determineFieldPosition(normX: Float, normY: Float): String? {
+    val dx = normX - 0.5f
+    val dy = normY - 0.5f
+    val distanceFromCenterSquared = dx * dx + dy * dy
+
+    // Ignore taps outside the playing area; the artwork's boundary is a circle.
+    val boundaryRadius = 0.45f
+    if (distanceFromCenterSquared > boundaryRadius * boundaryRadius) return null
+
+    // The pitch/wicket area has no directional label, so treat it as Straight.
+    val straightRadius = 0.10f
+    if (distanceFromCenterSquared <= straightRadius * straightRadius) return "Straight"
+
+    // Resolve the tap to the closest labeled marker, matching the image layout
+    // rather than assuming the field positions occupy equal angular slices.
+    return fieldPositionHotspots.minByOrNull { hotspot ->
+        val hotspotDx = normX - hotspot.x
+        val hotspotDy = normY - hotspot.y
+        hotspotDx * hotspotDx + hotspotDy * hotspotDy
+    }?.name
 }

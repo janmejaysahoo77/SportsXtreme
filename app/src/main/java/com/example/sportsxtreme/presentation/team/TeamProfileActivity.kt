@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.R
+import coil3.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.ListenerRegistration
@@ -76,6 +78,7 @@ private val ProfileGlass = Color(0xCC101E28)
 
 private data class TeamProfileData(
     val name: String = "Addd",
+    val logoUrl: String = "",
     val location: String = "Bhubaneswar",
     val description: String = "",
     val founded: String = "",
@@ -151,6 +154,7 @@ private fun TeamProfileScreen(
                             .orEmpty()
                         team = TeamProfileData(
                             name = firstValue("teamName", "name").ifBlank { "Addd" },
+                            logoUrl = firstValue("logoUrl", "teamLogoUrl", "photoUrl"),
                             location = firstValue("city", "cityTown", "location").ifBlank { "Bhubaneswar" },
                             description = firstValue("description", "about"),
                             founded = firstValue("founded"),
@@ -304,7 +308,23 @@ private fun TeamHero(team: TeamProfileData) {
         Text("TEAM PROFILE", color = ProfileAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, modifier = Modifier.align(Alignment.TopStart).padding(start = 22.dp, top = 20.dp))
         Column(Modifier.align(Alignment.BottomStart).padding(start = 22.dp, end = 18.dp, bottom = 18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(76.dp).background(Brush.linearGradient(listOf(Color(0xFFEF7B55), Color(0xFF6B2B50))), CircleShape).border(2.dp, ProfileAccent, CircleShape), contentAlignment = Alignment.Center) { Text(team.name.initials(), color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black) }
+                Box(
+                    Modifier.size(76.dp).clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(Color(0xFFEF7B55), Color(0xFF6B2B50))))
+                        .border(2.dp, ProfileAccent, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (team.logoUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = team.logoUrl,
+                            contentDescription = "${team.name} logo",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text(team.name.initials(), color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
+                    }
+                }
                 Column(Modifier.padding(start = 14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { Text(team.name, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black); Text("  VERIFIED", color = Color(0xFF07140B), fontSize = 7.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 7.dp).background(ProfileAccent, RoundedCornerShape(5.dp)).padding(horizontal = 6.dp, vertical = 3.dp)) }
                     Text("⌾  ${team.location}  •  Cricket", color = Color.White, fontSize = 11.sp)

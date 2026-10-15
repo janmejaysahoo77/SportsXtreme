@@ -60,7 +60,13 @@ class AddPlayerActivity : ComponentActivity() {
                 teamName = teamName,
                 onBack = ::finish,
                 onInvite = { createAndShareInvite(teamId, teamName) },
-                onAddByMobileNumber = { startActivity(Intent(this, AddPlayerByMobileNumberActivity::class.java)) },
+                onAddByMobileNumber = {
+                    startActivity(
+                        Intent(this, AddPlayerByMobileNumberActivity::class.java)
+                            .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_NAME, teamName)
+                            .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_ID, teamId)
+                    )
+                },
                 onScanQrCode = { startActivity(Intent(this, QRForPlayerAddingActivity::class.java)) }
             )
         }

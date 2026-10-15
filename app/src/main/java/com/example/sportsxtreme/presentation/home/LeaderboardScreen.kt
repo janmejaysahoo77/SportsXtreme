@@ -54,7 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 private val LeaderboardAccent = Color(0xFFC1FF00)
-private val LeaderboardBg = Color(0xFF010509)
+private val LeaderboardBg = Color(0xFF0A101C)
 private val LeaderboardMuted = Color(0xFF93A09D)
 private val LeaderboardStroke = Color(0x3D6A7480)
 

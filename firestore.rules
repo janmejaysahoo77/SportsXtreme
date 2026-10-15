@@ -13,6 +13,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isSignedIn() { return request.auth != null; }
+    function isModerationAdmin() { return request.auth != null && request.auth.token.admin == true; }
     function unchangedClaims() {
       return request.resource.data.get('teamAClaim', null) == resource.data.get('teamAClaim', null)
         && request.resource.data.get('teamBClaim', null) == resource.data.get('teamBClaim', null);
@@ -180,8 +181,29 @@ service cloud.firestore {
     // ---------- Community profiles: visible to signed-in community members ----------
     match /communityProfiles/{profileId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn()
-        && request.resource.data.keys().hasOnly([
+      allow create: if isSignedIn() && (
+        (request.resource.data.postType == 'request'
+          && request.resource.data.keys().hasOnly([
+            'postType', 'ownerId', 'name', 'title', 'category', 'description',
+            'date', 'time', 'location', 'format', 'profilePhotoUrl', 'whatsappConsent', 'createdAt'
+          ])
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.name is string
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.title.size() <= 100
+          && request.resource.data.category in ['Batter', 'Bowler', 'All Rounder', 'Wicket Keeper', 'Umpire']
+          && request.resource.data.description is string
+          && request.resource.data.description.size() > 0
+          && request.resource.data.description.size() <= 500
+          && request.resource.data.date is string
+          && request.resource.data.time is string
+          && request.resource.data.location is string
+          && request.resource.data.format is string
+          && request.resource.data.profilePhotoUrl is string
+          && request.resource.data.whatsappConsent == true
+          && request.resource.data.createdAt == request.time)
+        || (request.resource.data.keys().hasOnly([
           'ownerId', 'name', 'category', 'location', 'organization',
           'experience', 'groundType', 'ballType', 'chargePerMatch', 'profilePhotoUrl', 'whatsappConsent', 'createdAt'
         ])
@@ -198,8 +220,9 @@ service cloud.firestore {
         && request.resource.data.chargePerMatch is string
         && request.resource.data.profilePhotoUrl is string
         && request.resource.data.whatsappConsent == true
-        && request.resource.data.createdAt == request.time;
-      allow update, delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+        && request.resource.data.createdAt == request.time));
+      allow update: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow delete: if (isSignedIn() && resource.data.ownerId == request.auth.uid) || isModerationAdmin();
 
       match /private/{privateDocument} {
         allow get: if isSignedIn()
@@ -217,6 +240,50 @@ service cloud.firestore {
         allow delete: if isSignedIn()
           && resource.data.ownerId == request.auth.uid;
       }
+    }
+
+    // Reporters may check their own report for duplicate protection. Moderators
+    // can review the queue and record the outcome; reports cannot be deleted.
+    match /communityPostReports/{reportId} {
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['postId', 'postOwnerId', 'reporterId', 'reason', 'description', 'status', 'createdAt'])
+        && reportId == request.resource.data.postId + '_' + request.auth.uid
+        && request.resource.data.postId is string
+        && exists(/databases/$(database)/documents/communityProfiles/$(request.resource.data.postId))
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.postOwnerId == get(/databases/$(database)/documents/communityProfiles/$(request.resource.data.postId)).data.ownerId
+        && request.resource.data.postOwnerId != request.auth.uid
+        && request.resource.data.reason in [
+          'Spam or misleading listing', 'Fake identity or impersonation',
+          'Inappropriate or offensive content', 'Phone number or contact misuse',
+          'Fraud or scam', 'Not sports-related', 'Duplicate listing', 'Other'
+        ]
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 1000
+        && request.resource.data.status == 'OPEN'
+        && request.resource.data.createdAt == request.time
+        && !exists(/databases/$(database)/documents/communityPostReports/$(reportId));
+      allow get: if isModerationAdmin()
+        || (isSignedIn() && (!exists(/databases/$(database)/documents/communityPostReports/$(reportId))
+          || resource.data.reporterId == request.auth.uid));
+      allow list: if isModerationAdmin();
+      allow update: if isModerationAdmin()
+        && request.resource.data.keys().hasOnly([
+          'postId', 'postOwnerId', 'reporterId', 'reason', 'description',
+          'status', 'createdAt', 'reviewedAt', 'reviewedBy', 'actionTaken'
+        ])
+        && request.resource.data.postId == resource.data.postId
+        && request.resource.data.postOwnerId == resource.data.postOwnerId
+        && request.resource.data.reporterId == resource.data.reporterId
+        && request.resource.data.reason == resource.data.reason
+        && request.resource.data.description == resource.data.description
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.status in ['OPEN', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED']
+        && request.resource.data.reviewedBy == request.auth.uid
+        && request.resource.data.reviewedAt == request.time
+        && request.resource.data.actionTaken is string
+        && request.resource.data.actionTaken.size() <= 500;
+      allow delete: if false;
     }
 
     // ---------- User profiles: readable by signed-in players ----------

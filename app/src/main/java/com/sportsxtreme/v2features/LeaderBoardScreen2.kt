@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Locale
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.components.SportsXtremeAppBar
 import com.example.sportsxtreme.presentation.profile.Lime
 import coil3.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
@@ -227,15 +228,24 @@ fun LeaderBoardScreen2(
             .fillMaxSize()
             .background(ScreenBg)
             .drawBehind {
-                drawCircle(
-                    color = Color(0x1F203416),
-                    radius = size.width * 0.8f,
-                    center = Offset(size.width * 0.95f, size.height * 0.2f)
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF0A151B), ScreenBg, Color(0xFF020609))
+                    )
                 )
-                drawCircle(
-                    color = Color(0x1200D2FF),
-                    radius = size.width * 0.6f,
-                    center = Offset(size.width * 0.05f, size.height * 0.65f)
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x2545E9FF), Color(0x1045E9FF), Color.Transparent),
+                        center = Offset(size.width * 0.08f, size.height * 0.12f),
+                        radius = size.width * 0.85f
+                    )
+                )
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x20C7FF1A), Color(0x0CC7FF1A), Color.Transparent),
+                        center = Offset(size.width * 0.94f, size.height * 0.58f),
+                        radius = size.width * 0.72f
+                    )
                 )
             }
     ) {
@@ -243,7 +253,7 @@ fun LeaderBoardScreen2(
             modifier = Modifier.fillMaxSize()
         ) {
             // 1. Top Header Bar
-            HeaderBar(onMenuClick = onMenuClick)
+            SportsXtremeAppBar(onMenuClick = onMenuClick, showSearch = true)
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),

@@ -91,7 +91,11 @@ class ScoringViewModel @Inject constructor(
         initialValue = ScoringUiState()
     )
 
-    fun recordRuns(runs: Int) = recordDelivery(runsOffBat = runs)
+    fun recordRuns(runs: Int, shotDirection: String? = null, metadata: Map<String, String> = emptyMap()) =
+        recordDelivery(
+            runsOffBat = runs,
+            metadata = if (shotDirection != null) metadata + ("shotDirection" to shotDirection) else metadata
+        )
 
     fun recordExtra(type: ExtraType) = recordDelivery(
         extras = listOf(ExtraRun(type, 1)),
@@ -156,7 +160,8 @@ class ScoringViewModel @Inject constructor(
         runsOffBat: Int = 0,
         extras: List<ExtraRun> = emptyList(),
         dismissal: Dismissal? = null,
-        isLegalDelivery: Boolean = true
+        isLegalDelivery: Boolean = true,
+        metadata: Map<String, String> = emptyMap()
     ) {
         val state = currentState() ?: return
         val innings = state.currentInnings ?: return
@@ -187,7 +192,8 @@ class ScoringViewModel @Inject constructor(
             recordedByUserId = LOCAL_SCORER_ID,
             timestampEpochMs = now,
             syncState = SyncState.PENDING,
-            previousEventId = previousEvent?.ballId
+            previousEventId = previousEvent?.ballId,
+            metadata = metadata
         )
         viewModelScope.launch { recordBall(event) }
     }

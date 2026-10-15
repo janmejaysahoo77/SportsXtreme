@@ -1,6 +1,8 @@
 package com.example.sportsxtreme.presentation.home
 
 import android.net.Uri
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.annotation.DrawableRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -10,7 +12,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,13 +29,24 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.DropdownMenu
@@ -44,6 +56,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Business
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -52,6 +74,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -59,6 +82,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -68,19 +92,30 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
 import android.widget.Toast
+import android.content.Intent
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.Calendar
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.components.SportsXtremeAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import com.example.sportsxtreme.data.remote.cloudinary.CloudinaryTournamentImageUploader
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -94,7 +129,7 @@ import com.google.firebase.Timestamp
 // Color Palette
 private val GreenAccent = Color(0xFFC1FF00)
 private val CyanAccent = Color(0xFF00D2FF)
-private val ScreenBg = Color(0xFF010509)
+private val ScreenBg = Color(0xFF0A101C)
 private val MutedText = Color(0xFF9AA7A3)
 private val StrokeBorder = Color(0x334E5B64)
 
@@ -106,6 +141,8 @@ private data class CommunityCategory(
 )
 
 private data class Opportunity(
+    val id: String = "",
+    val ownerId: String? = null,
     val name: String,
     val role: String,
     val description: String,
@@ -117,7 +154,17 @@ private data class Opportunity(
     val location: String? = null,
     val league: String? = null,
     val bubble: String? = null,
-    val profilePhotoUrl: String? = null
+    val profilePhotoUrl: String? = null,
+    val isRequest: Boolean = false,
+    val organization: String? = null,
+    val experience: String? = null,
+    val groundType: String? = null,
+    val ballType: String? = null,
+    val chargePerMatch: String? = null,
+    val requestTitle: String? = null,
+    val requestDate: String? = null,
+    val requestTime: String? = null,
+    val requestFormat: String? = null
 )
 
 private val categories = listOf(
@@ -130,7 +177,7 @@ private val categories = listOf(
     CommunityCategory("Grounds", "VENUES", R.drawable.ground, GreenAccent)
 )
 
-private val filters = listOf("All", "Looking For", "Available")
+private val filters = listOf("All", "Looking for", "Available")
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -140,21 +187,45 @@ fun CommunityScreen(
     var selectedFilterIndex by remember { mutableIntStateOf(0) }
     var showCreateOptions by remember { mutableStateOf(false) }
     var showProfileForm by remember { mutableStateOf(false) }
+    var showLookingForForm by remember { mutableStateOf(false) }
     val createOptionsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val profileFormSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val lookingForSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val communityProfiles = remember { mutableStateListOf<Opportunity>() }
+    val ownerPhotoUrls = remember { mutableStateMapOf<String, String>() }
     val currentUser = FirebaseAuth.getInstance().currentUser
     var accountPhotoUrl by remember(currentUser?.uid) { mutableStateOf(currentUser?.photoUrl?.toString()) }
+    var isPostingRequest by remember { mutableStateOf(false) }
+    var selectedContactProfile by remember { mutableStateOf<Opportunity?>(null) }
+    var contactWhatsappNumber by remember { mutableStateOf<String?>(null) }
+    var isLoadingContact by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(currentUser?.uid) {
         val uid = currentUser?.uid ?: return@LaunchedEffect
         FirebaseFirestore.getInstance().collection("users").document(uid).get()
             .addOnSuccessListener { userDocument ->
-                accountPhotoUrl = userDocument.getString("profilePhotoUrl")
-                    ?.takeIf { it.isNotBlank() }
-                    ?: currentUser.photoUrl?.toString()
+                val photo = userDocument.getString("profilePhotoUrl")?.takeIf { it.isNotBlank() }
+                if (photo != null) {
+                    accountPhotoUrl = photo
+                } else {
+                    FirebaseFirestore.getInstance().collection("users")
+                        .whereEqualTo("id", uid)
+                        .limit(1)
+                        .get()
+                        .addOnSuccessListener { querySnap ->
+                            val legacyPhoto = querySnap.documents.firstOrNull()
+                                ?.getString("profilePhotoUrl")?.takeIf { it.isNotBlank() }
+                            accountPhotoUrl = legacyPhoto ?: currentUser.photoUrl?.toString()
+                        }
+                        .addOnFailureListener {
+                            accountPhotoUrl = currentUser.photoUrl?.toString()
+                        }
+                }
+            }
+            .addOnFailureListener {
+                accountPhotoUrl = currentUser.photoUrl?.toString()
             }
     }
 
@@ -169,24 +240,68 @@ fun CommunityScreen(
                     communityProfiles.addAll(snapshot.documents.mapNotNull { document ->
                         val data = document.data ?: return@mapNotNull null
                         val createdAt = data["createdAt"] as? Timestamp
+                        val isRequest = data["postType"] == "request"
+                        val ownerId = data["ownerId"] as? String
+                        val docPhotoUrl = (data["profilePhotoUrl"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+
+                        if (docPhotoUrl != null && ownerId != null) {
+                            ownerPhotoUrls[ownerId] = docPhotoUrl
+                        } else if (ownerId != null && !ownerPhotoUrls.containsKey(ownerId)) {
+                            if (ownerId == currentUser?.uid && !accountPhotoUrl.isNullOrBlank()) {
+                                ownerPhotoUrls[ownerId] = accountPhotoUrl!!
+                            } else {
+                                FirebaseFirestore.getInstance().collection("users").document(ownerId).get()
+                                    .addOnSuccessListener { userDoc ->
+                                        val photo = userDoc.getString("profilePhotoUrl")?.trim()?.takeIf { it.isNotBlank() }
+                                        if (photo != null) {
+                                            ownerPhotoUrls[ownerId] = photo
+                                        } else {
+                                            FirebaseFirestore.getInstance().collection("users")
+                                                .whereEqualTo("id", ownerId)
+                                                .limit(1)
+                                                .get()
+                                                .addOnSuccessListener { querySnap ->
+                                                    val legacyPhoto = querySnap.documents.firstOrNull()
+                                                        ?.getString("profilePhotoUrl")?.trim()?.takeIf { it.isNotBlank() }
+                                                    if (legacyPhoto != null) {
+                                                        ownerPhotoUrls[ownerId] = legacyPhoto
+                                                    }
+                                                }
+                                        }
+                                    }
+                            }
+                        }
+
                         Opportunity(
-                            name = data["name"] as? String ?: "Community member",
+                            id = document.id,
+                            ownerId = ownerId,
+                            name = if (isRequest) data["title"] as? String ?: "Community request" else data["name"] as? String ?: "Community member",
                             role = (data["category"] as? String ?: "PLAYER").uppercase(),
-                            description = listOfNotNull(
+                            description = if (isRequest) data["description"] as? String ?: "" else listOfNotNull(
                                 (data["organization"] as? String)?.takeIf { it.isNotBlank() },
                                 (data["experience"] as? String)?.takeIf { it.isNotBlank() }?.let { "$it experience" }
                             ).joinToString(" · "),
-                            meta = "Match",
+                            meta = if (isRequest) listOfNotNull((data["date"] as? String)?.let { "Date: $it" }, (data["time"] as? String)?.takeIf { it.isNotBlank() }?.let { "Time: $it" }).joinToString(" · ").ifBlank { "Looking for" } else "Match",
                             price = (data["chargePerMatch"] as? String)?.takeIf { it.isNotBlank() }?.let { "₹$it" },
-                            action = "Connect",
+                            action = if (isRequest) "Respond" else "Connect",
                             age = createdAt?.let { timeAgo(it.toDate().time) } ?: "Just now",
                             accent = GreenAccent,
                             location = (data["location"] as? String)?.takeIf { it.isNotBlank() },
-                            league = listOfNotNull(
+                            league = if (isRequest) (data["format"] as? String)?.takeIf { it.isNotBlank() } else listOfNotNull(
                                 (data["groundType"] as? String)?.let { "Ground: $it" },
                                 (data["ballType"] as? String)?.let { "Ball: $it" }
                             ).joinToString(" · ").ifBlank { null },
-                            profilePhotoUrl = (data["profilePhotoUrl"] as? String)?.takeIf { it.isNotBlank() }
+                            profilePhotoUrl = docPhotoUrl,
+                            isRequest = isRequest,
+                            organization = (data["organization"] as? String)?.takeIf { it.isNotBlank() },
+                            experience = (data["experience"] as? String)?.takeIf { it.isNotBlank() },
+                            groundType = (data["groundType"] as? String)?.takeIf { it.isNotBlank() },
+                            ballType = (data["ballType"] as? String)?.takeIf { it.isNotBlank() },
+                            chargePerMatch = (data["chargePerMatch"] as? String)?.takeIf { it.isNotBlank() },
+                            requestTitle = if (isRequest) data["title"] as? String else null,
+                            requestDate = if (isRequest) data["date"] as? String else null,
+                            requestTime = if (isRequest) data["time"] as? String else null,
+                            requestFormat = if (isRequest) data["format"] as? String else null
                         )
                     })
                 }
@@ -199,53 +314,114 @@ fun CommunityScreen(
             .fillMaxSize()
             .background(ScreenBg)
             .drawBehind {
-                drawCircle(
-                    color = Color(0x29223416),
-                    radius = size.width * 0.75f,
-                    center = Offset(size.width * 0.95f, size.height * 0.25f)
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF0A151B), ScreenBg, Color(0xFF020609))
+                    )
                 )
-                drawCircle(
-                    color = Color(0x1400D2FF),
-                    radius = size.width * 0.55f,
-                    center = Offset(size.width * 0.05f, size.height * 0.65f)
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x2545E9FF), Color(0x1045E9FF), Color.Transparent),
+                        center = Offset(size.width * 0.08f, size.height * 0.12f),
+                        radius = size.width * 0.85f
+                    )
+                )
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x20C7FF1A), Color(0x0CC7FF1A), Color.Transparent),
+                        center = Offset(size.width * 0.94f, size.height * 0.58f),
+                        radius = size.width * 0.72f
+                    )
                 )
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
+            SportsXtremeAppBar(onMenuClick = onMenuClick, showSearch = true)
+            FilterRow(selectedIndex = selectedFilterIndex, onSelectFilter = { selectedFilterIndex = it })
+            AnimatedContent(
+                targetState = selectedFilterIndex,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item {
-                    FilterRow(
-                        selectedIndex = selectedFilterIndex,
-                        onSelectFilter = { selectedFilterIndex = it }
-                    )
-                }
-                item {
-                    Text(
-                        text = "New Opportunities",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
-                    )
-                }
-                if (communityProfiles.isEmpty()) {
-                    item {
-                        Text(
-                            text = "No community posts yet. Be the first to add your profile.",
-                            color = Color(0xFF9AA7A3),
-                            fontSize = 13.sp,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
-                        )
+                transitionSpec = {
+                    (slideInHorizontally { width -> if (targetState > initialState) width else -width } + fadeIn()) togetherWith
+                        (slideOutHorizontally { width -> if (targetState > initialState) -width else width } + fadeOut())
+                },
+                label = "community-tab-content"
+            ) { tabIndex ->
+                val displayedProfiles = remember(tabIndex, communityProfiles.toList()) {
+                    when (tabIndex) {
+                        1 -> communityProfiles.filter { it.isRequest }
+                        2 -> communityProfiles.filterNot { it.isRequest }
+                        else -> communityProfiles.toList()
                     }
                 }
-                items(communityProfiles) { opportunity ->
-                    OpportunityCard(opportunity = opportunity)
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().pointerInput(tabIndex) {
+                        var horizontalDrag = 0f
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                horizontalDrag += dragAmount
+                            },
+                            onDragEnd = {
+                                if (horizontalDrag < -72f && tabIndex < filters.lastIndex) selectedFilterIndex = tabIndex + 1
+                                if (horizontalDrag > 72f && tabIndex > 0) selectedFilterIndex = tabIndex - 1
+                                horizontalDrag = 0f
+                            },
+                            onDragCancel = { horizontalDrag = 0f }
+                        )
+                    },
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 120.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        Text(
+                            text = filters[tabIndex],
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                        )
+                    }
+                    if (displayedProfiles.isEmpty()) {
+                        item {
+                            Text(
+                                text = when (tabIndex) {
+                                    1 -> "No one is looking for an opportunity right now."
+                                    2 -> "No self profiles are available yet."
+                                    else -> "No community posts yet. Be the first to add your profile."
+                                },
+                                color = Color(0xFF9AA7A3),
+                                fontSize = 13.sp,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
+                            )
+                        }
+                    }
+                    items(displayedProfiles, key = { it.id }) { opportunity ->
+                        OpportunityCard(
+                            opportunity = opportunity,
+                            ownerPhotoUrls = ownerPhotoUrls,
+                            currentUserId = currentUser?.uid,
+                            accountPhotoUrl = accountPhotoUrl,
+                            onConnect = { profile ->
+                                selectedContactProfile = profile
+                                contactWhatsappNumber = null
+                                isLoadingContact = true
+                                FirebaseFirestore.getInstance()
+                                    .collection("communityProfiles").document(profile.id)
+                                    .collection("private").document("contact").get()
+                                    .addOnSuccessListener { doc ->
+                                        contactWhatsappNumber = doc.getString("whatsappNumber")?.takeIf { it.isNotBlank() }
+                                        isLoadingContact = false
+                                    }
+                                    .addOnFailureListener { error ->
+                                        isLoadingContact = false
+                                        Toast.makeText(context, "Could not load contact details: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
+                                    }
+                            }
+                        )
+                    }
+                    item { Spacer(modifier = Modifier.height(34.dp)) }
                 }
-                item { Spacer(modifier = Modifier.height(34.dp)) }
             }
         }
 
@@ -280,12 +456,99 @@ fun CommunityScreen(
                 }
             ) {
                 CreateCommunityOptionsSheet(
-                    onLookingFor = { showCreateOptions = false },
+                    onLookingFor = {
+                        showCreateOptions = false
+                        showLookingForForm = true
+                    },
                     onAddProfile = {
                         showCreateOptions = false
                         showProfileForm = true
                     },
                     onCancel = { showCreateOptions = false }
+                )
+            }
+        }
+
+        if (showLookingForForm) {
+            ModalBottomSheet(
+                onDismissRequest = { showLookingForForm = false },
+                sheetState = lookingForSheetState,
+                containerColor = Color(0xFF08131D),
+                contentColor = Color.White,
+                dragHandle = {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 6.dp, bottom = 2.dp)
+                            .width(38.dp)
+                            .height(5.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE7F0F8))
+                    )
+                }
+            ) {
+                LookingForOpportunityScreen(
+                    modifier = Modifier.fillMaxSize(),
+                    onBack = {
+                        showLookingForForm = false
+                        showCreateOptions = true
+                    },
+                    onPost = { category, title, description, date, time, location, format, whatsappNumber, whatsappConsent ->
+                        if (isPostingRequest) return@LookingForOpportunityScreen
+                        val user = FirebaseAuth.getInstance().currentUser
+                        if (user == null) {
+                            Toast.makeText(context, "Sign in to post a Community request.", Toast.LENGTH_LONG).show()
+                        } else {
+                            isPostingRequest = true
+                            val db = FirebaseFirestore.getInstance()
+
+                            fun publishRequest(photoUrl: String) {
+                                val requestRef = db.collection("communityProfiles").document()
+                                val batch = db.batch()
+                                batch.set(requestRef, mapOf(
+                                    "postType" to "request",
+                                    "ownerId" to user.uid,
+                                    "name" to user.displayName.orEmpty().ifBlank { "Community member" },
+                                    "title" to title,
+                                    "category" to category,
+                                    "description" to description,
+                                    "date" to date,
+                                    "time" to time,
+                                    "location" to location,
+                                    "format" to format,
+                                    "profilePhotoUrl" to photoUrl,
+                                    "whatsappConsent" to whatsappConsent,
+                                    "createdAt" to FieldValue.serverTimestamp()
+                                ))
+                                batch.set(requestRef.collection("private").document("contact"), mapOf(
+                                    "ownerId" to user.uid,
+                                    "whatsappNumber" to whatsappNumber
+                                ))
+                                batch.commit()
+                                    .addOnSuccessListener {
+                                        isPostingRequest = false
+                                        Toast.makeText(context, "Your request is now on Community.", Toast.LENGTH_SHORT).show()
+                                        showLookingForForm = false
+                                    }
+                                    .addOnFailureListener { error ->
+                                        isPostingRequest = false
+                                        Toast.makeText(context, "Could not post request: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
+                                    }
+                            }
+
+                            val fallbackUrl = accountPhotoUrl?.takeIf { it.isNotBlank() } ?: user.photoUrl?.toString().orEmpty()
+
+                            db.collection("users").document(user.uid).get()
+                                .addOnSuccessListener { userDocument ->
+                                    val fetchedUrl = userDocument.getString("profilePhotoUrl")
+                                        ?.takeIf { it.isNotBlank() }
+                                        ?: fallbackUrl
+                                    publishRequest(fetchedUrl)
+                                }
+                                .addOnFailureListener {
+                                    publishRequest(fallbackUrl)
+                                }
+                        }
+                    }
                 )
             }
         }
@@ -363,6 +626,26 @@ fun CommunityScreen(
                 )
             }
         }
+
+        selectedContactProfile?.let { profile ->
+            ModalBottomSheet(
+                onDismissRequest = { selectedContactProfile = null },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = Color(0xFF061018),
+                contentColor = Color.White,
+                dragHandle = null,
+            ) {
+                ContactDetailsSheet(
+                    profile = profile,
+                    photoUrl = profile.profilePhotoUrl?.takeIf { it.isNotBlank() }
+                        ?: profile.ownerId?.let { ownerPhotoUrls[it] }
+                        ?: if (profile.ownerId == currentUser?.uid) accountPhotoUrl else null,
+                    whatsappNumber = contactWhatsappNumber,
+                    isLoading = isLoadingContact,
+                    onBack = { selectedContactProfile = null }
+                )
+            }
+        }
     }
 }
 
@@ -373,6 +656,146 @@ private fun timeAgo(createdAtMillis: Long): String {
         elapsedMinutes < 60 -> "${elapsedMinutes}m ago"
         elapsedMinutes < 1_440 -> "${elapsedMinutes / 60}h ago"
         else -> "${elapsedMinutes / 1_440}d ago"
+    }
+}
+
+@Composable
+private fun LookingForOpportunityScreen(
+    modifier: Modifier = Modifier,
+    onBack: () -> Unit,
+    onPost: (String, String, String, String, String, String, String, String, Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    var category by remember { mutableStateOf("") }
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var date by remember { mutableStateOf("") }
+    var time by remember { mutableStateOf("") }
+    var location by remember { mutableStateOf("") }
+    var format by remember { mutableStateOf("") }
+    var whatsappNumber by remember { mutableStateOf("") }
+    var whatsappConsent by remember { mutableStateOf(false) }
+    var openMenu by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    val categories = listOf("Batter", "Bowler", "All Rounder", "Wicket Keeper", "Umpire")
+
+    Box(modifier.fillMaxSize().background(Color(0xFF08131D)).navigationBarsPadding()) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                }
+                Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                    Text("Looking for Someone", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    Text("Post an opportunity for match, team, players, ground, and more.", color = Color(0xFFA8B9C8), fontSize = 11.sp)
+                }
+            }
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 5.dp, vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                OpportunityDropdownField("I am looking for", category, "Select category", categories, true, Icons.Filled.GridView, openMenu, { openMenu = it }, { category = it })
+                OpportunityTextField("Title", title, { title = it }, "e.g., Need Umpire for Weekend Match", true, Icons.Filled.Business)
+                OpportunityTextField("Description", description, { if (it.length <= 500) description = it }, "Provide more details (e.g., match format, date, requirements, etc.)", true, Icons.Filled.Description, minLines = 3, counter = "${description.length}/500")
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    OpportunityDateTimeField("Date", date.ifBlank { "Select date" }, true, Icons.Filled.CalendarMonth, Modifier.weight(1f)) {
+                        val now = Calendar.getInstance()
+                        DatePickerDialog(context, { _, year, month, day -> date = "%02d/%02d/%04d".format(day, month + 1, year) }, now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH)).show()
+                    }
+                    OpportunityDateTimeField("Time", time.ifBlank { "Select time" }, false, Icons.Filled.AccessTime, Modifier.weight(1f)) {
+                        val now = Calendar.getInstance()
+                        TimePickerDialog(context, { _, hour, minute -> time = "%02d:%02d".format(hour, minute) }, now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE), false).show()
+                    }
+                }
+                OpportunityTextField("Location", location, { location = it }, "Enter location (e.g., Kalinga Stadium, Bhubaneswar)", true, Icons.Filled.Place)
+                OpportunityTextField("Match Type / Format", format, { format = it }, "e.g., T20 / League / Practice / Tournament", false, Icons.Filled.SportsEsports, optional = true)
+                OpportunityTextField("WhatsApp Number", whatsappNumber, { whatsappNumber = it }, "Enter your WhatsApp number", true, icon = null, iconRes = R.drawable.whatsappicon, keyboardType = KeyboardType.Phone)
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { whatsappConsent = !whatsappConsent },
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Checkbox(
+                        checked = whatsappConsent,
+                        onCheckedChange = { whatsappConsent = it },
+                        colors = androidx.compose.material3.CheckboxDefaults.colors(
+                            checkedColor = GreenAccent,
+                            uncheckedColor = Color(0xFFA8B9C8),
+                            checkmarkColor = Color(0xFF111800)
+                        )
+                    )
+                    Text(
+                        "I consent to sharing my WhatsApp number with users who wish to contact me regarding this listing. My number will not be displayed publicly, but tapping the WhatsApp button will allow users to contact me directly via WhatsApp. For more, check Privacy Policy.",
+                        color = Color(0xFFB6C4CF), fontSize = 10.sp, lineHeight = 14.sp,
+                        modifier = Modifier.weight(1f).clickable { whatsappConsent = !whatsappConsent }.padding(top = 12.dp)
+                    )
+                }
+                if (error.isNotBlank()) Text(error, color = Color(0xFFFF6878), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp))
+            }
+            Box(
+                Modifier.fillMaxWidth().padding(start = 5.dp, end = 5.dp, top = 8.dp, bottom = 14.dp).height(46.dp)
+                    .clip(RoundedCornerShape(11.dp)).background(GreenAccent).clickable {
+                        error = when {
+                            category.isBlank() -> "Select what you are looking for."
+                            title.isBlank() -> "Enter a title."
+                            description.isBlank() -> "Add a short description."
+                            date.isBlank() -> "Select a date."
+                            location.isBlank() -> "Enter a location."
+                            whatsappNumber.filter(Char::isDigit).length !in 10..12 -> "Enter a valid WhatsApp number."
+                            !whatsappConsent -> "Please consent to WhatsApp contact before posting."
+                            else -> ""
+                        }
+                        if (error.isBlank()) onPost(category, title.trim(), description.trim(), date, time, location.trim(), format.trim(), whatsappNumber.trim(), whatsappConsent)
+                    },
+                contentAlignment = Alignment.Center
+            ) { Text("Post", color = Color(0xFF111800), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold) }
+        }
+    }
+}
+
+@Composable
+private fun OpportunityDateTimeField(label: String, value: String, required: Boolean, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp)).background(Color(0xFF0D1A25)).border(1.dp, Color(0x334E5B64), RoundedCornerShape(11.dp)).clickable(onClick = onClick).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(21.dp))
+        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+            ProfileFieldLabel(label, required, !required)
+            Row(Modifier.fillMaxWidth().height(34.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF0A1620)).border(1.dp, Color(0xFF263947), RoundedCornerShape(8.dp)).padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(value, color = if (value.startsWith("Select")) Color(0xFF9DAFBD) else Color.White, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                Icon(icon, null, tint = Color(0xFFDCE7EF), modifier = Modifier.size(15.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun OpportunityTextField(label: String, value: String, onValueChange: (String) -> Unit, placeholder: String, required: Boolean, icon: ImageVector?, minLines: Int = 1, counter: String? = null, optional: Boolean = false, iconRes: Int? = null, keyboardType: KeyboardType = KeyboardType.Text) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp)).background(Color(0xFF0D1A25)).border(1.dp, Color(0x334E5B64), RoundedCornerShape(11.dp)).padding(10.dp), verticalAlignment = Alignment.Top) {
+        if (iconRes != null) Image(painterResource(iconRes), contentDescription = null, modifier = Modifier.padding(top = 16.dp).size(21.dp))
+        else if (icon != null) Icon(icon, null, tint = Color.White, modifier = Modifier.padding(top = 16.dp).size(21.dp))
+        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+            ProfileFieldLabel(label, required, optional)
+            OutlinedTextField(value = value, onValueChange = onValueChange, placeholder = { Text(placeholder, color = Color(0xFF8295A5), fontSize = 11.sp) }, singleLine = minLines == 1, minLines = minLines, keyboardOptions = KeyboardOptions(keyboardType = keyboardType), leadingIcon = if (keyboardType == KeyboardType.Phone) ({ Text("+91", color = Color.White, fontSize = 11.sp) }) else null, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF314656), unfocusedBorderColor = Color(0xFF263947), cursorColor = GreenAccent), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp))
+            if (counter != null) Text(counter, color = Color(0xFF8295A5), fontSize = 10.sp, modifier = Modifier.align(Alignment.End).padding(end = 4.dp, top = 2.dp))
+        }
+    }
+}
+
+@Composable
+private fun OpportunityDropdownField(label: String, value: String, placeholder: String, options: List<String>, required: Boolean, icon: ImageVector, openMenu: String, onExpand: (String) -> Unit, onSelect: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp)).background(Color(0xFF0D1A25)).border(1.dp, Color(0x334E5B64), RoundedCornerShape(11.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(21.dp))
+        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+            ProfileFieldLabel(label, required, false)
+            Box {
+                Row(Modifier.fillMaxWidth().height(38.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, if (value.isBlank()) GreenAccent else Color(0xFF263947), RoundedCornerShape(8.dp)).clickable { onExpand(if (openMenu == label) "" else label) }.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(value.ifBlank { placeholder }, color = if (value.isBlank()) Color(0xFF9DAFBD) else Color.White, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                    Text("⌄", color = Color.White, fontSize = 18.sp)
+                }
+                DropdownMenu(expanded = openMenu == label, onDismissRequest = { onExpand("") }) { options.forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { onSelect(option); onExpand("") }) } }
+            }
+        }
     }
 }
 
@@ -891,22 +1314,30 @@ private fun FilterRow(
     ) {
         filters.forEachIndexed { index, label ->
             val isSelected = index == selectedIndex
+            val backgroundColor by animateColorAsState(
+                targetValue = if (isSelected) GreenAccent else Color(0xFF11181E),
+                label = "community-tab-background-$index"
+            )
+            val foregroundColor by animateColorAsState(
+                targetValue = if (isSelected) Color(0xFF101604) else Color(0xFFEAF0F3),
+                label = "community-tab-foreground-$index"
+            )
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .height(36.dp)
                     .clip(RoundedCornerShape(9.dp))
-                    .background(if (isSelected) GreenAccent else Color(0xFF11181E))
+                    .background(backgroundColor)
                     .border(1.dp, if (isSelected) Color(0xFFDFFF6B) else Color(0x332A353D), RoundedCornerShape(9.dp))
                     .clickable { onSelectFilter(index) }
                     .padding(horizontal = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (index != 0) FilterTabIcon(available = index == 2, color = if (isSelected) Color(0xFF101604) else Color(0xFFEAF0F3))
+                    if (index != 0) FilterTabIcon(available = index == 2, color = foregroundColor)
                     Text(
                         text = label,
-                        color = if (isSelected) Color(0xFF101604) else Color(0xFFEAF0F3),
+                        color = foregroundColor,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1
@@ -932,7 +1363,30 @@ private fun FilterTabIcon(available: Boolean, color: Color) {
 }
 
 @Composable
-private fun OpportunityCard(opportunity: Opportunity) {
+private fun OpportunityCard(
+    opportunity: Opportunity,
+    ownerPhotoUrls: Map<String, String>,
+    currentUserId: String?,
+    accountPhotoUrl: String?,
+    onConnect: (Opportunity) -> Unit
+) {
+    val context = LocalContext.current
+    var menuExpanded by remember(opportunity.id) { mutableStateOf(false) }
+    var confirmDelete by remember(opportunity.id) { mutableStateOf(false) }
+    var showReportSheet by remember(opportunity.id) { mutableStateOf(false) }
+    val isOwner = currentUserId != null && opportunity.ownerId == currentUserId
+    val rawPhotoUrl = opportunity.profilePhotoUrl?.takeIf { it.isNotBlank() }
+        ?: opportunity.ownerId?.let { ownerPhotoUrls[it] }
+        ?: if (opportunity.ownerId == currentUserId) accountPhotoUrl?.takeIf { it.isNotBlank() } else null
+
+    val photoUrl = rawPhotoUrl?.trim()?.let { rawUrl ->
+        val secureUrl = rawUrl.replaceFirst("http://", "https://", ignoreCase = true)
+            .let { if (it.startsWith("//")) "https:$it" else it }
+        if (secureUrl.contains("/image/upload/", ignoreCase = true) &&
+            !secureUrl.contains("/image/upload/c_fill,g_auto,h_512,w_512,f_jpg,q_auto/", ignoreCase = true)
+        ) secureUrl.replace("/image/upload/", "/image/upload/c_fill,g_auto,h_512,w_512,f_jpg,q_auto/", ignoreCase = true)
+        else secureUrl
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -946,13 +1400,14 @@ private fun OpportunityCard(opportunity: Opportunity) {
             .padding(10.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            if (opportunity.profilePhotoUrl != null) {
+            if (!photoUrl.isNullOrBlank()) {
                 AsyncImage(
-                    model = opportunity.profilePhotoUrl,
+                    model = ImageRequest.Builder(context).data(photoUrl).build(),
                     contentDescription = "${opportunity.name} profile photo",
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(42.dp).clip(CircleShape)
-                        .border(1.5.dp, opportunity.accent, CircleShape)
+                    modifier = Modifier.size(42.dp)
+                        .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
+                        .clip(CircleShape)
                 )
             } else {
                 BlankAvatar(accent = opportunity.accent)
@@ -981,12 +1436,28 @@ private fun OpportunityCard(opportunity: Opportunity) {
                             maxLines = 1
                         )
                     }
-                    Text(
-                        text = opportunity.age,
-                        color = MutedText,
-                        fontSize = 9.sp,
-                        modifier = Modifier.padding(start = 5.dp, top = 1.dp)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = opportunity.age, color = MutedText, fontSize = 9.sp, modifier = Modifier.padding(start = 5.dp, top = 1.dp))
+                        Box {
+                            IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(30.dp)) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "Post options", tint = Color.White, modifier = Modifier.size(19.dp))
+                            }
+                            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                                if (isOwner) {
+                                    DropdownMenuItem(text = { Text("Delete") }, onClick = { menuExpanded = false; confirmDelete = true })
+                                }
+                                DropdownMenuItem(text = { Text("Share") }, onClick = {
+                                    menuExpanded = false
+                                    val shareText = "${opportunity.name} · ${opportunity.role}\n${opportunity.description}\n${opportunity.location.orEmpty()}".trim()
+                                    val intent = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, shareText) }
+                                    context.startActivity(Intent.createChooser(intent, "Share community post"))
+                                })
+                                if (!isOwner) {
+                                    DropdownMenuItem(text = { Text("Report") }, onClick = { menuExpanded = false; showReportSheet = true })
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if (opportunity.description.isNotBlank() && opportunity.price == null) {
@@ -1031,8 +1502,139 @@ private fun OpportunityCard(opportunity: Opportunity) {
 
                     Spacer(modifier = Modifier.weight(1f))
 
-                    ActionPill(label = opportunity.action)
+                    ActionPill(label = opportunity.action) {
+                        onConnect(opportunity)
+                    }
                 }
+            }
+        }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete post?") },
+            text = { Text("This community post will be permanently deleted.") },
+            confirmButton = { TextButton(onClick = {
+                confirmDelete = false
+                FirebaseFirestore.getInstance().collection("communityProfiles").document(opportunity.id)
+                    .delete()
+                    .addOnSuccessListener { Toast.makeText(context, "Post deleted", Toast.LENGTH_SHORT).show() }
+                    .addOnFailureListener { error -> Toast.makeText(context, "Could not delete post: ${error.localizedMessage}", Toast.LENGTH_LONG).show() }
+            }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } }
+        )
+    }
+    if (showReportSheet) {
+        ReportListingSheet(
+            onDismiss = { showReportSheet = false },
+            onSubmit = { reason, description, onComplete, onFailure ->
+                val reporterId = currentUserId
+                if (reporterId == null || opportunity.ownerId == null) {
+                    onFailure("Sign in to report this listing")
+                } else {
+                    val reportId = "${opportunity.id}_$reporterId"
+                    val reportRef = FirebaseFirestore.getInstance().collection("communityPostReports").document(reportId)
+                    reportRef.get().addOnSuccessListener { existingReport ->
+                        if (existingReport.exists()) {
+                            onFailure("You have already reported this listing")
+                            return@addOnSuccessListener
+                        }
+                        reportRef.set(mapOf(
+                            "postId" to opportunity.id,
+                            "postOwnerId" to opportunity.ownerId,
+                            "reporterId" to reporterId,
+                            "reason" to reason,
+                            "description" to description,
+                            "status" to "OPEN",
+                            "createdAt" to FieldValue.serverTimestamp()
+                        ))
+                        .addOnSuccessListener { onComplete() }
+                        .addOnFailureListener { error -> onFailure(
+                            "Could not submit report. You may already have reported this listing."
+                        ) }
+                    }.addOnFailureListener { error -> onFailure("Could not check previous report: ${error.localizedMessage}") }
+                }
+            }
+        )
+    }
+}
+
+private val reportReasons = listOf(
+    "Spam or misleading listing",
+    "Fake identity or impersonation",
+    "Inappropriate or offensive content",
+    "Phone number or contact misuse",
+    "Fraud or scam",
+    "Not sports-related",
+    "Duplicate listing",
+    "Other"
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReportListingSheet(
+    onDismiss: () -> Unit,
+    onSubmit: (String, String, () -> Unit, (String) -> Unit) -> Unit
+) {
+    val context = LocalContext.current
+    var selectedReason by remember { mutableStateOf<String?>(null) }
+    var description by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    ModalBottomSheet(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        containerColor = Color(0xFF101A24),
+        contentColor = Color.White,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding()
+                .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Report Listing", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Select the reason that best describes the issue.", color = MutedText, fontSize = 12.sp)
+            reportReasons.forEach { reason ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .clickable(enabled = !isSubmitting) { selectedReason = reason }
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = selectedReason == reason, onClick = { selectedReason = reason }, enabled = !isSubmitting)
+                    Text(reason, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp))
+                }
+            }
+            OutlinedTextField(
+                value = description,
+                onValueChange = { if (it.length <= 1000) description = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Additional details (optional)") },
+                minLines = 3,
+                maxLines = 5,
+                enabled = !isSubmitting
+            )
+            errorMessage?.let { Text(it, color = Color(0xFFFF7886), fontSize = 12.sp) }
+            Button(
+                onClick = {
+                    val reason = selectedReason ?: run { errorMessage = "Select a reason to continue"; return@Button }
+                    isSubmitting = true
+                    errorMessage = null
+                    onSubmit(reason, description.trim(), {
+                        isSubmitting = false
+                        onDismiss()
+                        Toast.makeText(context, "Report submitted for review", Toast.LENGTH_SHORT).show()
+                    }, { message ->
+                        isSubmitting = false
+                        errorMessage = message
+                    })
+                },
+                enabled = !isSubmitting,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = GreenAccent, contentColor = Color(0xFF111800))
+            ) {
+                Text(if (isSubmitting) "Submitting…" else "Submit Report", fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1100,18 +1702,181 @@ private fun SmallBubble(text: String) {
 }
 
 @Composable
-private fun ActionPill(label: String) {
+private fun ActionPill(label: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .height(30.dp)
             .clip(RoundedCornerShape(9.dp))
             .border(1.dp, GreenAccent, RoundedCornerShape(9.dp))
             .background(Color(0x201B2404))
-            .clickable { }
+            .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(text = label, color = GreenAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun ContactDetailsSheet(
+    profile: Opportunity,
+    photoUrl: String?,
+    whatsappNumber: String?,
+    isLoading: Boolean,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+    Column(
+        modifier = Modifier.fillMaxSize().background(Color(0xFF061018)).navigationBarsPadding()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(42.dp)) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+            Column(Modifier.padding(start = 7.dp)) {
+                Text(
+                    if (profile.isRequest) "Opportunity Details" else "Contact Details",
+                    color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold
+                )
+                Text(
+                    if (profile.isRequest) "Review the requirement and contact the poster" else "Reach out to the opportunity owner",
+                    color = Color(0xFF9FB3C9), fontSize = 12.sp
+                )
+            }
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF07141D))
+                    .border(1.dp, Color(0xFF16303A), RoundedCornerShape(12.dp)).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!photoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context).data(photoUrl).build(),
+                        contentDescription = "${profile.name} profile photo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(76.dp).clip(CircleShape).border(2.dp, GreenAccent, CircleShape)
+                    )
+                } else {
+                    BlankAvatar(accent = GreenAccent)
+                }
+                Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                    Text(profile.name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(profile.role, color = GreenAccent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    if (profile.isRequest) Text("◷  ${profile.age}", color = Color(0xFF9FB3C9), fontSize = 10.sp)
+                    profile.location?.let { MetaLine(it, Modifier.padding(top = 7.dp)) }
+                }
+            }
+
+            Text(
+                if (profile.isRequest) "Requirement Details" else "Opportunity Details",
+                color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold
+            )
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF07141D))
+                    .border(1.dp, Color(0xFF16303A), RoundedCornerShape(12.dp)).padding(horizontal = 12.dp)
+            ) {
+                if (profile.isRequest) {
+                    ContactDetailRow(R.drawable.outline_groups_24, "Category", profile.role)
+                    profile.requestTitle?.takeIf { it.isNotBlank() }?.let {
+                        ContactDetailRow(R.drawable.baseline_edit_location_24, "Title", it)
+                    }
+                    profile.description.takeIf { it.isNotBlank() }?.let {
+                        ContactDetailRow(R.drawable.baseline_edit_location_24, "Description", it)
+                    }
+                    profile.requestDate?.takeIf { it.isNotBlank() }?.let {
+                        ContactDetailRow(R.drawable.outline_calendar_add_on_24, "Date", it)
+                    }
+                    profile.requestTime?.takeIf { it.isNotBlank() }?.let {
+                        ContactDetailRow(R.drawable.timer, "Time", it)
+                    }
+                    profile.location?.let { ContactDetailRow(R.drawable.location, "Location", it) }
+                    profile.requestFormat?.takeIf { it.isNotBlank() }?.let {
+                        ContactDetailRow(R.drawable.grouping, "Match Type / Format", it)
+                    }
+                } else {
+                    profile.organization?.let { ContactDetailRow(R.drawable.groups, "Organization / Team", it) }
+                    profile.experience?.let { ContactDetailRow(R.drawable.trophy1, "Experience", it) }
+                    profile.groundType?.let { ContactDetailRow(R.drawable.ground, "Ground Type", it) }
+                    profile.ballType?.let { ContactDetailRow(R.drawable.tennisball, "Ball Type", it) }
+                    profile.chargePerMatch?.takeIf { it.isNotBlank() }?.let {
+                        ContactDetailRow(R.drawable.rupee, "Payment", "₹$it / Match")
+                    }
+                }
+            }
+
+            Text("Contact Information", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF07141D))
+                    .border(1.dp, Color(0xFF16303A), RoundedCornerShape(12.dp)).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(50.dp).clip(RoundedCornerShape(11.dp)).background(Color(0xFF09251F)), contentAlignment = Alignment.Center) {
+                    Image(painterResource(R.drawable.whatsappicon), contentDescription = "WhatsApp", modifier = Modifier.size(29.dp))
+                }
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text("WhatsApp", color = Color(0xFF9FB3C9), fontSize = 11.sp)
+                    Text(
+                        when { isLoading -> "Loading contact…"; whatsappNumber != null -> whatsappNumber; else -> "Contact unavailable" },
+                        color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold
+                    )
+                }
+                Box(
+                    Modifier.widthIn(min = 126.dp).height(46.dp).clip(RoundedCornerShape(11.dp))
+                        .background(GreenAccent).clickable(enabled = !isLoading && whatsappNumber != null) {
+                            val digits = whatsappNumber.orEmpty().filter(Char::isDigit)
+                            runCatching { uriHandler.openUri("https://wa.me/$digits") }
+                                .onFailure { Toast.makeText(context, "Could not open WhatsApp.", Toast.LENGTH_SHORT).show() }
+                        }.padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(painterResource(R.drawable.whatsappicon), contentDescription = null, modifier = Modifier.size(22.dp))
+                        Text("WhatsApp", color = Color(0xFF10170B), fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF07141D))
+                    .border(1.dp, Color(0xFF16303A), RoundedCornerShape(12.dp)).padding(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Info, contentDescription = null, tint = Color(0xFFAFC9E5), modifier = Modifier.size(24.dp))
+                    Text("Contact only for this opportunity.", color = Color(0xFFD7E2EA), fontSize = 11.sp, modifier = Modifier.padding(start = 10.dp))
+                }
+                Text(
+                    if (profile.isRequest) "Use these contact details only to discuss this opportunity."
+                    else "Please use this number only for discussion about this opportunity.",
+                    color = Color(0xFF9FB3C9), fontSize = 11.sp,
+                    modifier = Modifier.padding(start = 34.dp, top = 5.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContactDetailRow(iconRes: Int, label: String, value: String) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 61.dp).border(width = 0.dp, color = Color.Transparent)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(46.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF09251F)), contentAlignment = Alignment.Center) {
+            Image(painterResource(iconRes), contentDescription = null, modifier = Modifier.size(28.dp))
+        }
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(label, color = Color(0xFF9FB3C9), fontSize = 11.sp)
+            Text(value, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 

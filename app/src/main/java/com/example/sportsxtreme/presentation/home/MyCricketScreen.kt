@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -56,7 +57,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -85,7 +85,9 @@ import com.example.sportsxtreme.presentation.tournament.RegisterTournamentFinalP
 import com.example.sportsxtreme.presentation.tournament.TournamentRegistrationActivity
 import com.example.sportsxtreme.presentation.team.CreateTeamActivity
 import com.example.sportsxtreme.presentation.team.TeamProfileActivity
+import com.example.sportsxtreme.presentation.scoring.ScorecardActivity
 import com.example.sportsxtreme.presentation.ui.theme.*
+import com.example.sportsxtreme.presentation.components.SportsXtremeAppBar
 import coil3.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
@@ -107,6 +109,7 @@ private val ClubMuted = XtremeMuted
 private val cricketTabs = listOf("Matches", "Tournaments", "Teams", "Stats")
 
 private data class CricketMatch(
+    val matchId: String = "",
     val type: String,
     val title: String,
     val status: String,
@@ -122,7 +125,9 @@ private data class CricketMatch(
     val live: Boolean = false,
     val liveSoon: Boolean = false,
     val accent: Color = CricketAccent,
-    val dateEpochMs: Long = 0L
+    val dateEpochMs: Long = 0L,
+    val leftLogoUrl: String? = null,
+    val rightLogoUrl: String? = null
 )
 
 private data class PlayerMatchesState(
@@ -137,7 +142,8 @@ private data class CricketTeam(
     val name: String,
     val initials: String,
     val location: String,
-    val accent: Color
+    val accent: Color,
+    val logoUrl: String = ""
 )
 
 private data class CricketTournament(
@@ -179,9 +185,9 @@ private fun rememberJoinedTeams(): List<CricketTeam> {
 }
 
 @Composable
-private fun rememberPlayerMatches(userId: String?, playerTeamIds: Set<String>): PlayerMatchesState {
+private fun rememberPlayerMatches(userId: String?, playerTeamLogosById: Map<String, String>): PlayerMatchesState {
     var state by remember(userId) { mutableStateOf(PlayerMatchesState()) }
-    DisposableEffect(userId, playerTeamIds) {
+    DisposableEffect(userId, playerTeamLogosById) {
         if (userId.isNullOrBlank()) {
             state = PlayerMatchesState(loading = false)
             return@DisposableEffect onDispose { }
@@ -195,12 +201,12 @@ private fun rememberPlayerMatches(userId: String?, playerTeamIds: Set<String>): 
                 } else {
                     val documents = snapshot?.documents.orEmpty()
                     val matches = documents
-                        .filter { document -> document.isPlayerMatch(userId, playerTeamIds) }
-                        .mapNotNull { document -> document.toPlayerCricketMatch() }
+                        .filter { document -> document.isPlayerMatch(userId, playerTeamLogosById.keys) }
+                        .mapNotNull { document -> document.toPlayerCricketMatch(playerTeamLogosById) }
                         .sortedWith(compareBy<CricketMatch> { it.status == "Finished" }.thenBy { it.dateEpochMs })
                     val hostedMatches = documents
                         .filter { document -> document.isHostedBy(userId) }
-                        .mapNotNull { document -> document.toPlayerCricketMatch() }
+                        .mapNotNull { document -> document.toPlayerCricketMatch(playerTeamLogosById) }
                         .sortedWith(compareBy<CricketMatch> { it.status == "Finished" }.thenBy { it.dateEpochMs })
                     state = PlayerMatchesState(
                         loading = false,
@@ -270,7 +276,8 @@ private fun DocumentSnapshot.isHostedBy(userId: String): Boolean =
     getString("ownerId") == userId ||
         getString("ownerUserId") == userId ||
         getString("organiserId") == userId ||
-        getString("organizerId") == userId
+        getString("organizerId") == userId ||
+        getString("createdBy") == userId
 
 private fun DocumentSnapshot.isPlayerMatch(userId: String, playerTeamIds: Set<String>): Boolean {
     val teamA = get("teamA") as? Map<*, *>
@@ -281,22 +288,39 @@ private fun DocumentSnapshot.isPlayerMatch(userId: String, playerTeamIds: Set<St
         getString("teamAId"),
         getString("teamBId")
     )
+    val playerIds = playerTeamIds.mapTo(linkedSetOf()) { "$it::$userId" }.apply { add(userId) }
     val playingXI = get("playingXI") as? Map<*, *>
     val lineupIncludesUser = playingXI?.values.orEmpty().any { xi ->
-        val playerIds = (xi as? Map<*, *>)?.get("playerIds") as? List<*>
-        userId in playerIds.orEmpty().filterIsInstance<String>()
+        val lineupPlayerIds = (xi as? Map<*, *>)?.get("playerIds") as? List<*>
+        lineupPlayerIds.orEmpty().filterIsInstance<String>().any { it in playerIds }
     }
-    val claimedByUser = (get("teamAClaim") as? Map<*, *>)?.get("userId") == userId ||
-        (get("teamBClaim") as? Map<*, *>)?.get("userId") == userId
-    return involvedTeamIds.any { it in playerTeamIds } || lineupIncludesUser || claimedByUser
+    val squadIncludesUser = (get("matchSquads") as? Map<*, *>)?.values.orEmpty()
+        .flatMap { ((it as? Map<*, *>)?.get("players") as? List<*>).orEmpty() }
+        .filterIsInstance<Map<*, *>>()
+        .any { it["userId"] == userId || it["linkedUserId"] == userId || it["playerId"] in playerIds }
+    val claimedByUser = listOf("teamAClaim", "teamBClaim").any { field ->
+        val claim = get(field) as? Map<*, *>
+        claim?.get("userId") == userId || claim?.get("linkedUserId") == userId
+    }
+    return lineupIncludesUser || squadIncludesUser || claimedByUser
 }
 
-private fun DocumentSnapshot.toPlayerCricketMatch(): CricketMatch? {
+private fun DocumentSnapshot.toPlayerCricketMatch(teamLogosById: Map<String, String> = emptyMap()): CricketMatch? {
     val teamA = get("teamA") as? Map<*, *>
     val teamB = get("teamB") as? Map<*, *>
     val liveScore = get("liveScore") as? Map<*, *>
     val teamAName = getString("teamAName") ?: teamA?.get("name") as? String ?: "Team A"
     val teamBName = getString("teamBName") ?: teamB?.get("name") as? String ?: "Team B"
+    val teamAId = teamA?.get("teamId") as? String ?: getString("teamAId")
+    val teamBId = teamB?.get("teamId") as? String ?: getString("teamBId")
+    val teamALogo = (teamA?.get("logoUrl") as? String)
+        ?: (teamA?.get("teamLogoUrl") as? String)
+        ?: teamLogosById[teamAId]
+        ?: getString("teamALogoUrl")
+    val teamBLogo = (teamB?.get("logoUrl") as? String)
+        ?: (teamB?.get("teamLogoUrl") as? String)
+        ?: teamLogosById[teamBId]
+        ?: getString("teamBLogoUrl")
     val statusValue = (liveScore?.get("status") as? String)
         ?: getString("status")
         ?: getString("scheduleStatus")
@@ -312,9 +336,7 @@ private fun DocumentSnapshot.toPlayerCricketMatch(): CricketMatch? {
         "$runs/$wickets ($overs)"
     }
     val battingTeamId = liveScore?.get("battingTeamId") as? String
-    val teamAId = teamA?.get("teamId") as? String ?: getString("teamAId")
     val leftScore = liveScoreText.takeIf { battingTeamId != null && battingTeamId == teamAId }
-    val teamBId = teamB?.get("teamId") as? String ?: getString("teamBId")
     val innings = get("innings") as? List<*>
     fun inningsScore(teamId: String?): String? = innings.orEmpty()
         .mapNotNull { it as? Map<*, *> }
@@ -342,6 +364,7 @@ private fun DocumentSnapshot.toPlayerCricketMatch(): CricketMatch? {
         else -> "Upcoming"
     }
     return CricketMatch(
+        matchId = id,
         type = when {
             tournamentName.isNotBlank() || getString("tournamentId") != null ->
                 tournamentName.ifBlank { "TOURNAMENT MATCH" }.uppercase()
@@ -359,7 +382,9 @@ private fun DocumentSnapshot.toPlayerCricketMatch(): CricketMatch? {
         location = getString("venue")?.takeIf { it.isNotBlank() },
         live = live,
         accent = if (live) Color(0xFFFF5C65) else CricketBlue,
-        dateEpochMs = dateMillis
+        dateEpochMs = dateMillis,
+        leftLogoUrl = teamALogo?.takeIf { it.isNotBlank() },
+        rightLogoUrl = teamBLogo?.takeIf { it.isNotBlank() }
     )
 }
 
@@ -398,7 +423,8 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toCricketTeam(): Cric
         name,
         initials,
         location,
-        accents[(id.hashCode() and Int.MAX_VALUE) % accents.size]
+        accents[(id.hashCode() and Int.MAX_VALUE) % accents.size],
+        getString("logoUrl").orEmpty().ifBlank { getString("teamLogoUrl").orEmpty() }
     )
 }
 
@@ -482,7 +508,7 @@ fun MyCricketScreen(
     val participatedTournamentsState = rememberParticipatedTournaments(currentUserId)
     val playerMatchesState = rememberPlayerMatches(
         currentUserId,
-        joinedTeams.mapTo(linkedSetOf()) { it.id }
+        joinedTeams.associate { it.id to it.logoUrl }
     )
     val hostedTournamentsState by if (hostTournamentsViewModel != null) {
         hostTournamentsViewModel.uiState.collectAsState()
@@ -499,7 +525,7 @@ fun MyCricketScreen(
             .fillMaxSize()
             .background(CricketBg)
     ) {
-        CricketTopStrip(onMenuClick, selectedTab)
+        SportsXtremeAppBar(onMenuClick = onMenuClick)
         CricketTabs(selectedTab = selectedTab, onSelect = { page ->
             coroutineScope.launch { pagerState.animateScrollToPage(page) }
         })
@@ -540,7 +566,7 @@ fun MyCricketScreen(
                         "Matches you host will appear here."
                     }
                     when {
-                        playerMatchesState.loading -> item { AndroidView(factory = { context -> SkeletonMatchCardView(context) }, modifier = Modifier.fillMaxWidth().height(180.dp).padding(horizontal = 16.dp, vertical = 8.dp)) }
+                        playerMatchesState.loading -> item { CricketLoadingIndicator(Modifier.fillMaxWidth().height(180.dp)) }
                         playerMatchesState.error != null -> item {
                             TournamentFeedbackCard(
                                 title = "Couldn't load your matches",
@@ -670,7 +696,7 @@ private fun LazyListScope.hostedTournamentsContent(
     onDeleteClick: (Tournament) -> Unit
 ) {
     when (state) {
-        HostTournamentsViewModel.UiState.Loading -> item { AndroidView(factory = { context -> SkeletonMatchCardView(context) }, modifier = Modifier.fillMaxWidth().height(180.dp).padding(horizontal = 16.dp, vertical = 8.dp)) }
+        HostTournamentsViewModel.UiState.Loading -> item { CricketLoadingIndicator(Modifier.fillMaxWidth().height(180.dp)) }
 
         is HostTournamentsViewModel.UiState.Error -> item {
             TournamentFeedbackCard(
@@ -706,10 +732,7 @@ private fun LazyListScope.participatedTournamentsContent(
 ) {
     when (state) {
         HostTournamentsViewModel.UiState.Loading -> item {
-            AndroidView(
-                factory = { context -> SkeletonMatchCardView(context) },
-                modifier = Modifier.fillMaxWidth().height(180.dp).padding(horizontal = 16.dp, vertical = 8.dp)
-            )
+            CricketLoadingIndicator(Modifier.fillMaxWidth().height(180.dp))
         }
         is HostTournamentsViewModel.UiState.Error -> item {
             TournamentFeedbackCard(
@@ -955,12 +978,21 @@ private fun SegmentPills(
 
 @Composable
 private fun MatchCard(match: CricketMatch) {
+    val context = LocalContext.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(CricketCard)
             .border(1.dp, CricketStroke, RoundedCornerShape(18.dp))
+            .clickable {
+                if (match.matchId.isNotBlank()) {
+                    context.startActivity(
+                        Intent(context, ScorecardActivity::class.java)
+                            .putExtra(ScorecardActivity.EXTRA_MATCH_ID, match.matchId)
+                    )
+                }
+            }
             .padding(16.dp)
     ) {
         Column {
@@ -1044,8 +1076,8 @@ private fun MatchCard(match: CricketMatch) {
 @Composable
 private fun LiveMatchLayout(match: CricketMatch) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ScoreRow(match.left, match.leftScore ?: "Yet to bat")
-        ScoreRow(match.right, match.rightScore ?: "Yet to bat")
+        ScoreRow(match.left, match.leftScore ?: "Yet to bat", match.leftLogoUrl)
+        ScoreRow(match.right, match.rightScore ?: "Yet to bat", match.rightLogoUrl)
         Text("LIVE", color = Color(0xFFFF5C65), fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
@@ -1053,7 +1085,7 @@ private fun LiveMatchLayout(match: CricketMatch) {
 @Composable
 private fun UpcomingMatchLayout(match: CricketMatch) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        TeamNode(match.left, match.accent, Modifier.weight(1f))
+        TeamNode(match.left, match.accent, Modifier.weight(1f), match.leftLogoUrl)
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.width(100.dp)
@@ -1066,14 +1098,14 @@ private fun UpcomingMatchLayout(match: CricketMatch) {
             )
             Text(match.meta, color = CricketAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
-        TeamNode(match.right, match.accent, Modifier.weight(1f))
+        TeamNode(match.right, match.accent, Modifier.weight(1f), match.rightLogoUrl)
     }
 }
 
 @Composable
 private fun LiveSoonMatchLayout(match: CricketMatch) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        TeamNode(match.left, match.accent, Modifier.weight(1f))
+        TeamNode(match.left, match.accent, Modifier.weight(1f), match.leftLogoUrl)
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.width(100.dp)
@@ -1087,29 +1119,29 @@ private fun LiveSoonMatchLayout(match: CricketMatch) {
             )
             Text("AM", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         }
-        TeamNode(match.right, match.accent, Modifier.weight(1f))
+        TeamNode(match.right, match.accent, Modifier.weight(1f), match.rightLogoUrl)
     }
 }
 
 @Composable
 private fun FinishedMatchLayout(match: CricketMatch) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ScoreRow(match.left, match.leftScore ?: "")
-        ScoreRow(match.right, match.rightScore ?: "")
+        ScoreRow(match.left, match.leftScore ?: "", match.leftLogoUrl)
+        ScoreRow(match.right, match.rightScore ?: "", match.rightLogoUrl)
     }
 }
 
 @Composable
 private fun ScheduledMatchLayout(match: CricketMatch) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        BigTeamNode(match.left, match.accent, Modifier.weight(1f))
+        TeamNode(match.left, match.accent, Modifier.weight(1f), match.leftLogoUrl)
         Text(
             "vs",
             color = Color.White.copy(alpha = 0.3f),
             fontSize = 16.sp,
             fontStyle = FontStyle.Italic
         )
-        BigTeamNode(match.right, match.accent, Modifier.weight(1f))
+        TeamNode(match.right, match.accent, Modifier.weight(1f), match.rightLogoUrl)
     }
 }
 
@@ -1154,14 +1186,21 @@ private fun ResultMatchLayout(match: CricketMatch) {
 }
 
 @Composable
-private fun ScoreRow(team: String, score: String) {
+private fun ScoreRow(team: String, score: String, logoUrl: String? = null) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
                 .size(32.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.White.copy(alpha = 0.1f))
-        )
+                .background(Color.White.copy(alpha = 0.1f)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!logoUrl.isNullOrBlank()) {
+                AsyncImage(model = logoUrl, contentDescription = "$team logo", modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+            } else {
+                Text(team.take(1), color = CricketBlue, fontWeight = FontWeight.Bold)
+            }
+        }
         Spacer(Modifier.width(12.dp))
         Text(
             team,
@@ -1192,7 +1231,7 @@ private fun BigTeamNode(name: String, accent: Color, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun TeamNode(name: String, accent: Color, modifier: Modifier = Modifier) {
+private fun TeamNode(name: String, accent: Color, modifier: Modifier = Modifier, logoUrl: String? = null) {
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
@@ -1201,11 +1240,16 @@ private fun TeamNode(name: String, accent: Color, modifier: Modifier = Modifier)
                 .background(Color.White.copy(alpha = 0.1f)),
             contentAlignment = Alignment.Center
         ) {
-            Image(
-                painter = painterResource(R.drawable.ball),
-                contentDescription = null,
-                modifier = Modifier.size(40.dp)
-            )
+            if (!logoUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = logoUrl,
+                    contentDescription = "$name logo",
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Text(name.split(Regex("\\s+")).filter { it.isNotBlank() }.take(2).joinToString("") { it.first().uppercase() }.ifBlank { "TM" }, color = accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
         }
         Spacer(Modifier.height(8.dp))
         Text(
@@ -1574,10 +1618,22 @@ private fun StatsContent(userId: String?, teamIds: Set<String>) {
 
         Spacer(Modifier.height(20.dp))
         when {
-            stats.loading -> TournamentFeedbackCard("Loading your stats…", "Fetching your match scorecards.")
+            stats.loading -> CricketLoadingIndicator(Modifier.fillMaxWidth().height(160.dp))
             stats.error != null -> TournamentFeedbackCard("Couldn't load your stats", stats.error)
             else -> StatCategoryContent(selectedStatTab, stats)
         }
+    }
+}
+
+@Composable
+private fun CricketLoadingIndicator(modifier: Modifier = Modifier) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(34.dp),
+            color = CricketAccent,
+            trackColor = CricketAccent.copy(alpha = 0.18f),
+            strokeWidth = 3.dp
+        )
     }
 }
 
@@ -2137,12 +2193,21 @@ private fun TeamCard(team: CricketTeam) {
                 .background(team.accent),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                team.initials,
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
+            if (team.logoUrl.isNotBlank()) {
+                AsyncImage(
+                    model = team.logoUrl,
+                    contentDescription = "${team.name} logo",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Text(
+                    team.initials,
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {

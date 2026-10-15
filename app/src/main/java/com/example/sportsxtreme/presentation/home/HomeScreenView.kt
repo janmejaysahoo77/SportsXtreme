@@ -961,7 +961,12 @@ class HomeScreenView @JvmOverloads constructor(
 
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                addView(hostTopStrip(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)))
+                addView(
+                    ComposeView(context).apply {
+                        setContent { SportsXtremeAppBar(onMenuClick = { openDrawer() }) }
+                    },
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48))
+                )
 
                 lateinit var switchHostTab: (Int) -> Unit
                 var selectedHostTab = 0
@@ -1955,8 +1960,10 @@ class HomeScreenView @JvmOverloads constructor(
                 addView(TopIconView(context, TopIconView.Icon.SEARCH).apply {
                     setTint(Color.WHITE)
                 }, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
-                addView(TopIconView(context, TopIconView.Icon.BELL).apply {
-                    setTint(Color.WHITE)
+                addView(ImageView(context).apply {
+                    setImageResource(R.drawable.notification)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = "Notifications"
                 }, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)).apply {
                 topMargin = dp(20)

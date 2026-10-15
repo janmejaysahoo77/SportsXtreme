@@ -15,10 +15,12 @@ import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,7 +34,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,23 +47,60 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import android.widget.Toast
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.google.firebase.functions.FirebaseFunctions
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class AddPlayerByMobileNumberActivity : ComponentActivity() {
+    @Inject lateinit var functions: FirebaseFunctions
+    private var isSubmitting by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val teamId = intent.getStringExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_ID).orEmpty()
         setContent {
-            AddPlayerByMobileNumberScreen(onBack = { finish() }, onDone = { finish() })
+            AddPlayerByMobileNumberScreen(isSubmitting = isSubmitting, onBack = { finish() }, onDone = { players -> submitPlayers(teamId, players) })
         }
     }
+
+    private fun submitPlayers(teamId: String, players: List<ManualPlayerInput>) {
+        if (isSubmitting) return
+        if (teamId.isBlank()) {
+            Toast.makeText(this, "Team information is missing. Reopen Add Player and try again.", Toast.LENGTH_LONG).show()
+            return
+        }
+        isSubmitting = true
+        functions.getHttpsCallable("addTeamPlayersByMobile")
+            .call(mapOf("teamId" to teamId, "players" to players.map { mapOf("name" to it.name, "mobileNumber" to it.mobileNumber) }))
+            .addOnSuccessListener { result ->
+                val addedCount = ((result.data as? Map<*, *>)?.get("addedCount") as? Number)?.toInt() ?: players.size
+                Toast.makeText(this, "Added $addedCount player${if (addedCount == 1) "" else "s"} to the team roster.", Toast.LENGTH_LONG).show()
+                finish()
+            }
+            .addOnFailureListener { error ->
+                isSubmitting = false
+                Toast.makeText(this, error.message ?: "Unable to add players. Please try again.", Toast.LENGTH_LONG).show()
+            }
+    }
 }
+
+private data class ManualPlayerInput(val name: String, val mobileNumber: String)
 
 private val MobileAccent = Color(0xFFC1FF00)
 private val MobileBg = XtremeBgBlue
@@ -70,7 +110,39 @@ private val MobileMuted = Color(0xFFB7C0C7)
 private val MobileDim = Color(0xFF485061)
 
 @Composable
-private fun AddPlayerByMobileNumberScreen(onBack: () -> Unit, onDone: () -> Unit) {
+private fun AddPlayerByMobileNumberScreen(isSubmitting: Boolean, onBack: () -> Unit, onDone: (List<ManualPlayerInput>) -> Unit) {
+    var mobileNumber by rememberSaveable { mutableStateOf("") }
+    var playerName by rememberSaveable { mutableStateOf("") }
+    var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    val queuedPlayers = remember { mutableStateListOf<ManualPlayerInput>() }
+    val focusManager = LocalFocusManager.current
+
+    fun addCurrentPlayer(): Boolean {
+        val mobile = mobileNumber.filter(Char::isDigit)
+        val name = playerName.trim().replace(Regex("\\s+"), " ")
+        if (name.isBlank()) { errorMessage = "Enter the player's name."; return false }
+        if (name.length > 80) { errorMessage = "Player name must be 80 characters or fewer."; return false }
+        if (!Regex("[6-9]\\d{9}").matches(mobile)) { errorMessage = "Enter a valid 10-digit Indian mobile number."; return false }
+        if (queuedPlayers.any { it.mobileNumber == mobile }) { errorMessage = "This number is already in the list."; return false }
+        queuedPlayers.add(ManualPlayerInput(name, mobile))
+        mobileNumber = ""
+        playerName = ""
+        errorMessage = null
+        focusManager.clearFocus()
+        return true
+    }
+
+    fun submitPlayers() {
+        val hasCurrentInput = playerName.isNotBlank() || mobileNumber.isNotBlank()
+        val players = queuedPlayers.toMutableList()
+        if (hasCurrentInput) {
+            if (!addCurrentPlayer()) return
+            players.add(queuedPlayers.last())
+        }
+        if (players.isEmpty()) { errorMessage = "Add at least one player before continuing."; return }
+        onDone(players)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -92,18 +164,47 @@ private fun AddPlayerByMobileNumberScreen(onBack: () -> Unit, onDone: () -> Unit
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp)
             ) {
-                Spacer(Modifier.height(56.dp))
-                MobileInputCard()
-                AddAnotherButton(Modifier.padding(top = 34.dp))
+                Spacer(Modifier.height(34.dp))
+                MobileInputCard(mobileNumber, { value -> mobileNumber = value.filter(Char::isDigit).take(10) }, playerName, { playerName = it.take(80) })
                 Text(
-                    "QUEUE UP PLAYER BEFORE FINAL SYNC",
+                    "Adds the player to the roster now. Phone ownership verification will be added later.",
+                    color = MobileMuted,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.padding(horizontal = 3.dp).padding(top = 10.dp)
+                )
+                if (errorMessage != null) {
+                    Text(errorMessage.orEmpty(), color = Color(0xFFFF8A80), fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp, start = 4.dp))
+                }
+                AddAnotherButton(Modifier.padding(top = 24.dp), enabled = !isSubmitting) {
+                    addCurrentPlayer()
+                }
+                Text(
+                    "PLAYERS TO ADD (${queuedPlayers.size})",
                     color = MobileDim,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.2.sp,
                     modifier = Modifier.padding(top = 15.dp, start = 3.dp)
                 )
-                Spacer(Modifier.height(190.dp))
+                if (queuedPlayers.isNotEmpty()) {
+                    Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        queuedPlayers.forEachIndexed { index, player ->
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MobilePanel).padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("${index + 1}", color = MobileAccent, fontWeight = FontWeight.Black, fontSize = 15.sp)
+                                Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                                    Text(player.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text("+91 ${player.mobileNumber}", color = MobileMuted, fontSize = 12.sp)
+                                }
+                                Text("REMOVE", color = Color(0xFFFF8A80), fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.clickable(enabled = !isSubmitting) { queuedPlayers.removeAt(index) })
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(60.dp))
             }
             Box(
                 modifier = Modifier
@@ -117,16 +218,11 @@ private fun AddPlayerByMobileNumberScreen(onBack: () -> Unit, onDone: () -> Unit
                         .height(67.dp)
                         .clip(RoundedCornerShape(11.dp))
                         .background(MobileAccent)
-                        .clickable(onClick = onDone),
+                        .clickable(enabled = !isSubmitting, onClick = ::submitPlayers),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        "D O N E",
-                        color = Color(0xFF111604),
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 4.sp
-                    )
+                    if (isSubmitting) CircularProgressIndicator(color = Color(0xFF111604), strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                    else Text("D O N E", color = Color(0xFF111604), fontSize = 19.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp)
                 }
             }
         }
@@ -158,7 +254,7 @@ private fun MobileTopBar(onBack: () -> Unit) {
 }
 
 @Composable
-private fun MobileInputCard() {
+private fun MobileInputCard(mobileNumber: String, onMobileChange: (String) -> Unit, playerName: String, onNameChange: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -174,13 +270,9 @@ private fun MobileInputCard() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("+91", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-            Text(
-                "98765 43210",
-                color = MobileDim,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.padding(start = 13.dp)
-            )
+            BasicTextField(value = mobileNumber, onValueChange = onMobileChange, modifier = Modifier.padding(start = 13.dp).weight(1f), singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black), cursorBrush = SolidColor(MobileAccent), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                decorationBox = { inner -> Box { if (mobileNumber.isEmpty()) Text("98765 43210", color = MobileDim, fontSize = 22.sp, fontWeight = FontWeight.Black); inner() } })
         }
         DividerLine(Modifier.padding(top = 14.dp))
         FieldLabel("PLAYER NAME", Modifier.padding(top = 42.dp))
@@ -189,13 +281,9 @@ private fun MobileInputCard() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             PlayerIcon(Modifier.size(23.dp), MobileAccent)
-            Text(
-                "e.g. John Doe",
-                color = MobileDim,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.padding(start = 17.dp)
-            )
+            BasicTextField(value = playerName, onValueChange = onNameChange, modifier = Modifier.padding(start = 17.dp).weight(1f), singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold), cursorBrush = SolidColor(MobileAccent), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                decorationBox = { inner -> Box { if (playerName.isEmpty()) Text("e.g. John Doe", color = MobileDim, fontSize = 20.sp, fontWeight = FontWeight.Bold); inner() } })
         }
         DividerLine(Modifier.padding(top = 15.dp))
     }
@@ -232,14 +320,15 @@ private fun DividerLine(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun AddAnotherButton(modifier: Modifier = Modifier) {
+private fun AddAnotherButton(modifier: Modifier = Modifier, enabled: Boolean, onClick: () -> Unit) {
     Box(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 48.dp)
             .height(37.dp)
             .clip(RoundedCornerShape(8.dp))
-            .border(1.dp, Color(0xFF4D721A), RoundedCornerShape(8.dp)),
+            .border(1.dp, Color(0xFF4D721A), RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(

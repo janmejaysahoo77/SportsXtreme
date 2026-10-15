@@ -54,10 +54,10 @@ exports.createTournamentLogoUploadSignature = onCall({
   const assetId = typeof request.data?.assetId === "string" ? request.data.assetId.trim() : "";
   const assetType = typeof request.data?.assetType === "string" ? request.data.assetType.trim() : "logo";
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(assetId)) {
-    throw new HttpsError("invalid-argument", "A valid tournament logo upload ID is required.");
+    throw new HttpsError("invalid-argument", "A valid image upload ID is required.");
   }
-  if (!["logo", "banner"].includes(assetType)) {
-    throw new HttpsError("invalid-argument", "Tournament image type must be logo or banner.");
+  if (!["logo", "banner", "teamLogo"].includes(assetType)) {
+    throw new HttpsError("invalid-argument", "Image type must be logo, banner, or teamLogo.");
   }
 
   const cloudName = String(cloudinaryCloudName.value() || "").trim();
@@ -67,7 +67,9 @@ exports.createTournamentLogoUploadSignature = onCall({
     throw new HttpsError("failed-precondition", "Cloudinary is not configured on the server.");
   }
 
-  const folder = assetType === "banner" ? "tournament_banners" : "tournament_logos";
+  const folder = assetType === "teamLogo"
+    ? "team_logos"
+    : assetType === "banner" ? "tournament_banners" : "tournament_logos";
   const publicId = `${request.auth.uid}_${assetId}`;
   const timestamp = Math.floor(Date.now() / 1000);
   const signaturePayload = `folder=${folder}&overwrite=false&public_id=${publicId}&timestamp=${timestamp}`;
@@ -99,7 +101,14 @@ function isGoogleAccountPhotoUrl(value) {
   }
 }
 function storedMember(member, roles = memberRoles(member), playingRole = member?.playingRole || "PLAYER") {
-  return { userId: member.userId, roles: [...new Set(roles)], playingRole, joinedAtEpochMs: member.joinedAtEpochMs || Date.now() };
+  const stored = { userId: member.userId, roles: [...new Set(roles)], playingRole, joinedAtEpochMs: member.joinedAtEpochMs || Date.now() };
+  // Keep manually added, not-yet-registered roster entries intact when other
+  // team operations normalize the members array. Their phone is used later,
+  // after ownership is verified, to connect the player to an account.
+  for (const field of ["displayName", "phoneNumber", "isRegistered"]) {
+    if (member[field] !== undefined) stored[field] = member[field];
+  }
+  return stored;
 }
 async function teamInTransaction(transaction, teamId) {
   const ref = db.collection("teams").doc(teamId);
@@ -201,6 +210,61 @@ exports.createTeamInvite = onCall(async (request) => {
     }
   }
   throw new HttpsError("internal", "Unable to create a unique invitation. Please try again.");
+});
+
+function normalizeIndianMobile(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  const national = digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits;
+  return /^[6-9]\d{9}$/.test(national) ? `+91${national}` : null;
+}
+
+/** Adds unregistered roster placeholders; phone ownership is verified in a later OTP flow. */
+exports.addTeamPlayersByMobile = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before adding players.");
+  const teamId = requireTeamId(request.data?.teamId);
+  const inputs = request.data?.players;
+  if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_TEAM_MEMBERS) {
+    throw new HttpsError("invalid-argument", "Add between 1 and 18 players.");
+  }
+
+  const players = inputs.map((input) => {
+    const displayName = typeof input?.name === "string" ? input.name.trim().replace(/\s+/g, " ") : "";
+    const phoneNumber = normalizeIndianMobile(input?.mobileNumber);
+    if (!displayName || displayName.length > 80) throw new HttpsError("invalid-argument", "Enter a player name up to 80 characters.");
+    if (!phoneNumber) throw new HttpsError("invalid-argument", `Enter a valid Indian mobile number for ${displayName}.`);
+    return { displayName, phoneNumber };
+  });
+  if (new Set(players.map((player) => player.phoneNumber)).size !== players.length) {
+    throw new HttpsError("invalid-argument", "A mobile number appears more than once in this list.");
+  }
+
+  return db.runTransaction(async (transaction) => {
+    const { ref, members } = await teamInTransaction(transaction, teamId);
+    const actor = findMember(members, request.auth.uid);
+    if (!isManager(actor) && !hasRole(actor, ROLES.VICE_CAPTAIN)) {
+      throw new HttpsError("permission-denied", "Only a team admin, captain, or vice-captain can add players.");
+    }
+    const existingPhones = new Set(members.map((member) => normalizeIndianMobile(member.phoneNumber)).filter(Boolean));
+    if (players.some((player) => existingPhones.has(player.phoneNumber))) {
+      throw new HttpsError("already-exists", "A player with this mobile number is already on the team.");
+    }
+    if (members.length + players.length > MAX_TEAM_MEMBERS) {
+      throw new HttpsError("failed-precondition", `A team can have at most ${MAX_TEAM_MEMBERS} players.`);
+    }
+
+    const addedMembers = players.map(({ displayName, phoneNumber }) => ({
+      userId: `pending_${crypto.createHash("sha256").update(`${teamId}:${phoneNumber}`).digest("hex").slice(0, 32)}`,
+      displayName,
+      phoneNumber,
+      isRegistered: false,
+      roles: [],
+      playingRole: "PLAYER",
+      joinedAtEpochMs: Date.now()
+    }));
+    const updated = [...members.map((member) => storedMember(member)), ...addedMembers];
+    transaction.update(ref, { members: updated, memberIds: updated.map((member) => member.userId), updatedAtEpochMs: Date.now() });
+    return { teamId, addedCount: addedMembers.length };
+  });
 });
 
 exports.joinTeamInvite = onCall(async (request) => {

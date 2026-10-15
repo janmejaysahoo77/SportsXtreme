@@ -1,10 +1,14 @@
 package com.example.sportsxtreme.presentation.team
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -23,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -47,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
+import coil3.compose.AsyncImage
+import com.example.sportsxtreme.data.remote.cloudinary.CloudinaryTournamentImageUploader
 import com.example.sportsxtreme.R
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -59,7 +66,7 @@ import kotlinx.coroutines.tasks.await
 class CreateTeamActivity : ComponentActivity() {
     @Inject lateinit var firebaseAuth: FirebaseAuth
     @Inject lateinit var firestore: FirebaseFirestore
-    private var isSavingTeam = false
+    private var isSavingTeam by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,13 +74,13 @@ class CreateTeamActivity : ComponentActivity() {
         window.statusBarColor = android.graphics.Color.rgb(2, 11, 18)
         window.navigationBarColor = android.graphics.Color.rgb(2, 11, 18)
         setContent {
-            CreateTeamScreen(::finish) { teamName, city, captainName, captainMobile ->
-                saveTeamAndContinue(teamName, city, captainName, captainMobile)
+            CreateTeamScreen(::finish, isSavingTeam) { teamName, city, captainName, captainMobile, logoUri ->
+                saveTeamAndContinue(teamName, city, captainName, captainMobile, logoUri)
             }
         }
     }
 
-    private fun saveTeamAndContinue(teamName: String, city: String, captainName: String, captainMobile: String) {
+    private fun saveTeamAndContinue(teamName: String, city: String, captainName: String, captainMobile: String, logoUri: Uri?) {
         if (isSavingTeam) return
         val userId = firebaseAuth.currentUser?.uid ?: run {
             Toast.makeText(this, "Sign in to create a team", Toast.LENGTH_SHORT).show()
@@ -83,6 +90,11 @@ class CreateTeamActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 val teamRef = firestore.collection("teams").document()
+                val logoUrl = logoUri?.let { selectedUri ->
+                    CloudinaryTournamentImageUploader(applicationContext)
+                        .upload(selectedUri, teamRef.id, "teamLogo")
+                        .getOrElse { throw it }
+                }.orEmpty()
                 // The creator is always the initial admin and captain. These are
                 // independent roles, so one member can legitimately hold both.
                 val members = listOf(
@@ -97,6 +109,7 @@ class CreateTeamActivity : ComponentActivity() {
                     mapOf(
                         "teamId" to teamRef.id,
                         "teamName" to teamName,
+                        "logoUrl" to logoUrl,
                         "shortName" to teamName.take(3).uppercase(),
                         "city" to city,
                         "cityTown" to city,
@@ -139,10 +152,14 @@ class CreateTeamActivity : ComponentActivity() {
     private val border = Color(0xFF26343C)
 
     @Composable
-    private fun CreateTeamScreen(onBack: () -> Unit, onContinue: (String, String, String, String) -> Unit) {
+    private fun CreateTeamScreen(onBack: () -> Unit, isSaving: Boolean, onContinue: (String, String, String, String, Uri?) -> Unit) {
         var teamName by rememberSaveable { mutableStateOf("") }; var city by rememberSaveable { mutableStateOf("") }
         var mobile by rememberSaveable { mutableStateOf("") }; var captain by rememberSaveable { mutableStateOf("") }
         var showRequiredErrors by rememberSaveable { mutableStateOf(false) }
+        var selectedLogo by rememberSaveable { mutableStateOf<String?>(null) }
+        val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri != null) selectedLogo = uri.toString()
+        }
         val focusManager = LocalFocusManager.current
 
         // Prefer the saved profile; Firebase Auth covers profiles that are still being created.
@@ -171,7 +188,9 @@ class CreateTeamActivity : ComponentActivity() {
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                 Header(onBack)
                 Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    ScreenTitle(); LogoPicker()
+                    ScreenTitle(); LogoPicker(selectedLogo, isSaving) {
+                        logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
                     Text("Team Logo", color = textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
                     Text("Upload your team logo", color = textSecondary, fontSize = 11.sp); Spacer(Modifier.height(14.dp))
                     TeamTextField("TEAM NAME *", "Enter your team name", teamName, { if (it.length <= 30) teamName = it }, R.drawable.baseline_check_circle_24, counter = "${teamName.length}/30", error = if (showRequiredErrors && teamName.isBlank()) "Team name is required" else null)
@@ -181,11 +200,11 @@ class CreateTeamActivity : ComponentActivity() {
                     CreatorRoleCard()
                     Spacer(Modifier.height(100.dp))
                 }
-                CreateButton(enabled = teamName.isNotBlank() && city.isNotBlank() && captain.isNotBlank() && mobile.isNotBlank()) {
+                CreateButton(enabled = !isSaving && teamName.isNotBlank() && city.isNotBlank() && captain.isNotBlank() && mobile.isNotBlank(), isSaving = isSaving) {
                     if (teamName.isBlank() || city.isBlank() || captain.isBlank() || mobile.isBlank()) {
                         showRequiredErrors = true
                     } else {
-                        onContinue(teamName.trim(), city.trim(), captain.trim(), mobile.trim())
+                        onContinue(teamName.trim(), city.trim(), captain.trim(), mobile.trim(), selectedLogo?.let(Uri::parse))
                     }
                 }
             }
@@ -202,8 +221,23 @@ class CreateTeamActivity : ComponentActivity() {
         }
     }
     @Composable private fun ScreenTitle() { Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) { Text("CREATE ", color = brandBlue, fontSize = 23.sp, fontWeight = FontWeight.Black); Text("YOUR TEAM", color = textPrimary, fontSize = 23.sp, fontWeight = FontWeight.Black) }; Text("Let's Build Your Xtreme Team", color = textPrimary.copy(.76f), fontSize = 12.sp, fontStyle = FontStyle.Italic, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)) }
-    @Composable private fun LogoPicker() = Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.fillMaxSize().border(1.dp, accent.copy(.58f), CircleShape)); Box(Modifier.size(118.dp).background(elevatedSurface, CircleShape).border(1.dp, accent.copy(.65f), CircleShape), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(painterResource(R.drawable.baseline_camera_alt_24), null, tint = textPrimary, modifier = Modifier.size(34.dp)); Text("ADD LOGO", color = textPrimary, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 5.dp)) } }; Box(Modifier.align(Alignment.TopEnd).size(30.dp).background(accent, CircleShape).border(2.dp, background, CircleShape), contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.baseline_add_24), null, tint = background, modifier = Modifier.size(19.dp)) }
+    @Composable private fun LogoPicker(selectedLogo: String?, isSaving: Boolean, onClick: () -> Unit) = Box(
+        Modifier.size(132.dp).clickable(enabled = !isSaving, onClick = onClick), contentAlignment = Alignment.Center
+    ) {
+        Box(Modifier.fillMaxSize().border(1.dp, accent.copy(.58f), CircleShape))
+        Box(Modifier.size(118.dp).clip(CircleShape).background(elevatedSurface).border(1.dp, accent.copy(.65f), CircleShape), contentAlignment = Alignment.Center) {
+            if (selectedLogo != null) {
+                AsyncImage(model = Uri.parse(selectedLogo), contentDescription = "Selected team logo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(painterResource(R.drawable.baseline_camera_alt_24), null, tint = textPrimary, modifier = Modifier.size(34.dp))
+                    Text("ADD LOGO", color = textPrimary, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 5.dp))
+                }
+            }
+        }
+        Box(Modifier.align(Alignment.BottomEnd).size(30.dp).background(accent, CircleShape).border(2.dp, background, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(painterResource(R.drawable.baseline_add_24), null, tint = background, modifier = Modifier.size(19.dp))
+        }
     }
     @Composable
     private fun TeamTextField(label: String, placeholder: String, value: String, onValueChange: (String) -> Unit, icon: Int, keyboardType: KeyboardType = KeyboardType.Text, counter: String? = null, error: String? = null) {
@@ -252,5 +286,11 @@ class CreateTeamActivity : ComponentActivity() {
         }
     }
     @Composable private fun CreatorRoleCard() = Row(Modifier.fillMaxWidth().padding(top = 11.dp).background(surface, RoundedCornerShape(10.dp)).border(1.dp, accent.copy(.55f), RoundedCornerShape(10.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(34.dp).background(accent.copy(.13f), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.outline_groups_24), null, tint = accent, modifier = Modifier.size(21.dp)) }; Column(Modifier.padding(start = 10.dp).weight(1f)) { Text("You will lead this team", color = textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp); Text("You will be added as its admin and captain.", color = textSecondary, fontSize = 10.sp) } }
-    @Composable private fun CreateButton(enabled: Boolean, onContinue: () -> Unit) = Box(Modifier.fillMaxWidth().padding(bottom = 10.dp, top = 4.dp).height(54.dp).background(if (enabled) Brush.horizontalGradient(listOf(accent, accentGreen)) else Brush.horizontalGradient(listOf(border, border)), RoundedCornerShape(10.dp)).clickable(onClick = onContinue), contentAlignment = Alignment.Center) { Text("Create Team", color = if (enabled) background else textSecondary, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold); Icon(painterResource(R.drawable.outline_arrow_back_ios_24), null, tint = if (enabled) background else textSecondary, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 17.dp).size(20.dp).graphicsLayer(rotationZ = 180f)) }
+    @Composable private fun CreateButton(enabled: Boolean, isSaving: Boolean, onContinue: () -> Unit) = Box(Modifier.fillMaxWidth().padding(bottom = 10.dp, top = 4.dp).height(54.dp).background(if (enabled) Brush.horizontalGradient(listOf(accent, accentGreen)) else Brush.horizontalGradient(listOf(border, border)), RoundedCornerShape(10.dp)).clickable(enabled = enabled, onClick = onContinue), contentAlignment = Alignment.Center) {
+        if (isSaving) CircularProgressIndicator(color = background, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+        else {
+            Text("Create Team", color = if (enabled) background else textSecondary, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+            Icon(painterResource(R.drawable.outline_arrow_back_ios_24), null, tint = if (enabled) background else textSecondary, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 17.dp).size(20.dp).graphicsLayer(rotationZ = 180f))
+        }
+    }
 }
