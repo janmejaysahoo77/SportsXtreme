@@ -56,6 +56,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
@@ -233,6 +234,7 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                 match = uiState.match,
                 teamA = uiState.selectedTeamA,
                 teamB = uiState.selectedTeamB,
+                isCreatingMatch = uiState.isCreatingMatch,
                 isTournamentScheduleFlow = false,
                 tournamentName = tournamentName.takeIf { isTournamentMatchFlow && it.isNotBlank() },
                 onBack = { finish() },
@@ -332,10 +334,10 @@ private fun Intent.copyTeamSelectionExtras(): Bundle = Bundle().apply {
 }
 
 private val TeamsAccent = XtremeLime
-private val TeamsBg = XtremeBgBlue
-private val TeamsPanel = XtremeCardBlue
-private val TeamsCard = XtremeCardBlue
-private val TeamsStroke = XtremeCardBorder
+private val TeamsBg = Color(0xFF0A101C)
+private val TeamsPanel = BlueCardBackGround
+private val TeamsCard = BlueCardBackGround
+private val TeamsStroke = Color(0xFF26394B)
 private val TeamsBlue = Color(0xFF1D67FF)
 private val TeamsMuted = XtremeMuted
 
@@ -344,6 +346,7 @@ private fun SelectPlayingTeamsScreen(
     match: Match?,
     teamA: SelectedTeam?,
     teamB: SelectedTeam?,
+    isCreatingMatch: Boolean = false,
     isTournamentScheduleFlow: Boolean,
     tournamentName: String? = null,
     selectedStage: String = "",
@@ -421,6 +424,7 @@ private fun SelectPlayingTeamsScreen(
             if (!isTournamentScheduleFlow) {
                 StartMatchFadeAnimationWillOpen(
                     visible = showStartMatchFade,
+                    isCreatingMatch = isCreatingMatch,
                     onStartMatch = {
                         val selectedA = displayedTeamA
                         val selectedB = displayedTeamB
@@ -598,8 +602,8 @@ private fun MatchPreviewCard(teamA: SelectedTeam?, teamB: SelectedTeam?, modifie
                 .padding(horizontal = 44.dp, vertical = 17.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            PreviewTeamIcon(teamA)
-            PreviewTeamIcon(teamB)
+            PreviewTeamIcon(teamA, "A")
+            PreviewTeamIcon(teamB, "B")
         }
         Text(
             if (teamA != null && teamB != null) {
@@ -617,19 +621,22 @@ private fun MatchPreviewCard(teamA: SelectedTeam?, teamB: SelectedTeam?, modifie
 }
 
 @Composable
-private fun PreviewTeamIcon(team: SelectedTeam?) {
-    Box(
-        modifier = Modifier
-            .size(46.dp)
-            .drawBehind {
-                drawCircle(Color(0x335B6E34), radius = size.minDimension * 0.48f)
-                drawCircle(Color(0xFF2F3E22), radius = size.minDimension * 0.39f, style = Stroke(width = 1.dp.toPx()))
-                drawCircle(Color(0xFF111A21), radius = size.minDimension * 0.32f)
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        if (team == null) TeamBenchIcon(Modifier.size(23.dp), TeamsAccent)
-        else TemporaryTeamLogo(team = team, modifier = Modifier.size(33.dp))
+private fun PreviewTeamIcon(team: SelectedTeam?, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .drawBehind {
+                    drawCircle(Color(0x33366DFF), radius = size.minDimension * 0.48f)
+                    drawCircle(Color(0xFF328AC0), radius = size.minDimension * 0.39f, style = Stroke(width = 1.dp.toPx()))
+                    drawCircle(Color(0xFF111A29), radius = size.minDimension * 0.32f)
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (team == null) Text(label, color = TeamsAccent, fontSize = 16.sp, fontWeight = FontWeight.Black)
+            else TemporaryTeamLogo(team = team, modifier = Modifier.size(33.dp))
+        }
+        Text(label, color = TeamsAccent, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 3.dp))
     }
 }
 
@@ -680,19 +687,31 @@ private fun TemporaryTeamLogo(team: SelectedTeam, modifier: Modifier = Modifier)
             },
         contentAlignment = Alignment.Center
     ) {
-        TeamBenchIcon(Modifier.size(34.dp), TeamsAccent)
         Text(
-            team.name.take(2).uppercase(),
+            teamInitials(team.name),
             color = Color.White,
-            fontSize = 8.sp,
+            fontSize = 18.sp,
             fontWeight = FontWeight.Black,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp)
+            maxLines = 1
         )
     }
 }
 
+private fun teamInitials(teamName: String): String {
+    val words = teamName.trim().split(Regex("\\s+")).filter(String::isNotBlank)
+    return when {
+        words.isEmpty() -> "?"
+        words.size == 1 -> words.first().take(2).uppercase()
+        else -> words.take(3).joinToString("") { it.take(1).uppercase() }
+    }
+}
+
 @Composable
-private fun StartMatchFadeAnimationWillOpen(visible: Boolean, onStartMatch: () -> Unit) {
+private fun StartMatchFadeAnimationWillOpen(
+    visible: Boolean,
+    isCreatingMatch: Boolean,
+    onStartMatch: () -> Unit
+) {
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(tween(600)) + scaleIn(initialScale = 0.92f, animationSpec = tween(600))
@@ -701,37 +720,24 @@ private fun StartMatchFadeAnimationWillOpen(visible: Boolean, onStartMatch: () -
             modifier = Modifier
                 .padding(top = 24.dp)
                 .clip(RoundedCornerShape(18.dp))
-                .background(TeamsAccent)
-                .clickable(onClick = onStartMatch)
+                .background(if (isCreatingMatch) Color(0xFFB6D96A) else TeamsAccent)
+                .clickable(enabled = !isCreatingMatch, onClick = onStartMatch)
                 .padding(horizontal = 22.dp, vertical = 10.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                "START MATCH",
-                color = Color(0xFF111604),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Black
-            )
+            if (isCreatingMatch) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = Color(0xFF111604),
+                        strokeWidth = 2.dp
+                    )
+                    Text("CREATING MATCH...", color = Color(0xFF111604), fontSize = 12.sp, fontWeight = FontWeight.Black)
+                }
+            } else {
+                Text("START MATCH", color = Color(0xFF111604), fontSize = 12.sp, fontWeight = FontWeight.Black)
+            }
         }
-    }
-}
-
-@Composable
-internal fun TeamBenchIcon(modifier: Modifier, tint: Color) {
-    Canvas(modifier) {
-        val stroke = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
-        drawRoundRect(
-            color = tint,
-            topLeft = Offset(size.width * 0.18f, size.height * 0.38f),
-            size = Size(size.width * 0.64f, size.height * 0.28f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx(), 2.dp.toPx()),
-            style = stroke
-        )
-        drawLine(tint, Offset(size.width * 0.28f, size.height * 0.66f), Offset(size.width * 0.28f, size.height * 0.84f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.72f, size.height * 0.66f), Offset(size.width * 0.72f, size.height * 0.84f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.12f, size.height * 0.84f), Offset(size.width * 0.88f, size.height * 0.84f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawCircle(tint, radius = size.minDimension * 0.12f, center = Offset(size.width * 0.33f, size.height * 0.22f), style = stroke)
-        drawCircle(tint, radius = size.minDimension * 0.12f, center = Offset(size.width * 0.67f, size.height * 0.22f), style = stroke)
     }
 }
 

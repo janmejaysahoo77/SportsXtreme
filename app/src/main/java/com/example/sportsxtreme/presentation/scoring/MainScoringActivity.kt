@@ -214,8 +214,26 @@ private fun MainScoringScreen(
                     .padding(horizontal = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                BatterMini("STRIKER", matchState?.striker?.displayName ?: "Select batter", (striker?.runs ?: 0).toString(), "(${striker?.balls ?: 0})", ScoringAccent, Modifier)
-                BatterMini("NON-STR", matchState?.nonStriker?.displayName ?: "Select batter", (nonStriker?.runs ?: 0).toString(), "(${nonStriker?.balls ?: 0})", ScoringStroke, Modifier)
+                BatterMini(
+                    "STRIKER",
+                    matchState?.striker?.displayName ?: "Select batter",
+                    (striker?.runs ?: 0).toString(),
+                    "(${striker?.balls ?: 0})",
+                    striker?.fours ?: 0,
+                    striker?.sixes ?: 0,
+                    ScoringAccent,
+                    Modifier
+                )
+                BatterMini(
+                    "NON-STR",
+                    matchState?.nonStriker?.displayName ?: "Select batter",
+                    (nonStriker?.runs ?: 0).toString(),
+                    "(${nonStriker?.balls ?: 0})",
+                    nonStriker?.fours ?: 0,
+                    nonStriker?.sixes ?: 0,
+                    ScoringStroke,
+                    Modifier
+                )
                 BowlerMini(matchState?.bowler?.displayName ?: "Select bowler", bowler?.overs?.display ?: "0.0", bowler?.economy ?: 0.0, bowler?.wickets ?: 0, bowler?.runsConceded ?: 0, Modifier)
             }
             Spacer(Modifier.weight(2f))
@@ -419,7 +437,16 @@ private fun ScoreSummaryCard(score: String, overs: String, runRate: Double, targ
 
 // ── Compact Batter / Bowler cards ────────────────────────
 @Composable
-private fun BatterMini(label: String, name: String, runs: String, balls: String, accent: Color, modifier: Modifier) {
+private fun BatterMini(
+    label: String,
+    name: String,
+    runs: String,
+    balls: String,
+    fours: Int,
+    sixes: Int,
+    accent: Color,
+    modifier: Modifier
+) {
     val isStriker = accent != ScoringStroke
     Row(
         modifier = modifier
@@ -434,7 +461,7 @@ private fun BatterMini(label: String, name: String, runs: String, balls: String,
         Column(modifier = Modifier.weight(1f)) {
             Text(label, color = if (isStriker) accent else ScoringMuted, fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 0.8.sp)
             Text(name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-            Text(if (isStriker) "4s: 2  6s: 1" else "4s: 1  6s: 0", color = ScoringMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 2.dp))
+            Text("4s: $fours  6s: $sixes", color = ScoringMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 2.dp))
         }
         Column(horizontalAlignment = Alignment.End) {
             Row(verticalAlignment = Alignment.Bottom) {

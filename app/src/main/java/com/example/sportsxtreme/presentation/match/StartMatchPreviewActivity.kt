@@ -13,6 +13,8 @@ import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.os.Bundle
 import android.content.Intent
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -36,6 +38,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.Text
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,16 +71,27 @@ import androidx.core.view.WindowCompat
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import com.example.sportsxtreme.domain.model.Match
+import com.example.sportsxtreme.domain.model.Team
+import com.example.sportsxtreme.domain.repository.TeamRepository
+import com.example.sportsxtreme.common.Resource
+import com.example.sportsxtreme.domain.model.MatchFormat
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import coil3.compose.AsyncImage
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import java.text.SimpleDateFormat
 import java.util.Locale
 
 @AndroidEntryPoint
 class StartMatchPreviewActivity : ComponentActivity() {
     @Inject lateinit var matchUseCases: MatchUseCases
+    @Inject lateinit var teamRepository: TeamRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,10 +106,40 @@ class StartMatchPreviewActivity : ComponentActivity() {
         val viewModel: StartMatchPreviewViewModel by viewModels {
             StartMatchPreviewViewModel.factory(matchId, matchUseCases)
         }
+        val teams = androidx.compose.runtime.mutableStateOf<Map<String, Team>>(emptyMap())
+        val teamLogos = androidx.compose.runtime.mutableStateOf<Map<String, String>>(emptyMap())
+        val firestore = FirebaseFirestore.getInstance()
+        val teamListeners = mutableMapOf<String, ListenerRegistration>()
+        lifecycleScope.launch {
+            viewModel.uiState.collect { state ->
+                val match = state.match ?: return@collect
+                listOf(match.teamA.teamId, match.teamB.teamId).forEach { id ->
+                    if (id.isNotBlank() && id !in teamListeners) {
+                        teamListeners[id] = firestore.collection("teams").document(id).addSnapshotListener { doc, _ ->
+                            if (doc != null && doc.exists()) {
+                                val logo = listOf("logoUrl", "teamLogoUrl", "photoUrl").firstNotNullOfOrNull { doc.getString(it)?.takeIf(String::isNotBlank) }.orEmpty()
+                                teamLogos.value = teamLogos.value + (id to logo)
+                            }
+                        }
+                        lifecycleScope.launch {
+                            when (val result = teamRepository.getTeam(id)) {
+                                is Resource.Success -> result.data?.let { teams.value = teams.value + (id to it) }
+                                else -> Unit
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onDestroy(owner: androidx.lifecycle.LifecycleOwner) { teamListeners.values.forEach { it.remove() } }
+        })
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             StartMatchPreviewScreen(
                 match = uiState.match,
+                teams = teams.value,
+                teamLogos = teamLogos.value,
                 tournamentName = tournamentName,
                 selectedStage = selectedStage,
                 onBack = { finish() },
@@ -125,19 +172,24 @@ private val PreviewBlue = Color(0xFF70B9FF)
 
 private data class PreviewSelectedTeam(
     val id: String,
-    val name: String
+    val name: String,
+    val playerCount: Int,
+    val logoUrl: String
 )
 
 @Composable
 private fun StartMatchPreviewScreen(
     match: Match?,
+    teams: Map<String, Team>,
+    teamLogos: Map<String, String>,
     tournamentName: String,
     selectedStage: String,
     onBack: () -> Unit,
     onContinue: () -> Unit
 ) {
-    val teamA = match?.teamA?.let { PreviewSelectedTeam(it.teamId, it.name) }
-    val teamB = match?.teamB?.let { PreviewSelectedTeam(it.teamId, it.name) }
+    var showAdvancedSettings by remember { mutableStateOf(false) }
+    val teamA = match?.teamA?.let { selected -> PreviewSelectedTeam(selected.teamId, selected.name, teams[selected.teamId]?.players?.size ?: 0, teamLogos[selected.teamId].orEmpty()) }
+    val teamB = match?.teamB?.let { selected -> PreviewSelectedTeam(selected.teamId, selected.name, teams[selected.teamId]?.players?.size ?: 0, teamLogos[selected.teamId].orEmpty()) }
 
     Box(
         modifier = Modifier
@@ -168,7 +220,7 @@ private fun StartMatchPreviewScreen(
                 MatchInformation(match = match)
                 MatchVenue(match = match)
                 BallTypeSection(match = match)
-                AdvancedSettingsCard()
+                AdvancedSettingsCard(onClick = { showAdvancedSettings = true })
                 ScheduleMatchSection(match = match)
                 Spacer(Modifier.height(100.dp))
             }
@@ -195,6 +247,15 @@ private fun StartMatchPreviewScreen(
                 Text("  ->", color = Color(0xFF111604), fontSize = 16.sp, fontWeight = FontWeight.Black)
             }
         }
+    }
+    if (showAdvancedSettings) {
+        AdvancedSettingsSheet(
+            initialOvers = match?.overs ?: 20,
+            onDismiss = { showAdvancedSettings = false },
+            onApply = { _, _ ->
+                showAdvancedSettings = false
+            }
+        )
     }
 }
 
@@ -299,7 +360,7 @@ private fun MatchHeroCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             HeroTeam(
-                team = teamA ?: PreviewSelectedTeam("team-a", "Team A"),
+                team = teamA ?: PreviewSelectedTeam("team-a", "Team A", 0, ""),
                 modifier = Modifier.weight(1f)
             )
             Box(
@@ -313,7 +374,7 @@ private fun MatchHeroCard(
                 Text("VS", color = Color(0xFF111604), fontSize = 16.sp, fontWeight = FontWeight.Black)
             }
             HeroTeam(
-                team = teamB ?: PreviewSelectedTeam("team-b", "Team B"),
+                team = teamB ?: PreviewSelectedTeam("team-b", "Team B", 0, ""),
                 modifier = Modifier.weight(1f)
             )
         }
@@ -330,7 +391,11 @@ private fun HeroTeam(team: PreviewSelectedTeam, modifier: Modifier = Modifier) {
                 .background(Brush.radialGradient(listOf(Color(0xFF111D35), Color(0xFF070D18)), radius = 100f)),
             contentAlignment = Alignment.Center
         ) {
-            PreviewTemporaryTeamLogo(team = team, modifier = Modifier.size(74.dp))
+            if (team.logoUrl.isNotBlank()) {
+                AsyncImage(model = team.logoUrl, contentDescription = "${team.name} logo", modifier = Modifier.size(74.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+            } else {
+                PreviewTemporaryTeamLogo(team = team, modifier = Modifier.size(74.dp))
+            }
         }
         Text(
             team.name,
@@ -345,7 +410,7 @@ private fun HeroTeam(team: PreviewSelectedTeam, modifier: Modifier = Modifier) {
         )
         Row(modifier = Modifier.padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             PreviewPeopleIcon(Modifier.size(14.dp), PreviewMuted)
-            Text("12 PLAYERS", color = PreviewMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 4.dp))
+            Text("${team.playerCount} PLAYERS", color = PreviewMuted, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 4.dp))
         }
     }
 }
@@ -360,23 +425,22 @@ private fun PreviewTemporaryTeamLogo(team: PreviewSelectedTeam, modifier: Modifi
             },
         contentAlignment = Alignment.Center
     ) {
-        TeamBenchIcon(Modifier.size(34.dp), PreviewAccent)
         Text(
-            team.name.take(2).uppercase(),
+            team.name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
             color = Color.White,
-            fontSize = 8.sp,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp)
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Black
         )
     }
 }
 
 @Composable
 private fun MatchInformation(match: Match?) {
-    val formatStr = match?.format?.name?.replace('_', ' ') ?: "Limited Overs"
-    val isTest = match?.format?.name?.contains("TEST", ignoreCase = true) == true
-    val oversStr = match?.overs?.toString() ?: "20"
-    val oversPerBowler = match?.overs?.let { ((it + 4) / 5).coerceAtLeast(1).toString() } ?: "-"
+    val formatStr = match?.format?.name?.replace('_', ' ') ?: "Not set"
+    val isTest = match?.format == MatchFormat.TEST
+    val matchTypeStr = match?.matchType?.name?.replace('_', ' ') ?: "Not set"
+    val oversStr = match?.overs?.toString() ?: "Not set"
+    val oversPerBowler = if (match?.overs != null && match.format != MatchFormat.TEST) ((match.overs + 4) / 5).coerceAtLeast(1).toString() else "Not set"
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionHeader("Match Information", "Configure match format and playing conditions.")
@@ -390,11 +454,11 @@ private fun MatchInformation(match: Match?) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MatchInfoTile(formatStr, "FORMAT", selected = !isTest, modifier = Modifier.weight(1f)) {
+                MatchInfoTile(formatStr, "FORMAT", selected = !isTest && match?.format != null, modifier = Modifier.weight(1f)) {
                     PreviewBallIcon(Modifier.size(20.dp), PreviewAccent)
                 }
-                MatchInfoTile("Test Match", null, selected = isTest, modifier = Modifier.weight(1f)) {
-                    PreviewStumpsIcon(Modifier.size(19.dp), if (isTest) PreviewAccent else PreviewMuted)
+                MatchInfoTile(matchTypeStr, "MATCH TYPE", selected = false, modifier = Modifier.weight(1f)) {
+                    PreviewStumpsIcon(Modifier.size(19.dp), PreviewMuted)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -480,7 +544,7 @@ private fun VenueField(label: String, value: String, icon: @Composable () -> Uni
 @Composable
 private fun BallTypeSection(match: Match?) {
     val ballTypeName = match?.ballType?.name.orEmpty()
-    val isTennis = ballTypeName.contains("TENNIS", ignoreCase = true) || ballTypeName.isBlank()
+    val isTennis = ballTypeName.contains("TENNIS", ignoreCase = true)
     val isLeather = ballTypeName.contains("LEATHER", ignoreCase = true)
     val isOther = !isTennis && !isLeather
 
@@ -523,10 +587,11 @@ private fun BallTypeCard(title: String, imageRes: Int, selected: Boolean, modifi
 }
 
 @Composable
-private fun AdvancedSettingsCard() {
+private fun AdvancedSettingsCard(onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .height(84.dp)
             .pureNeonGlow(NeonYellow.copy(alpha = 0.65f), 18.dp, 14.dp)
             .clip(RoundedCornerShape(14.dp))
@@ -544,11 +609,90 @@ private fun AdvancedSettingsCard() {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun AdvancedSettingsSheet(
+    initialOvers: Int,
+    onDismiss: () -> Unit,
+    onApply: (String, Int) -> Unit
+) {
+    var pitch by remember { mutableStateOf("Grass") }
+    var powerplayChoice by remember { mutableStateOf(initialOvers.coerceIn(1, 10).toString()) }
+    var customOvers by remember { mutableStateOf("") }
+    val choices = listOf("4", "6", "8", "10").filter { it.toInt() <= initialOvers.coerceAtLeast(1) } + "Custom"
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = PreviewPanel,
+        contentColor = Color.White,
+        dragHandle = { Box(Modifier.padding(top = 10.dp).size(width = 42.dp, height = 4.dp).clip(CircleShape).background(PreviewMuted)) }
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Text("Advanced Settings", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("PITCH TYPE", color = PreviewMuted, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Grass", "Turf", "Concrete").forEach { value ->
+                        SettingChoice(value, pitch == value, Modifier.weight(1f)) { pitch = value }
+                    }
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("POWERPLAY OVERS", color = PreviewMuted, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    choices.forEach { value ->
+                        SettingChoice(value, powerplayChoice == value, Modifier.weight(1f)) { powerplayChoice = value }
+                    }
+                }
+                if (powerplayChoice == "Custom") {
+                    OutlinedTextField(
+                        value = customOvers,
+                        onValueChange = { customOvers = it.filter(Char::isDigit).take(2) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Custom overs (1–${initialOvers.coerceAtLeast(1)})", color = PreviewMuted) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = PreviewAccent,
+                            unfocusedBorderColor = PreviewStroke,
+                            cursorColor = PreviewAccent
+                        )
+                    )
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(12.dp)).background(PreviewAccent)
+                    .clickable {
+                        val value = if (powerplayChoice == "Custom") customOvers.toIntOrNull() else powerplayChoice.toIntOrNull()
+                        if (value != null && value in 1..initialOvers.coerceAtLeast(1)) onApply(pitch, value)
+                    },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) { Text("APPLY SETTINGS", color = Color(0xFF111604), fontWeight = FontWeight.Black, fontSize = 14.sp) }
+        }
+    }
+}
+
+@Composable
+private fun SettingChoice(value: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier.height(42.dp).clip(RoundedCornerShape(10.dp))
+            .background(if (selected) Color(0xFF25351B) else Color(0xFF111B2B))
+            .clickable(onClick = onClick).padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(value, color = if (selected) PreviewAccent else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+@Composable
 private fun ScheduleMatchSection(match: Match?) {
     val dateStr = match?.matchDateEpochMs?.takeIf { it > 0L }?.let {
         SimpleDateFormat("dd MMMM yyyy", Locale.getDefault()).format(it)
-    } ?: "Today"
-    val timeStr = match?.matchTime.orEmpty().ifBlank { "08:00 PM" }
+    } ?: "Not set"
+    val timeStr = match?.matchTime.orEmpty().ifBlank { "Not set" }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {

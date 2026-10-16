@@ -16,19 +16,23 @@ import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -46,14 +50,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.paint
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -76,6 +82,7 @@ import androidx.compose.runtime.getValue
 import android.widget.Toast
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.launch
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import com.example.sportsxtreme.presentation.scoring.FinalPageBeforeScoringActivity
 import com.example.sportsxtreme.domain.model.TossDecision
@@ -128,7 +135,7 @@ class TossActivity : ComponentActivity() {
 }
 
 private val TossAccent = Color(0xFFC1FF00)
-private val TossBg = Color(0xFF020A15)
+private val TossBg = Color(0xFF0A101C)
 private val TossPanel = Color(0xFF07111D)
 private val TossCard = Color(0xFF0A1725)
 private val TossStroke = Color(0xFF2B3950)
@@ -152,13 +159,12 @@ private fun TossScreen(
             .background(TossBg)
             .drawBehind {
                 drawRect(
-                    Brush.verticalGradient(
-                        listOf(Color(0xFF071625), Color(0xFF020A15), Color(0xFF03050B))
+                    Brush.radialGradient(
+                        colors = listOf(TossAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
                     )
                 )
-                drawCircle(Color(0x1EFFD36A), radius = size.width * 0.52f, center = Offset(size.width * 0.82f, size.height * 0.18f))
-                drawCircle(Color(0x2214D8A6), radius = size.width * 0.55f, center = Offset(size.width * 0.08f, size.height * 0.42f))
-                drawCircle(Color(0x161B5BFF), radius = size.width * 0.62f, center = Offset(size.width * 0.78f, size.height * 0.78f))
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -308,7 +314,12 @@ private fun TossTopBar(onBack: () -> Unit) {
             fontWeight = FontWeight.Black,
             modifier = Modifier.padding(start = 16.dp).weight(1f)
         )
-        TossCameraIcon(Modifier.size(24.dp), TossMuted)
+        Image(
+            painter = painterResource(R.drawable.appicon2),
+            contentDescription = "SportsXtreme app icon",
+            modifier = Modifier.fillMaxWidth(0.18f).aspectRatio(2.28f),
+            contentScale = ContentScale.Fit
+        )
     }
 }
 
@@ -449,6 +460,10 @@ private fun TossChoiceCard(title: String, selected: Boolean, modifier: Modifier 
 
 @Composable
 private fun TossCoin(modifier: Modifier = Modifier) {
+    val scope = rememberCoroutineScope()
+    val rotation = remember { Animatable(0f) }
+    var isHeads by remember { mutableStateOf(true) }
+    var isFlipping by remember { mutableStateOf(false) }
     val infiniteTransition = rememberInfiniteTransition(label = "coin-glow")
     val pulse by infiniteTransition.animateFloat(
         initialValue = 0.86f,
@@ -465,9 +480,22 @@ private fun TossCoin(modifier: Modifier = Modifier) {
 
     Box(
         modifier = modifier
+            .clickable(enabled = !isFlipping) {
+                isFlipping = true
+                scope.launch {
+                    rotation.animateTo(
+                        targetValue = rotation.value + 900f,
+                        animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing)
+                    )
+                    isHeads = !isHeads
+                    isFlipping = false
+                }
+            }
             .graphicsLayer {
                 scaleX = pulse
                 scaleY = pulse
+                rotationY = rotation.value
+                cameraDistance = 12f * density
             }
             .shadow(24.dp, CircleShape, clip = false),
         contentAlignment = Alignment.Center
@@ -528,11 +556,15 @@ private fun TossCoin(modifier: Modifier = Modifier) {
             )
         }
         Text(
-            "HEADS",
+            if (isHeads) "HEADS" else "TAILS",
             color = TossAccent,
             fontSize = 26.sp,
             fontWeight = FontWeight.Black,
-            letterSpacing = 3.sp
+            letterSpacing = 3.sp,
+            modifier = Modifier.graphicsLayer {
+                // Keep the reverse face readable after the coin turns over.
+                rotationY = if (isHeads) 0f else 180f
+            }
         )
     }
 }
@@ -547,17 +579,5 @@ private fun TossArrow(modifier: Modifier, tint: Color) {
             lineTo(size.width * 0.66f, size.height * 0.76f)
         }
         drawPath(path, tint, style = stroke)
-    }
-}
-
-@Composable
-private fun TossCameraIcon(modifier: Modifier, tint: Color) {
-    Canvas(modifier) {
-        val stroke = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round)
-        drawRoundRect(tint, topLeft = Offset(size.width * 0.16f, size.height * 0.3f), size = Size(size.width * 0.68f, size.height * 0.5f), cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()), style = stroke)
-        drawLine(tint, Offset(size.width * 0.36f, size.height * 0.3f), Offset(size.width * 0.43f, size.height * 0.18f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.43f, size.height * 0.18f), Offset(size.width * 0.6f, size.height * 0.18f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.6f, size.height * 0.18f), Offset(size.width * 0.67f, size.height * 0.3f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawCircle(tint, radius = size.minDimension * 0.12f, center = Offset(size.width * 0.5f, size.height * 0.55f), style = stroke)
     }
 }

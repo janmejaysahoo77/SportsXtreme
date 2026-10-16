@@ -89,6 +89,7 @@ data class SelectedTeam(
 
 data class TeamSelectionUiState(
     val isLoading: Boolean = true,
+    val isCreatingMatch: Boolean = false,
     val match: Match? = null,
     val selectedTeamA: SelectedTeam? = null,
     val selectedTeamB: SelectedTeam? = null,
@@ -178,6 +179,7 @@ class TeamSelectionViewModel(
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
+        if (_uiState.value.isCreatingMatch) return
         if (teamAId.isBlank() || teamBId.isBlank()) {
             onError("Both Team A and Team B must be selected")
             return
@@ -187,15 +189,15 @@ class TeamSelectionViewModel(
             return
         }
         scope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+            _uiState.value = _uiState.value.copy(isCreatingMatch = true, errorMessage = null)
             when (val result = matchUseCases.updateMatchTeams(matchId, teamAId, teamBId)) {
                 is Resource.Success -> {
-                    _uiState.value = _uiState.value.copy(isLoading = false, match = result.data)
+                    _uiState.value = _uiState.value.copy(isCreatingMatch = false, match = result.data)
                     onSuccess()
                 }
                 is Resource.Error -> {
                     val msg = result.message ?: "Failed to update match teams"
-                    _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = msg)
+                    _uiState.value = _uiState.value.copy(isCreatingMatch = false, errorMessage = msg)
                     onError(msg)
                 }
                 is Resource.Loading -> Unit
@@ -406,6 +408,8 @@ data class OpeningPlayersUiState(
     val match: Match? = null,
     val battingTeamPlayers: List<Player> = emptyList(),
     val bowlingTeamPlayers: List<Player> = emptyList(),
+    val isLoadingBattingPlayers: Boolean = false,
+    val isLoadingBowlingPlayers: Boolean = false,
     val selectedStrikerId: String? = null,
     val selectedNonStrikerId: String? = null,
     val selectedBowlerId: String? = null,
@@ -474,17 +478,28 @@ class OpeningPlayersViewModel(
         }
         val bowlingTeamId = if (battingTeamId == match.teamA.teamId) match.teamB.teamId else match.teamA.teamId
 
+        _uiState.value = _uiState.value.copy(
+            isLoadingBattingPlayers = true,
+            isLoadingBowlingPlayers = true
+        )
         scope.launch(Dispatchers.IO) {
-            val battingResult = teamRepository.getTeam(battingTeamId)
-            val bowlingResult = teamRepository.getTeam(bowlingTeamId)
-            val battingPlayers = loadFirestoreTeamPlayers(battingTeamId)
-                .ifEmpty { (battingResult as? Resource.Success)?.data?.players ?: emptyList() }
-            val bowlingPlayers = loadFirestoreTeamPlayers(bowlingTeamId)
-                .ifEmpty { (bowlingResult as? Resource.Success)?.data?.players ?: emptyList() }
-            _uiState.value = _uiState.value.copy(
-                battingTeamPlayers = battingPlayers,
-                bowlingTeamPlayers = bowlingPlayers
-            )
+            try {
+                val battingResult = teamRepository.getTeam(battingTeamId)
+                val bowlingResult = teamRepository.getTeam(bowlingTeamId)
+                val battingPlayers = loadFirestoreTeamPlayers(battingTeamId)
+                    .ifEmpty { (battingResult as? Resource.Success)?.data?.players ?: emptyList() }
+                val bowlingPlayers = loadFirestoreTeamPlayers(bowlingTeamId)
+                    .ifEmpty { (bowlingResult as? Resource.Success)?.data?.players ?: emptyList() }
+                _uiState.value = _uiState.value.copy(
+                    battingTeamPlayers = battingPlayers,
+                    bowlingTeamPlayers = bowlingPlayers
+                )
+            } finally {
+                _uiState.value = _uiState.value.copy(
+                    isLoadingBattingPlayers = false,
+                    isLoadingBowlingPlayers = false
+                )
+            }
         }
     }
 

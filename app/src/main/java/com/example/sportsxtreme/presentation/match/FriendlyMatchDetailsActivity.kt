@@ -43,6 +43,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -61,7 +65,6 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -70,6 +73,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.R
@@ -92,6 +96,10 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -144,7 +152,7 @@ class FriendlyMatchDetailsActivity : ComponentActivity() {
 }
 
 private val DetailsAccent = XtremeLime
-private val DetailsBg = XtremeBgBlue
+private val DetailsBg = Color(0xFF0A101C)
 private val DetailsCard = XtremeCardBlue
 private val DetailsBorder = XtremeCardBorder
 private val DetailsMuted = XtremeMuted
@@ -157,16 +165,21 @@ private fun FriendlyMatchDetailsScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var ground by remember { mutableIntStateOf(0) }
+    var ground by remember { mutableIntStateOf(-1) }
     var date by remember { mutableIntStateOf(0) }
     var timeMode by remember { mutableIntStateOf(1) }
-    var venue by remember { mutableStateOf("KRT Stadium, Bhubaneswar") }
+    var venue by remember { mutableStateOf("") }
     var customVenue by remember { mutableStateOf("") }
+    var customGroundLocation by remember { mutableStateOf("") }
     var showVenueDialog by remember { mutableStateOf(false) }
+    var isSavingGround by remember { mutableStateOf(false) }
     var showGroundPicker by remember { mutableStateOf(false) }
     var showLocationConfirmation by remember { mutableStateOf(false) }
     var showLocationSettingsDialog by remember { mutableStateOf(false) }
     var groundSearch by remember { mutableStateOf("") }
+    var registeredGrounds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isLoadingGrounds by remember { mutableStateOf(false) }
+    var isFetchingLocation by remember { mutableStateOf(false) }
     var matchDateEpochMs by remember { mutableLongStateOf(startOfToday()) }
     var matchTime by remember { mutableStateOf("06:30 PM") }
     val applyCurrentLocation: (String?) -> Unit = { locationLabel ->
@@ -178,7 +191,82 @@ private fun FriendlyMatchDetailsScreen(
         }
     }
     val fetchAndApplyCurrentLocation: () -> Unit = {
-        coroutineScope.launch { applyCurrentLocation(fetchCurrentLocationLabel(context)) }
+        if (!isFetchingLocation) coroutineScope.launch {
+            isFetchingLocation = true
+            try {
+                applyCurrentLocation(fetchCurrentLocationLabel(context))
+            } finally {
+                isFetchingLocation = false
+            }
+        }
+    }
+    val loadRegisteredGrounds: () -> Unit = {
+        showGroundPicker = true
+        if (!isLoadingGrounds && registeredGrounds.isEmpty()) {
+            isLoadingGrounds = true
+            coroutineScope.launch {
+                try {
+                    val db = FirebaseFirestore.getInstance()
+                    val listedGrounds = db.collection("grounds").get().await().documents.mapNotNull { document ->
+                        val data = document.data ?: return@mapNotNull null
+                        val name = (data["name"] as? String ?: data["groundName"] as? String)?.trim().orEmpty()
+                        val location = (data["location"] as? String ?: data["address"] as? String ?: data["city"] as? String)?.trim().orEmpty()
+                        if (name.isBlank()) null else if (location.isBlank()) name else "$name, $location"
+                    }
+                    val legacyGroundProfiles = db.collection("communityProfiles").get().await().documents.mapNotNull { document ->
+                        val data = document.data ?: return@mapNotNull null
+                        val category = (data["category"] as? String).orEmpty()
+                        if (!category.equals("ground", ignoreCase = true) && !category.equals("grounds", ignoreCase = true)) {
+                            return@mapNotNull null
+                        }
+                        val name = (data["name"] as? String)?.trim().orEmpty()
+                        val location = (data["location"] as? String)?.trim().orEmpty()
+                        if (name.isBlank()) null else if (location.isBlank()) name else "$name, $location"
+                    }
+                    registeredGrounds = (listedGrounds + legacyGroundProfiles).distinct().sortedBy(String::lowercase)
+                } catch (error: Exception) {
+                    Toast.makeText(context, "Couldn't load registered grounds: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
+                } finally {
+                    isLoadingGrounds = false
+                }
+            }
+        }
+    }
+    val listNewGround: () -> Unit = {
+        val name = customVenue.trim()
+        val location = customGroundLocation.trim()
+        val userId = FirebaseAuth.getInstance().currentUser?.uid
+        if (name.isBlank()) {
+            Toast.makeText(context, "Enter a ground name.", Toast.LENGTH_SHORT).show()
+        } else if (userId == null) {
+            Toast.makeText(context, "Sign in to list a ground.", Toast.LENGTH_LONG).show()
+        } else if (!isSavingGround) {
+            coroutineScope.launch {
+                isSavingGround = true
+                try {
+                    FirebaseFirestore.getInstance().collection("grounds").add(
+                        mapOf(
+                            "name" to name,
+                            "location" to location,
+                            "ownerId" to userId,
+                            "createdAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                    val listing = if (location.isBlank()) name else "$name, $location"
+                    registeredGrounds = (registeredGrounds + listing).distinct().sortedBy(String::lowercase)
+                    ground = 2
+                    venue = listing
+                    showVenueDialog = false
+                    customVenue = ""
+                    customGroundLocation = ""
+                    Toast.makeText(context, "Ground listed successfully.", Toast.LENGTH_SHORT).show()
+                } catch (error: Exception) {
+                    Toast.makeText(context, "Couldn't list ground: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
+                } finally {
+                    isSavingGround = false
+                }
+            }
+        }
     }
     val locationSettingsLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -247,17 +335,31 @@ private fun FriendlyMatchDetailsScreen(
                             Text("Choose the venue, date and start time.", color = DetailsMuted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                         }
                         DetailsHeading("Ground Selection", DetailsIcon.LOCATION)
-                        DetailsOptionCard("Select Existing Ground", "KRT Stadium, Bhubaneswar", ground == 0) {
-                            showGroundPicker = true
+                        DetailsOptionCard("Select Existing Ground", if (ground == 0) venue else null, ground == 0) {
+                            loadRegisteredGrounds()
                         }
                         DetailsOptionCard(
                             "Use Current Location",
-                            if (ground == 1) venue else null,
+                            if (isFetchingLocation) "Fetching location…" else if (ground == 1) venue else null,
                             ground == 1
                         ) {
-                            showLocationConfirmation = true
+                            if (!isFetchingLocation) showLocationConfirmation = true
                         }
-                        DetailsOptionCard("Add New Ground", null, ground == 2) {
+                        if (isFetchingLocation) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    color = Color(0xFF58B8ED),
+                                    strokeWidth = 2.5.dp
+                                )
+                                Text("Fetching your location…", color = DetailsMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 9.dp))
+                            }
+                        }
+                        DetailsOptionCard("List New Ground", null, ground == 2) {
                             showVenueDialog = true
                         }
                         DetailsHeading("Match Date", DetailsIcon.CALENDAR)
@@ -300,45 +402,64 @@ private fun FriendlyMatchDetailsScreen(
                         .background(Brush.verticalGradient(listOf(Color.Transparent, DetailsBg, DetailsBg)))
                         .padding(horizontal = 16.dp, vertical = 16.dp)
                 ) {
+                    val hasVenue = venue.isNotBlank()
                     Row(
                         modifier = Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp))
-                            .background(Brush.horizontalGradient(listOf(Color(0xFFD8FF37), DetailsAccent, Color(0xFF9AFF00))))
-                            .clickable(
-                                enabled = !isLoading && venue.isNotBlank() && matchDateEpochMs > 0L && matchTime.isNotBlank(),
-                                onClick = { onContinue(venue, matchDateEpochMs, matchTime) }
-                            ),
+                            .background(
+                                if (hasVenue) Brush.horizontalGradient(listOf(Color(0xFFD8FF37), DetailsAccent, Color(0xFF9AFF00)))
+                                else Brush.horizontalGradient(listOf(Color(0xFF718044), Color(0xFF66733C)))
+                            )
+                            .clickable(enabled = !isLoading) {
+                                if (hasVenue) onContinue(venue, matchDateEpochMs, matchTime)
+                                else Toast.makeText(context, "Select a ground or use your current location to continue.", Toast.LENGTH_SHORT).show()
+                            },
                         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(if (isLoading) "SAVING DETAILS..." else "CONTINUE", color = Color(0xFF122004), fontSize = 15.sp, fontWeight = FontWeight.Black)
-                        DetailsArrow(Modifier.padding(start = 10.dp).size(20.dp), true, Color(0xFF122004))
+                        Text(
+                            when {
+                                isLoading -> "SAVING DETAILS..."
+                                hasVenue -> "CONTINUE"
+                                else -> "SELECT A GROUND TO CONTINUE"
+                            },
+                            color = Color(0xFF122004),
+                            fontSize = if (hasVenue || isLoading) 15.sp else 12.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        if (hasVenue || isLoading) {
+                            DetailsArrow(Modifier.padding(start = 10.dp).size(20.dp), true, Color(0xFF122004))
+                        }
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(100.dp))
         }
         if (showVenueDialog) {
             AlertDialog(
                 onDismissRequest = { showVenueDialog = false },
-                title = { Text("Add New Ground") },
+                title = { Text("List New Ground") },
                 text = {
-                    OutlinedTextField(
-                        value = customVenue,
-                        onValueChange = { customVenue = it },
-                        label = { Text("Ground name") },
-                        singleLine = true
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = customVenue,
+                            onValueChange = { customVenue = it },
+                            label = { Text("Ground name") },
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = customGroundLocation,
+                            onValueChange = { customGroundLocation = it },
+                            label = { Text("Location or address") },
+                            singleLine = true
+                        )
+                    }
                 },
                 confirmButton = {
                     TextButton(
-                        onClick = {
-                            val newVenue = customVenue.trim()
-                            if (newVenue.isNotBlank()) {
-                                ground = 2
-                                venue = newVenue
-                                showVenueDialog = false
-                            }
-                        }
-                    ) { Text("SAVE", color = DetailsAccent) }
+                        onClick = listNewGround,
+                        enabled = !isSavingGround
+                    ) {
+                        if (isSavingGround) CircularProgressIndicator(Modifier.size(18.dp), color = DetailsAccent, strokeWidth = 2.dp)
+                        else Text("LIST GROUND", color = DetailsAccent)
+                    }
                 },
                 dismissButton = {
                     TextButton(onClick = { showVenueDialog = false }) { Text("CANCEL", color = DetailsMuted) }
@@ -347,8 +468,15 @@ private fun FriendlyMatchDetailsScreen(
         }
         if (showGroundPicker) {
             GroundPickerDialog(
+                grounds = registeredGrounds,
+                isLoading = isLoadingGrounds,
                 searchQuery = groundSearch,
                 onSearchQueryChange = { groundSearch = it },
+                onListNewGround = {
+                    showGroundPicker = false
+                    groundSearch = ""
+                    showVenueDialog = true
+                },
                 onGroundSelected = { selectedGround ->
                     ground = 0
                     venue = selectedGround
@@ -383,59 +511,72 @@ private fun FriendlyMatchDetailsScreen(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun GroundPickerDialog(
+    grounds: List<String>,
+    isLoading: Boolean,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
+    onListNewGround: () -> Unit,
     onGroundSelected: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val grounds = listOf("KRT Stadium, Bhubaneswar")
     val matchingGrounds = grounds.filter { it.contains(searchQuery.trim(), ignoreCase = true) }
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = DetailsCard,
-        titleContentColor = Color.White,
-        textContentColor = DetailsMuted,
-        title = { Text("Select ground", fontSize = 20.sp, fontWeight = FontWeight.Black) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Choose a saved ground for this match.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = onSearchQueryChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Search grounds") },
-                    placeholder = { Text("Type to search") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = DetailsAccent,
-                        unfocusedBorderColor = DetailsBorder,
-                        focusedLabelColor = DetailsAccent,
-                        unfocusedLabelColor = DetailsMuted,
-                        cursorColor = DetailsAccent
-                    )
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = DetailsBg,
+        contentColor = Color.White
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Select ground", fontSize = 20.sp, fontWeight = FontWeight.Black)
+            Text("Choose a registered ground for this match.", color = DetailsMuted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Search grounds") },
+                placeholder = { Text("Type to search") },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = DetailsAccent,
+                    unfocusedBorderColor = DetailsBorder,
+                    focusedLabelColor = DetailsAccent,
+                    unfocusedLabelColor = DetailsMuted,
+                    cursorColor = DetailsAccent
                 )
-                matchingGrounds.forEach { ground ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF142019))
-                            .border(1.dp, Color(0xFF6F9427), RoundedCornerShape(12.dp)).clickable { onGroundSelected(ground) }
-                            .padding(horizontal = 14.dp, vertical = 15.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        DetailsIconCanvas(DetailsIcon.LOCATION, Modifier.size(21.dp), DetailsAccent)
-                        Text(ground, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 11.dp).weight(1f))
-                        DetailsIconCanvas(DetailsIcon.CHECK, Modifier.size(19.dp), DetailsAccent)
-                    }
-                }
-                if (matchingGrounds.isEmpty()) {
-                    Text("No grounds match your search.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            )
+            if (isLoading) {
+                Box(Modifier.fillMaxWidth().padding(vertical = 18.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = DetailsAccent)
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("CLOSE", color = DetailsAccent) } }
-    )
+            matchingGrounds.forEach { ground ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(DetailsCard)
+                        .border(1.dp, DetailsBorder, RoundedCornerShape(12.dp)).clickable { onGroundSelected(ground) }
+                        .padding(horizontal = 14.dp, vertical = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DetailsIconCanvas(DetailsIcon.LOCATION, Modifier.size(21.dp), DetailsAccent)
+                    Text(ground, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 11.dp).weight(1f))
+                    DetailsIconCanvas(DetailsIcon.CHECK, Modifier.size(19.dp), DetailsAccent)
+                }
+            }
+            if (!isLoading && matchingGrounds.isEmpty()) {
+                Text("No grounds listed yet.", color = DetailsMuted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+            TextButton(onClick = onListNewGround) {
+                Text("LIST A NEW GROUND", color = DetailsAccent, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
 }
 
 @Composable
@@ -521,7 +662,7 @@ private suspend fun requestFreshLocation(locationManager: LocationManager): Loca
 @Composable
 private fun DetailsTopBar(onBack: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().height(64.dp).background(Color(0xEA06101A)).padding(horizontal = 16.dp),
+        modifier = Modifier.fillMaxWidth().height(64.dp).background(DetailsCard).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         DetailsArrow(Modifier.size(24.dp).clickable(onClick = onBack), false, DetailsAccent)
@@ -545,12 +686,12 @@ private fun DetailsHeading(title: String, icon: DetailsIcon) {
 private fun DetailsOptionCard(title: String, subtitle: String?, selected: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().height(68.dp).clip(RoundedCornerShape(14.dp))
-            .background(if (selected) Color(0xFF142019) else DetailsCard)
-            .border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF6F9427) else DetailsBorder, RoundedCornerShape(14.dp))
+            .background(if (selected) Color(0xFF173044) else DetailsCard)
+            .border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF328AC0) else DetailsBorder, RoundedCornerShape(14.dp))
             .clickable(onClick = onClick).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(if (selected) Color(0xFF668900) else Color(0xFF1B2736)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(if (selected) Color(0xFF17618C) else Color(0xFF1B2736)), contentAlignment = Alignment.Center) {
             DetailsIconCanvas(DetailsIcon.LOCATION, Modifier.size(21.dp), if (selected) DetailsAccent else DetailsMuted)
         }
         Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
@@ -564,8 +705,8 @@ private fun DetailsOptionCard(title: String, subtitle: String?, selected: Boolea
 @Composable
 private fun DetailsDateCard(title: String, subtitle: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Column(
-        modifier = modifier.height(76.dp).clip(RoundedCornerShape(14.dp)).background(if (selected) Color(0xFF152019) else DetailsCard)
-            .border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF71962B) else DetailsBorder, RoundedCornerShape(14.dp))
+        modifier = modifier.height(76.dp).clip(RoundedCornerShape(14.dp)).background(if (selected) Color(0xFF173044) else DetailsCard)
+            .border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF328AC0) else DetailsBorder, RoundedCornerShape(14.dp))
             .clickable(onClick = onClick).padding(vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally
     ) {
         DetailsIconCanvas(DetailsIcon.CALENDAR, Modifier.size(18.dp), if (selected) DetailsAccent else DetailsMuted)
@@ -577,8 +718,8 @@ private fun DetailsDateCard(title: String, subtitle: String, selected: Boolean, 
 @Composable
 private fun DetailsTimeChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
-        modifier = Modifier.height(34.dp).clip(RoundedCornerShape(18.dp)).background(if (selected) Color(0xFF1A2814) else DetailsCard)
-            .border(if (selected) 1.5.dp else 1.dp, if (selected) Color(0xFF6E9428) else DetailsBorder, RoundedCornerShape(18.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp),
+        modifier = Modifier.height(34.dp).clip(RoundedCornerShape(18.dp)).background(if (selected) Color(0xFF173044) else DetailsCard)
+            .border(if (selected) 1.5.dp else 1.dp, if (selected) Color(0xFF328AC0) else DetailsBorder, RoundedCornerShape(18.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center
     ) { Text(label, color = if (selected) DetailsAccent else DetailsMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 }

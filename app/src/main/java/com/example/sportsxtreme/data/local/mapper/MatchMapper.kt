@@ -67,6 +67,7 @@ fun MatchEntity.toDomain(
     format = format?.let(MatchFormat::valueOf) ?: MatchFormat.T20,
     ballType = ballType?.let(BallType::valueOf) ?: BallType.LEATHER,
     overs = overs ?: 20,
+    maxOversPerBowler = maxOversPerBowler,
     venue = venue,
     matchDateEpochMs = matchDateEpochMs,
     matchTime = matchTime

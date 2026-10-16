@@ -27,6 +27,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -135,7 +136,7 @@ class FinalPageBeforeScoringActivity : ComponentActivity() {
 }
 
 private val InningsAccent = Color(0xFFC1FF00)
-private val InningsBg = Color(0xFF020A15)
+private val InningsBg = Color(0xFF0A101C)
 private val InningsPanel = Color(0xFF07111D)
 private val InningsCard = Color(0xFF0A1725)
 private val InningsStroke = Color(0xFF2B3950)
@@ -171,13 +172,12 @@ private fun FinalPageBeforeScoringScreen(
             .background(InningsBg)
             .drawBehind {
                 drawRect(
-                    Brush.verticalGradient(
-                        listOf(Color(0xFF071625), Color(0xFF020A15), Color(0xFF03050B))
+                    Brush.radialGradient(
+                        colors = listOf(InningsAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
                     )
                 )
-                drawCircle(Color(0x1EFFD36A), radius = size.width * 0.58f, center = Offset(size.width * 0.85f, size.height * 0.14f))
-                drawCircle(Color(0x2214D8A6), radius = size.width * 0.48f, center = Offset(size.width * 0.04f, size.height * 0.5f))
-                drawCircle(Color(0x171B5BFF), radius = size.width * 0.56f, center = Offset(size.width * 0.72f, size.height * 0.7f))
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -227,6 +227,7 @@ private fun FinalPageBeforeScoringScreen(
                 PlayerPickerList(
                     title = "SELECT STRIKER",
                     players = battingPlayers,
+                    isLoading = uiState.isLoading || uiState.isLoadingBattingPlayers,
                     selectedPlayerId = uiState.selectedStrikerId,
                     disabledPlayerId = uiState.selectedNonStrikerId,
                     onSelect = { onSelectStriker(it); showStrikerPicker = false },
@@ -239,6 +240,7 @@ private fun FinalPageBeforeScoringScreen(
                 PlayerPickerList(
                     title = "SELECT NON-STRIKER",
                     players = battingPlayers,
+                    isLoading = uiState.isLoading || uiState.isLoadingBattingPlayers,
                     selectedPlayerId = uiState.selectedNonStrikerId,
                     disabledPlayerId = uiState.selectedStrikerId,
                     onSelect = { onSelectNonStriker(it); showNonStrikerPicker = false },
@@ -251,6 +253,7 @@ private fun FinalPageBeforeScoringScreen(
                 PlayerPickerList(
                     title = "SELECT BOWLER",
                     players = eligibleBowlingPlayers,
+                    isLoading = uiState.isLoading || uiState.isLoadingBowlingPlayers,
                     selectedPlayerId = uiState.selectedBowlerId,
                     disabledPlayerId = null,
                     onSelect = { onSelectBowler(it); showBowlerPicker = false },
@@ -274,6 +277,7 @@ private fun FinalPageBeforeScoringScreen(
 private fun PlayerPickerList(
     title: String,
     players: List<Player>,
+    isLoading: Boolean,
     selectedPlayerId: String?,
     disabledPlayerId: String?,
     onSelect: (String) -> Unit,
@@ -308,15 +312,17 @@ private fun PlayerPickerList(
                 modifier = Modifier.clickable(onClick = onDismiss).padding(horizontal = 8.dp)
             )
         }
-        if (players.isEmpty()) {
+        if (isLoading) {
+            repeat(4) { PlayerPickerSkeletonRow() }
+        } else if (players.isEmpty()) {
             Text(
                 "No eligible players are available for this team.",
                 color = InningsMuted,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 18.dp)
             )
-        }
-        players.forEach { player ->
+        } else {
+            players.forEach { player ->
             val isSelected = player.id == selectedPlayerId
             val isDisabled = player.id == disabledPlayerId
             Row(
@@ -372,6 +378,25 @@ private fun PlayerPickerList(
                 }
             }
             Spacer(Modifier.height(4.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerPickerSkeletonRow() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .padding(horizontal = 6.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(Modifier.size(32.dp).clip(CircleShape).background(Color(0xFF23364A)))
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
+            Box(Modifier.fillMaxWidth(0.62f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFF23364A)))
+            Box(Modifier.fillMaxWidth(0.38f).height(8.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFF1A2B3C)))
         }
     }
 }
@@ -399,7 +424,12 @@ private fun InningsTopBar(onBack: () -> Unit) {
             fontWeight = FontWeight.Black,
             modifier = Modifier.padding(start = 24.dp).weight(1f)
         )
-        HelpIcon(Modifier.padding(end = 15.dp).size(24.dp), InningsMuted)
+        Image(
+            painter = painterResource(R.drawable.appicon2),
+            contentDescription = "SportsXtreme app icon",
+            modifier = Modifier.padding(end = 15.dp).fillMaxWidth(0.18f).aspectRatio(2.28f),
+            contentScale = ContentScale.Fit
+        )
     }
 }
 
@@ -539,16 +569,6 @@ private fun InningsArrow(modifier: Modifier, tint: Color) {
             lineTo(size.width * 0.66f, size.height * 0.76f)
         }
         drawPath(path, tint, style = stroke)
-    }
-}
-
-@Composable
-private fun HelpIcon(modifier: Modifier, tint: Color) {
-    Canvas(modifier) {
-        val stroke = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
-        drawCircle(tint, radius = size.minDimension * 0.4f, center = Offset(size.width * 0.5f, size.height * 0.5f), style = stroke)
-        drawArc(tint, 210f, 230f, false, topLeft = Offset(size.width * 0.32f, size.height * 0.22f), size = Size(size.width * 0.34f, size.height * 0.34f), style = stroke)
-        drawCircle(tint, radius = size.minDimension * 0.035f, center = Offset(size.width * 0.5f, size.height * 0.72f))
     }
 }
 

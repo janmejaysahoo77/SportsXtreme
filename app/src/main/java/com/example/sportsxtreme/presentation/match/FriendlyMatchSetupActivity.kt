@@ -121,15 +121,15 @@ class FriendlyMatchSetupActivity : ComponentActivity() {
 }
 
 private val FriendlyAccent = XtremeLime
-private val FriendlyBackground = XtremeBgBlue
-private val FriendlyCard = XtremeCardBlue
-private val FriendlyStroke = XtremeCardBorder
+private val FriendlyBackground = Color(0xFF0A101C)
+private val FriendlyCard = BlueCardBackGround
+private val FriendlyStroke = Color(0xFF26394B)
 private val FriendlyMuted = XtremeMuted
 
 @Composable
 private fun FriendlyMatchSetupScreen(
     onBack: () -> Unit,
-    onContinue: (MatchFormat, BallType, Int) -> Unit,
+    onContinue: (MatchFormat, BallType, Int, Int?) -> Unit,
     isLoading: Boolean
 ) {
     var format by remember { mutableIntStateOf(1) }
@@ -138,6 +138,10 @@ private fun FriendlyMatchSetupScreen(
     var customOvers by remember { mutableStateOf("15") }
     var showCustomOversDialog by remember { mutableStateOf(false) }
     var customOversError by remember { mutableStateOf(false) }
+    var selectedBowlerOvers by remember { mutableIntStateOf(-1) }
+    var customBowlerOvers by remember { mutableStateOf("") }
+    var showCustomBowlerOversDialog by remember { mutableStateOf(false) }
+    var customBowlerOversError by remember { mutableStateOf(false) }
     val formats = listOf("Limited Overs", "T20 Match", "Test Match")
     val overs = listOf("5", "10", "20", "Custom")
     val matchFormats = listOf(MatchFormat.ODI, MatchFormat.T20, MatchFormat.TEST)
@@ -149,7 +153,7 @@ private fun FriendlyMatchSetupScreen(
             .background(FriendlyBackground)
             .drawBehind {
                 drawCircle(Color(0x18235E86), size.width * 0.7f, Offset(size.width * 1.04f, size.height * 0.16f))
-                drawCircle(Color(0x123A6B18), size.width * 0.58f, Offset(size.width * 0.1f, size.height * 0.77f))
+                drawCircle(Color(0x103A6B92), size.width * 0.58f, Offset(size.width * 0.1f, size.height * 0.77f))
                 repeat(12) { index ->
                     val y = size.height * (0.14f + index * 0.074f)
                     drawLine(Color(0x0A88B7D4), Offset(0f, y), Offset(size.width, y - size.width * 0.09f), 1.dp.toPx())
@@ -226,6 +230,44 @@ private fun FriendlyMatchSetupScreen(
                         }
                     }
                 }
+                FriendlySectionTitle("Maximum overs per bowler")
+                val bowlerOvers = listOf("2", "4", "6", "Custom")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(FriendlyCard)
+                        .border(1.dp, FriendlyStroke, RoundedCornerShape(24.dp))
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    bowlerOvers.forEachIndexed { index, value ->
+                        val selection = index
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (selectedBowlerOvers == selection) FriendlyAccent else Color.Transparent)
+                                .clickable {
+                                    if (value == "Custom") {
+                                        showCustomBowlerOversDialog = true
+                                    } else {
+                                        selectedBowlerOvers = selection
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                value,
+                                color = if (selectedBowlerOvers == selection) Color(0xFF142008) else Color(0xFFBAC4C0),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                }
                 FriendlyMatchPreview(
                     format = formats[format],
                     ball = listOf("Leather Ball", "Tennis Ball", "Tape Ball")[ballType],
@@ -258,6 +300,13 @@ private fun FriendlyMatchSetupScreen(
                                     1 -> 10
                                     2 -> 20
                                     else -> customOvers.toInt()
+                                },
+                                when (selectedBowlerOvers) {
+                                    0 -> 2
+                                    1 -> 4
+                                    2 -> 6
+                                    3 -> customBowlerOvers.toIntOrNull()
+                                    else -> null
                                 }
                             )
                         }
@@ -313,6 +362,46 @@ private fun FriendlyMatchSetupScreen(
                 }
             )
         }
+        if (showCustomBowlerOversDialog) {
+            AlertDialog(
+                onDismissRequest = { showCustomBowlerOversDialog = false },
+                title = { Text("Custom Bowler Limit") },
+                text = {
+                    Column {
+                        Text("Set the maximum overs a bowler can deliver.")
+                        OutlinedTextField(
+                            value = customBowlerOvers,
+                            onValueChange = { value ->
+                                customBowlerOvers = value.filter(Char::isDigit)
+                                customBowlerOversError = false
+                            },
+                            label = { Text("Overs per bowler") },
+                            singleLine = true,
+                            isError = customBowlerOversError,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        if (customBowlerOversError) {
+                            Text("Enter at least 1 over.", color = Color(0xFFFF7676), fontSize = 12.sp)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (customBowlerOvers.toIntOrNull()?.let { it > 0 } == true) {
+                            selectedBowlerOvers = 3
+                            showCustomBowlerOversDialog = false
+                        } else {
+                            customBowlerOversError = true
+                        }
+                    }) { Text("SAVE", color = FriendlyAccent) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCustomBowlerOversDialog = false }) {
+                        Text("CANCEL", color = FriendlyMuted)
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -322,7 +411,7 @@ private fun FriendlyTopBar(onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .height(58.dp)
-            .background(Color(0xE9050B16))
+            .background(Color(0xE90B1626))
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -375,8 +464,8 @@ private fun FriendlyBallCard(label: String, imageRes: Int, selected: Boolean, mo
         modifier = modifier
             .height(92.dp)
             .clip(RoundedCornerShape(11.dp))
-            .background(if (selected) Color(0xFF172419) else Color(0xFF0B1522))
-            .border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF719B25) else Color.Transparent, RoundedCornerShape(11.dp))
+            .background(if (selected) Color(0xFF173044) else Color(0xFF0B1522))
+            .border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF328AC0) else Color.Transparent, RoundedCornerShape(11.dp))
             .clickable(onClick = onClick)
             .padding(top = 7.dp, bottom = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -458,13 +547,13 @@ class FriendlyMatchSetupViewModel(private val matchUseCases: MatchUseCases) : Vi
     val uiState: StateFlow<FriendlyMatchSetupUiState> = _uiState.asStateFlow()
     val events: SharedFlow<FriendlyMatchSetupEvent> = _events.asSharedFlow()
 
-    fun createFriendlyMatch(format: MatchFormat, ballType: BallType, overs: Int) {
+    fun createFriendlyMatch(format: MatchFormat, ballType: BallType, overs: Int, maxOversPerBowler: Int?) {
         if (_uiState.value.isLoading) return
         scope.launch {
             _uiState.value = FriendlyMatchSetupUiState(isLoading = true)
             when (val result = matchUseCases.createMatch(MatchType.FRIENDLY)) {
                 is Resource.Success -> result.data?.let { match ->
-                    when (val settingsResult = matchUseCases.updateMatchSettings(match.id, format, ballType, overs)) {
+                    when (val settingsResult = matchUseCases.updateMatchSettings(match.id, format, ballType, overs, maxOversPerBowler)) {
                         is Resource.Success -> {
                             _uiState.value = FriendlyMatchSetupUiState()
                             _events.emit(FriendlyMatchSetupEvent.NavigateToMatchDetails(match.id))

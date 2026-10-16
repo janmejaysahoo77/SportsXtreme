@@ -24,6 +24,7 @@ import com.example.sportsxtreme.data.remote.firestore.FirebaseFirestoreMatchSync
 import com.example.sportsxtreme.data.remote.firestore.FirebaseFirestoreMatchClaimsDataSource
 import com.example.sportsxtreme.data.remote.firestore.FirestoreScoringDataSource
 import com.example.sportsxtreme.domain.model.InningsStatus
+import com.example.sportsxtreme.domain.model.BallEventType
 import com.example.sportsxtreme.domain.model.BallType
 import com.example.sportsxtreme.domain.model.Match
 import com.example.sportsxtreme.domain.model.MatchFormat
@@ -82,7 +83,8 @@ class MatchRepositoryImpl @Inject constructor(
         matchId: String,
         format: MatchFormat,
         ballType: BallType,
-        overs: Int
+        overs: Int,
+        maxOversPerBowler: Int?
     ): Resource<Match> = runCatching {
         database.withTransaction {
             val match = requireMatch(matchId)
@@ -91,6 +93,7 @@ class MatchRepositoryImpl @Inject constructor(
                     format = format.name,
                     ballType = ballType.name,
                     overs = overs,
+                    maxOversPerBowler = maxOversPerBowler,
                     updatedAtEpochMs = System.currentTimeMillis()
                 )
             )
@@ -661,7 +664,15 @@ class MatchRepositoryImpl @Inject constructor(
         val legalBalls = latestInnings?.legalBalls ?: 0
         val currentOverEvents = latestInnings?.let { innings ->
             val events = ballEventDao.getBallEvents(matchId, innings.inningsId).map { it.toDomain() }
-            events.takeLastWhile { it.overNumber == events.lastOrNull()?.overNumber }
+            val reversedDeliveryIds = events.asSequence()
+                .filter { it.eventType == BallEventType.REVERSAL }
+                .mapNotNull { it.reversedEventId }
+                .toSet()
+            val activeDeliveries = events.filter {
+                it.eventType == BallEventType.DELIVERY && it.ballId !in reversedDeliveryIds
+            }
+            val currentOverNumber = activeDeliveries.lastOrNull()?.overNumber
+            activeDeliveries.filter { it.overNumber == currentOverNumber }
         }.orEmpty()
         return MatchState(
             matchId = matchId,

@@ -15,6 +15,7 @@ import com.example.sportsxtreme.data.sync.DeliverySyncScheduler
 import com.example.sportsxtreme.data.local.mapper.toDomain
 import com.example.sportsxtreme.data.local.mapper.toMatchTeam
 import com.example.sportsxtreme.domain.model.BallEvent
+import com.example.sportsxtreme.domain.model.BallEventType
 import com.example.sportsxtreme.domain.model.BattingScorecard
 import com.example.sportsxtreme.domain.model.BowlingScorecard
 import com.example.sportsxtreme.domain.model.DismissalType
@@ -222,7 +223,15 @@ class ScoringRepositoryImpl @Inject constructor(
         val currentOverEvents = innings?.let { currentInnings ->
             val events = ballEventDao.getBallEvents(matchId, currentInnings.inningsId)
                 .map { it.toDomain() }
-            events.takeLastWhile { it.overNumber == events.lastOrNull()?.overNumber }
+            val reversedDeliveryIds = events.asSequence()
+                .filter { it.eventType == BallEventType.REVERSAL }
+                .mapNotNull { it.reversedEventId }
+                .toSet()
+            val activeDeliveries = events.filter {
+                it.eventType == BallEventType.DELIVERY && it.ballId !in reversedDeliveryIds
+            }
+            val currentOverNumber = activeDeliveries.lastOrNull()?.overNumber
+            activeDeliveries.filter { it.overNumber == currentOverNumber }
         }.orEmpty()
         return MatchState(
             matchId = matchId,

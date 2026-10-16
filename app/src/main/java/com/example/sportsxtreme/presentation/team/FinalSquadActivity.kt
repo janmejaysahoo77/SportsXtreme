@@ -35,7 +35,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -87,12 +92,12 @@ class FinalSquadActivity : ComponentActivity() {
         val selectedTeamId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID).orEmpty()
         val selectedTeamName = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME).orEmpty()
         setContent {
-            val members = rememberFinalSquadMembers(selectedTeamId)
+            val squadState = rememberFinalSquadMembers(selectedTeamId)
             FinalSquadScreen(
-                members = members,
+                squadState = squadState,
                 onBack = { finish() },
                 onNext = { matchRoles ->
-                    saveMatchSquad(matchId, teamSlot, selectedTeamId, selectedTeamName, members, matchRoles) {
+                    saveMatchSquad(matchId, teamSlot, selectedTeamId, selectedTeamName, squadState.members, matchRoles) {
                     val resultIntent = Intent().apply {
                         putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, teamSlot)
                         if (teamSlot == "A") {
@@ -151,16 +156,26 @@ private data class FinalSquadMember(
     val teamRoles: List<String>
 )
 
+private data class FinalSquadMembersState(
+    val members: List<FinalSquadMember> = emptyList(),
+    val isLoading: Boolean = true
+)
+
 @Composable
-private fun rememberFinalSquadMembers(teamId: String): List<FinalSquadMember> {
-    var members by remember(teamId) { mutableStateOf(emptyList<FinalSquadMember>()) }
+private fun rememberFinalSquadMembers(teamId: String): FinalSquadMembersState {
+    var state by remember(teamId) { mutableStateOf(FinalSquadMembersState()) }
     DisposableEffect(teamId) {
         if (teamId.isBlank()) {
-            members = emptyList()
+            state = FinalSquadMembersState(isLoading = false)
             onDispose { }
         } else {
             val registration = FirebaseFirestore.getInstance().collection("teams").document(teamId)
-                .addSnapshotListener { document, _ ->
+                .addSnapshotListener { document, error ->
+                    if (error != null) {
+                        state = FinalSquadMembersState(isLoading = false)
+                        return@addSnapshotListener
+                    }
+                    if (document == null) return@addSnapshotListener
                     val baseMembers = (document?.get("members") as? List<*>).orEmpty()
                         .mapNotNull { it as? Map<*, *> }
                         .mapNotNull { value ->
@@ -173,7 +188,11 @@ private fun rememberFinalSquadMembers(teamId: String): List<FinalSquadMember> {
                                     ?.filterIsInstance<String>().orEmpty()
                             )
                         }.distinctBy { it.userId }
-                    members = baseMembers
+                    if (baseMembers.isEmpty()) {
+                        state = FinalSquadMembersState(isLoading = false)
+                        return@addSnapshotListener
+                    }
+                    state = FinalSquadMembersState(members = baseMembers, isLoading = true)
                     // The profile function is already used by Team Profile and supplies current member names.
                     FirebaseFunctions.getInstance().getHttpsCallable("getTeamMemberProfiles")
                         .call(mapOf("teamId" to teamId))
@@ -181,15 +200,21 @@ private fun rememberFinalSquadMembers(teamId: String): List<FinalSquadMember> {
                             val profiles = ((result.data as? Map<*, *>)?.get("members") as? List<*>).orEmpty()
                                 .mapNotNull { it as? Map<*, *> }
                                 .associate { (it["userId"] as? String).orEmpty() to (it["displayName"] as? String).orEmpty() }
-                            members = baseMembers.map { member ->
+                            state = FinalSquadMembersState(members = baseMembers.map { member ->
                                 member.copy(name = profiles[member.userId].orEmpty().ifBlank { member.name.ifBlank { "Team member" } })
-                            }
+                            }, isLoading = false)
+                        }
+                        .addOnFailureListener {
+                            state = FinalSquadMembersState(
+                                members = baseMembers.map { it.copy(name = it.name.ifBlank { "Team member" }) },
+                                isLoading = false
+                            )
                         }
                 }
             onDispose { registration.remove() }
         }
     }
-    return members
+    return state
 }
 
 private fun Intent.copyTeamSelectionExtras(): Bundle = Bundle().apply {
@@ -212,18 +237,19 @@ private fun Intent.copyTeamSelectionExtras(): Bundle = Bundle().apply {
 }
 
 private val SquadAccent = Color(0xFFC1FF00)
-private val SquadBg = XtremeBgBlue
-private val SquadPanel = XtremeCardBlue
-private val SquadCard = XtremeCardBlue
-private val SquadStroke = Color(0xFF25314A)
+private val SquadBg = Color(0xFF0A101C)
+private val SquadPanel = BlueCardBackGround
+private val SquadCard = BlueCardBackGround
+private val SquadStroke = Color(0xFF26394B)
 private val SquadMuted = Color(0xFFAAB6C4)
 
 @Composable
 private fun FinalSquadScreen(
-    members: List<FinalSquadMember>,
+    squadState: FinalSquadMembersState,
     onBack: () -> Unit,
     onNext: (Map<String, Set<String>>) -> Unit
 ) {
+    val members = squadState.members
     var matchRoles by remember(members) {
         mutableStateOf<Map<String, Set<String>>>(members.associate { member ->
             member.userId to buildSet<String> {
@@ -265,26 +291,34 @@ private fun FinalSquadScreen(
                     .padding(horizontal = 12.dp, vertical = 20.dp)
             ) {
                 FinalSquadHeader()
-                members.forEachIndexed { index, member ->
-                    val roles = matchRoles[member.userId].orEmpty()
-                    SquadPlayerCard(
-                        name = member.name,
-                        role = member.playingRole,
-                        isCaptain = "CAPTAIN" in roles,
-                        isViceCaptain = "VICE_CAPTAIN" in roles,
-                        isWicketKeeper = "WICKET_KEEPER" in roles,
-                        onRoleClick = { setRole(member.userId, it) },
-                        modifier = Modifier.padding(top = if (index == 0) 22.dp else 12.dp)
+                if (squadState.isLoading) {
+                    repeat(6) { index ->
+                        SquadPlayerSkeleton(Modifier.padding(top = if (index == 0) 22.dp else 12.dp))
+                    }
+                } else if (members.isEmpty()) {
+                    Text(
+                        "No players found in this squad.",
+                        color = SquadMuted,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(top = 22.dp)
                     )
+                } else {
+                    members.forEachIndexed { index, member ->
+                        val roles = matchRoles[member.userId].orEmpty()
+                        SquadPlayerCard(
+                            name = member.name,
+                            role = member.playingRole,
+                            isCaptain = "CAPTAIN" in roles,
+                            isViceCaptain = "VICE_CAPTAIN" in roles,
+                            isWicketKeeper = "WICKET_KEEPER" in roles,
+                            onRoleClick = { setRole(member.userId, it) },
+                            modifier = Modifier.padding(top = if (index == 0) 22.dp else 12.dp)
+                        )
+                    }
                 }
                 Spacer(Modifier.height(110.dp))
             }
         }
-        CameraFloatingButton(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 21.dp, bottom = 87.dp)
-        )
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -296,13 +330,49 @@ private fun FinalSquadScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(64.dp)
-                    .bounceClick { onNext(matchRoles) }
+                    .bounceClick {
+                        if (!squadState.isLoading && members.isNotEmpty()) onNext(matchRoles)
+                    }
                     .clip(RoundedCornerShape(12.dp))
-                    .background(SquadAccent),
+                    .background(SquadAccent.copy(alpha = if (squadState.isLoading || members.isEmpty()) 0.55f else 1f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Next", color = Color(0xFF111604), fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Text(
+                    if (squadState.isLoading) "Loading squad..." else "Next",
+                    color = Color(0xFF111604),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun SquadPlayerSkeleton(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "squad-player-skeleton")
+    val shimmer by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(animation = tween(850), repeatMode = RepeatMode.Reverse),
+        label = "squad-player-skeleton-alpha"
+    )
+    val bone = Color(0xFF36506B).copy(alpha = shimmer)
+    Row(
+        modifier = modifier.fillMaxWidth().height(96.dp).clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF0B1522)).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(56.dp).clip(CircleShape).background(bone))
+        Column(
+            modifier = Modifier.padding(start = 16.dp).weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(Modifier.fillMaxWidth(0.72f).height(15.dp).clip(RoundedCornerShape(8.dp)).background(bone))
+            Box(Modifier.fillMaxWidth(0.43f).height(10.dp).clip(RoundedCornerShape(6.dp)).background(bone.copy(alpha = shimmer * 0.75f)))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            repeat(3) { Box(Modifier.size(30.dp).clip(CircleShape).background(bone.copy(alpha = shimmer * 0.8f))) }
         }
     }
 }
@@ -423,20 +493,6 @@ private fun SquadPlayerCard(name: String, role: String, isCaptain: Boolean, isVi
 }
 
 @Composable
-private fun CameraFloatingButton(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .size(64.dp)
-            .bounceClick()
-            .clip(CircleShape)
-            .background(SquadAccent),
-        contentAlignment = Alignment.Center
-    ) {
-        SquadCameraIcon(Modifier.size(32.dp), Color.White)
-    }
-}
-
-@Composable
 private fun SquadArrow(modifier: Modifier, tint: Color) {
     Canvas(modifier) {
         val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
@@ -446,24 +502,6 @@ private fun SquadArrow(modifier: Modifier, tint: Color) {
             lineTo(size.width * 0.66f, size.height * 0.76f)
         }
         drawPath(path, tint, style = stroke)
-    }
-}
-
-@Composable
-private fun SquadCameraIcon(modifier: Modifier, tint: Color) {
-    Canvas(modifier) {
-        val stroke = Stroke(width = 1.9.dp.toPx(), cap = StrokeCap.Round)
-        drawRoundRect(
-            color = tint,
-            topLeft = Offset(size.width * 0.15f, size.height * 0.3f),
-            size = Size(size.width * 0.7f, size.height * 0.5f),
-            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
-            style = stroke
-        )
-        drawLine(tint, Offset(size.width * 0.34f, size.height * 0.3f), Offset(size.width * 0.42f, size.height * 0.19f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.42f, size.height * 0.19f), Offset(size.width * 0.59f, size.height * 0.19f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.59f, size.height * 0.19f), Offset(size.width * 0.66f, size.height * 0.3f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        drawCircle(tint, radius = size.minDimension * 0.13f, center = Offset(size.width * 0.5f, size.height * 0.55f), style = stroke)
     }
 }
 

@@ -40,7 +40,7 @@ import com.example.sportsxtreme.data.local.entity.TeamEntity
         SyncQueueEntity::class,
         LiveMatchEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class SportsXtremeDatabase : RoomDatabase() {
@@ -295,6 +295,12 @@ abstract class SportsXtremeDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE live_matches ADD COLUMN nonStrikerSixes INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE live_matches ADD COLUMN strikerPlayerId TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE live_matches ADD COLUMN nonStrikerPlayerId TEXT DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE matches ADD COLUMN maxOversPerBowler INTEGER DEFAULT NULL")
             }
         }
     }

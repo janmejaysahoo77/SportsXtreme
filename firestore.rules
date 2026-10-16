@@ -242,6 +242,22 @@ service cloud.firestore {
       }
     }
 
+    // ---------- Registered grounds: available when setting up a friendly match ----------
+    match /grounds/{groundId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['name', 'location', 'ownerId', 'createdAt'])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.location is string
+        && request.resource.data.location.size() <= 240
+        && request.resource.data.createdAt == request.time;
+      allow update: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow delete: if (isSignedIn() && resource.data.ownerId == request.auth.uid) || isModerationAdmin();
+    }
+
     // Reporters may check their own report for duplicate protection. Moderators
     // can review the queue and record the outcome; reports cannot be deleted.
     match /communityPostReports/{reportId} {

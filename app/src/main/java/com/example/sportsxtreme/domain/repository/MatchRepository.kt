@@ -19,7 +19,8 @@ interface MatchRepository {
         matchId: String,
         format: MatchFormat,
         ballType: BallType,
-        overs: Int
+        overs: Int,
+        maxOversPerBowler: Int? = null
     ): Resource<Match>
     suspend fun updateMatchDetails(
         matchId: String,

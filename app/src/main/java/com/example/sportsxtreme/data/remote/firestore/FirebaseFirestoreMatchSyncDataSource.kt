@@ -74,6 +74,7 @@ class FirebaseFirestoreMatchSyncDataSource @Inject constructor(
         "format" to (format?.name ?: "T20"),
         "ballType" to (ballType?.name ?: "LEATHER"),
         "overs" to (overs ?: 20),
+        "maxOversPerBowler" to maxOversPerBowler,
         "venue" to venue,
         "matchDateEpochMs" to matchDateEpochMs,
         "matchTime" to matchTime,

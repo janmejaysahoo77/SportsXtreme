@@ -11,8 +11,9 @@ class UpdateMatchSettingsUseCase(private val repository: MatchRepository) {
         matchId: String,
         format: MatchFormat,
         ballType: BallType,
-        overs: Int
+        overs: Int,
+        maxOversPerBowler: Int? = null
     ): Resource<Match> {
-        return repository.updateMatchSettings(matchId, format, ballType, overs)
+        return repository.updateMatchSettings(matchId, format, ballType, overs, maxOversPerBowler)
     }
 }

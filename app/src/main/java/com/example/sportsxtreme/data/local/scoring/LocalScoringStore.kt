@@ -141,28 +141,47 @@ class LocalScoringStore @Inject constructor(
         projection: InningsProjection,
         updatedAtEpochMs: Long
     ) {
+        val events = ballEventDao.getBallEvents(innings.matchId, innings.inningsId).map { it.toDomain() }
+        val reversedDeliveryIds = events
+            .asSequence()
+            .filter { it.eventType == BallEventType.REVERSAL }
+            .mapNotNull { it.reversedEventId }
+            .toSet()
+        val hasActiveDeliveries = events.any {
+            it.eventType == BallEventType.DELIVERY && it.ballId !in reversedDeliveryIds
+        }
+        val firstDelivery = events.firstOrNull { it.eventType == BallEventType.DELIVERY }
+        val persistedProjection = if (!hasActiveDeliveries && firstDelivery != null) {
+            projection.copy(
+                strikerId = firstDelivery.strikerId,
+                nonStrikerId = firstDelivery.nonStrikerId,
+                bowlerId = firstDelivery.bowlerId
+            )
+        } else {
+            projection
+        }
         inningsDao.updateInnings(
             innings.copy(
-                strikerId = projection.strikerId,
-                nonStrikerId = projection.nonStrikerId,
-                currentBowlerId = projection.bowlerId,
-                score = projection.totalScore,
-                wickets = projection.wickets,
-                legalBalls = projection.legalBalls
+                strikerId = persistedProjection.strikerId,
+                nonStrikerId = persistedProjection.nonStrikerId,
+                currentBowlerId = persistedProjection.bowlerId,
+                score = persistedProjection.totalScore,
+                wickets = persistedProjection.wickets,
+                legalBalls = persistedProjection.legalBalls
             )
         )
         matchDao.getMatch(innings.matchId)?.let { match ->
             matchDao.updateMatch(
                 match.copy(
-                    strikerId = projection.strikerId,
-                    nonStrikerId = projection.nonStrikerId,
-                    currentBowlerId = projection.bowlerId,
+                    strikerId = persistedProjection.strikerId,
+                    nonStrikerId = persistedProjection.nonStrikerId,
+                    currentBowlerId = persistedProjection.bowlerId,
                     updatedAtEpochMs = updatedAtEpochMs
                 )
             )
         }
         battingDao.deleteForInnings(innings.matchId, innings.inningsId)
-        battingDao.replaceAll(projection.batting.map { scorecard ->
+        battingDao.replaceAll(persistedProjection.batting.map { scorecard ->
             BattingEntity(
                 matchId = innings.matchId,
                 inningsId = innings.inningsId,
@@ -180,7 +199,7 @@ class LocalScoringStore @Inject constructor(
             )
         })
         bowlingDao.deleteForInnings(innings.matchId, innings.inningsId)
-        bowlingDao.replaceAll(projection.bowling.map { scorecard ->
+        bowlingDao.replaceAll(persistedProjection.bowling.map { scorecard ->
             BowlingEntity(
                 matchId = innings.matchId,
                 inningsId = innings.inningsId,
@@ -200,13 +219,13 @@ class LocalScoringStore @Inject constructor(
                 matchId = innings.matchId,
                 inningsId = innings.inningsId,
                 inningsNumber = innings.number,
-                totalScore = projection.totalScore,
-                wickets = projection.wickets,
-                legalBalls = projection.legalBalls,
+                totalScore = persistedProjection.totalScore,
+                wickets = persistedProjection.wickets,
+                legalBalls = persistedProjection.legalBalls,
                 target = innings.target,
-                strikerId = projection.strikerId,
-                nonStrikerId = projection.nonStrikerId,
-                bowlerId = projection.bowlerId,
+                strikerId = persistedProjection.strikerId,
+                nonStrikerId = persistedProjection.nonStrikerId,
+                bowlerId = persistedProjection.bowlerId,
                 updatedAtEpochMs = updatedAtEpochMs
             )
         )
