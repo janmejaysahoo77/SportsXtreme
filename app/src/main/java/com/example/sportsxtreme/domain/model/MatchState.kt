@@ -20,6 +20,7 @@ data class MatchState(
     val currentOver: Overs = overs,
     val currentRunRate: Double? = null,
     val requiredRunRate: Double? = null,
+    val maxOversPerBowler: Int? = null,
     val updatedAtEpochMs: Long
 )
 

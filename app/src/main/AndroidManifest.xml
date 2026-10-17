@@ -129,7 +129,7 @@
             android:name=".presentation.scoring.MainScoringActivity"
             android:exported="false" />
         <activity
-            android:name=".presentation.match.ViewDetailsScreenWhileStartMatch"
+            android:name=".presentation.match.AddPlayingTeamByOrganizer"
             android:exported="false" />
         <activity
             android:name=".presentation.match.SelectTeamAorBActivity"
@@ -167,6 +167,9 @@
             android:exported="false" />
         <activity
             android:name=".presentation.tournament.LeagueMatchSetupActivity"
+            android:exported="false" />
+        <activity
+            android:name=".presentation.tournament.TournamentDetailsActivity"
             android:exported="false" />
         <activity
             android:name=".presentation.tournament.ScheduleMatchActivity"

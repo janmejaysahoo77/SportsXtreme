@@ -518,7 +518,7 @@ function projectRemoteInnings(deliveries, matchId, inningsId, inningsNumber, bat
     bowlerEvents.get(row.bowlerId).push({ overNumber, legal, conceded: runs + extras.filter((item) => ["WIDE", "NO_BALL"].includes(item.type)).reduce((sum, item) => sum + item.runs, 0) });
     if (row.wicket === true) {
       const type = row.dismissalType; const dismissed = row.dismissedPlayerId;
-      if (!dismissed || participants.players.get(dismissed) !== battingTeamId || !new Set(["BOWLED", "CAUGHT", "LBW", "RUN_OUT", "STUMPED", "HIT_WICKET", "TIMED_OUT", "OBSTRUCTING_THE_FIELD", "RETIRED_OUT", "RETIRED_HURT", "OTHER"]).has(type)) failFinalization("data-loss", "A dismissal is invalid.");
+      if (!dismissed || participants.players.get(dismissed) !== battingTeamId || !new Set(["BOWLED", "CAUGHT", "LBW", "RUN_OUT", "STUMPED", "HIT_WICKET", "TIMED_OUT", "OBSTRUCTING_THE_FIELD", "RETIRED_OUT", "RETIRED_HURT", "HIT_BALL_TWICE", "OTHER"]).has(type)) failFinalization("data-loss", "A dismissal is invalid.");
       if (type !== "RETIRED_HURT") wickets++;
       batter.status = type === "RETIRED_HURT" ? "RETIRED_HURT" : "OUT"; batter.dismissalType = type;
       const fielder = row.fielderId;

@@ -197,6 +197,7 @@ fun CommunityScreen(
     val currentUser = FirebaseAuth.getInstance().currentUser
     var accountPhotoUrl by remember(currentUser?.uid) { mutableStateOf(currentUser?.photoUrl?.toString()) }
     var isPostingRequest by remember { mutableStateOf(false) }
+    var isPostingProfile by remember { mutableStateOf(false) }
     var selectedContactProfile by remember { mutableStateOf<Opportunity?>(null) }
     var contactWhatsappNumber by remember { mutableStateOf<String?>(null) }
     var isLoadingContact by remember { mutableStateOf(false) }
@@ -312,31 +313,20 @@ fun CommunityScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(ScreenBg)
+            .background(Color(0xFF0A101C))
             .drawBehind {
                 drawRect(
-                    Brush.verticalGradient(
-                        listOf(Color(0xFF0A151B), ScreenBg, Color(0xFF020609))
-                    )
-                )
-                drawRect(
                     Brush.radialGradient(
-                        colors = listOf(Color(0x2545E9FF), Color(0x1045E9FF), Color.Transparent),
-                        center = Offset(size.width * 0.08f, size.height * 0.12f),
-                        radius = size.width * 0.85f
-                    )
-                )
-                drawRect(
-                    Brush.radialGradient(
-                        colors = listOf(Color(0x20C7FF1A), Color(0x0CC7FF1A), Color.Transparent),
-                        center = Offset(size.width * 0.94f, size.height * 0.58f),
-                        radius = size.width * 0.72f
+                        colors = listOf(Color(0x26C1FF00), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
                     )
                 )
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             SportsXtremeAppBar(onMenuClick = onMenuClick, showSearch = true)
+            Spacer(Modifier.height(10.dp))
             FilterRow(selectedIndex = selectedFilterIndex, onSelectFilter = { selectedFilterIndex = it })
             AnimatedContent(
                 targetState = selectedFilterIndex,
@@ -488,6 +478,7 @@ fun CommunityScreen(
             ) {
                 LookingForOpportunityScreen(
                     modifier = Modifier.fillMaxSize(),
+                    isPosting = isPostingRequest,
                     onBack = {
                         showLookingForForm = false
                         showCreateOptions = true
@@ -572,6 +563,7 @@ fun CommunityScreen(
             ) {
                 AddSelfProfileForm(
                     initialPhotoUrl = accountPhotoUrl,
+                    isPosting = isPostingProfile,
                     onBack = {
                         showProfileForm = false
                         showCreateOptions = true
@@ -580,12 +572,14 @@ fun CommunityScreen(
                         val user = FirebaseAuth.getInstance().currentUser
                         if (user == null) {
                             Toast.makeText(context, "Sign in to post a Community profile.", Toast.LENGTH_LONG).show()
-                        } else {
+                        } else if (!isPostingProfile) {
+                            isPostingProfile = true
                             scope.launch {
                                 val photoUrl = if (photoUri != null) {
                                     CloudinaryTournamentImageUploader(context.applicationContext)
                                         .upload(photoUri, "community-${UUID.randomUUID()}", "logo")
                                         .getOrElse { error ->
+                                            isPostingProfile = false
                                             Toast.makeText(context, "Could not upload profile photo: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
                                             return@launch
                                         }
@@ -614,10 +608,12 @@ fun CommunityScreen(
                                 )
                                 batch.commit()
                                     .addOnSuccessListener {
+                                        isPostingProfile = false
                                         Toast.makeText(context, "Your profile is now on Community.", Toast.LENGTH_SHORT).show()
                                         showProfileForm = false
                                     }
                                     .addOnFailureListener { error ->
+                                        isPostingProfile = false
                                         Toast.makeText(context, "Could not post profile: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
                                     }
                             }
@@ -662,6 +658,7 @@ private fun timeAgo(createdAtMillis: Long): String {
 @Composable
 private fun LookingForOpportunityScreen(
     modifier: Modifier = Modifier,
+    isPosting: Boolean,
     onBack: () -> Unit,
     onPost: (String, String, String, String, String, String, String, String, Boolean) -> Unit
 ) {
@@ -736,7 +733,7 @@ private fun LookingForOpportunityScreen(
             }
             Box(
                 Modifier.fillMaxWidth().padding(start = 5.dp, end = 5.dp, top = 8.dp, bottom = 14.dp).height(46.dp)
-                    .clip(RoundedCornerShape(11.dp)).background(GreenAccent).clickable {
+                    .clip(RoundedCornerShape(11.dp)).background(GreenAccent.copy(alpha = if (isPosting) 0.65f else 1f)).clickable(enabled = !isPosting) {
                         error = when {
                             category.isBlank() -> "Select what you are looking for."
                             title.isBlank() -> "Enter a title."
@@ -750,7 +747,14 @@ private fun LookingForOpportunityScreen(
                         if (error.isBlank()) onPost(category, title.trim(), description.trim(), date, time, location.trim(), format.trim(), whatsappNumber.trim(), whatsappConsent)
                     },
                 contentAlignment = Alignment.Center
-            ) { Text("Post", color = Color(0xFF111800), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold) }
+            ) {
+                if (isPosting) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFF111800), strokeWidth = 2.dp)
+                        Text("Posting…", color = Color(0xFF111800), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                } else Text("Post", color = Color(0xFF111800), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+            }
         }
     }
 }
@@ -802,6 +806,7 @@ private fun OpportunityDropdownField(label: String, value: String, placeholder: 
 @Composable
 private fun AddSelfProfileForm(
     initialPhotoUrl: String?,
+    isPosting: Boolean,
     onBack: () -> Unit,
     onPost: (String, String, String, String, String, String, String, String, String, Boolean, Uri?) -> Unit
 ) {
@@ -891,8 +896,8 @@ private fun AddSelfProfileForm(
                 .padding(top = 10.dp)
                 .height(46.dp)
                 .clip(RoundedCornerShape(11.dp))
-                .background(GreenAccent)
-                .clickable {
+                .background(GreenAccent.copy(alpha = if (isPosting) 0.65f else 1f))
+                .clickable(enabled = !isPosting) {
                     validationMessage = when {
                         fullName.isBlank() -> "Enter your full name."
                         category.isBlank() -> "Select a category."
@@ -906,7 +911,12 @@ private fun AddSelfProfileForm(
                 },
             contentAlignment = Alignment.Center
         ) {
-            Text("Post", color = Color(0xFF111800), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+            if (isPosting) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFF111800), strokeWidth = 2.dp)
+                    Text("Posting…", color = Color(0xFF111800), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                }
+            } else Text("Post", color = Color(0xFF111800), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
         }
     }
 }

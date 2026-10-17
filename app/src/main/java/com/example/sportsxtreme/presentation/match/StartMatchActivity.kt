@@ -256,6 +256,9 @@ class StartMatchActivity : ComponentActivity() {
                     }
                 },
                 isLoading = uiState.isLoading,
+                onSeriesClick = {
+                    Toast.makeText(this@StartMatchActivity, "Coming soon", Toast.LENGTH_SHORT).show()
+                },
                 isScheduleFlow = isScheduleFlow,
                 tournamentOnlyFlow = isScheduleFlow || tournamentOnlyFlow,
                 tournamentName = tournamentName.value,
@@ -289,6 +292,7 @@ private fun StartMatchScreen(
     onBack: () -> Unit,
     onContinue: (MatchType, Tournament) -> Unit,
     isLoading: Boolean,
+    onSeriesClick: () -> Unit,
     isScheduleFlow: Boolean,
     tournamentOnlyFlow: Boolean,
     tournamentName: String?,
@@ -326,7 +330,7 @@ private fun StartMatchScreen(
                 PremiumMetricRow()
                 SectionTitle("MATCH FORMAT")
                 MatchTypeCard("Tournament Match", "Part of a tournament or league competition.", MatchIcon.BAT, selectedType == 0 || isScheduleFlow || tournamentOnlyFlow) { selectedType = 0 }
-                MatchTypeCard("Series Match", "Create a multi-match series between teams.", MatchIcon.BAT, selectedType == 1, enabled = !isScheduleFlow && !tournamentOnlyFlow) { selectedType = 1 }
+                MatchTypeCard("Series Match", "Coming soon", MatchIcon.BAT, selected = false, enabled = false, comingSoon = true, onClick = onSeriesClick)
                 MatchTypeCard("Friendly Match", "Casual, Practice & Quick Setup", MatchIcon.HANDSHAKE, selectedType == 2, enabled = !isScheduleFlow && !tournamentOnlyFlow) { selectedType = 2 }
                 if (selectedType != 2) {
                     if (tournamentOnlyFlow) {
@@ -534,7 +538,15 @@ private fun PremiumMetric(number: String, label: String, color: Color, modifier:
 }
 
 @Composable
-private fun MatchTypeCard(title: String, subtitle: String, icon: MatchIcon, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+private fun MatchTypeCard(
+    title: String,
+    subtitle: String,
+    icon: MatchIcon,
+    selected: Boolean,
+    enabled: Boolean = true,
+    comingSoon: Boolean = false,
+    onClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -542,7 +554,7 @@ private fun MatchTypeCard(title: String, subtitle: String, icon: MatchIcon, sele
             .clip(RoundedCornerShape(14.dp))
             .background(if (!enabled) Brush.horizontalGradient(listOf(Color(0xFF05080C), Color(0xFF070A0F))) else if (selected) Brush.horizontalGradient(listOf(Color(0xFF1D3510), Color(0xFF0B1623))) else Brush.horizontalGradient(listOf(Color(0xFF0B1420), Color(0xFF09111D))))
             .border(if (selected && enabled) 2.dp else 1.dp, if (selected && enabled) MatchAccent else Color(0xFF18202B), RoundedCornerShape(14.dp))
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(enabled = enabled || comingSoon, onClick = onClick)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

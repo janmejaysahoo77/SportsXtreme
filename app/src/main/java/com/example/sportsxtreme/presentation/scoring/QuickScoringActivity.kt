@@ -28,6 +28,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -153,19 +154,28 @@ class QuickScoringActivity : ComponentActivity() {
         if (isDeleting.value) return
         isDeleting.value = true
         lifecycleScope.launch {
-            when (val result = matchRepository.deleteMatch(match.id)) {
-                is Resource.Success -> {
-                    expiryScheduler.cancel(match.id)
-                    resumableMatch.value = null
+            try {
+                when (val result = matchRepository.deleteMatch(match.id)) {
+                    is Resource.Success -> {
+                        expiryScheduler.cancel(match.id)
+                        resumableMatch.value = null
+                    }
+                    is Resource.Error -> Toast.makeText(
+                        this@QuickScoringActivity,
+                        result.message ?: "Unable to delete match",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    is Resource.Loading -> Unit
                 }
-                is Resource.Error -> Toast.makeText(
+            } catch (error: Exception) {
+                Toast.makeText(
                     this@QuickScoringActivity,
-                    result.message ?: "Unable to delete match",
+                    error.message ?: "Unable to delete match",
                     Toast.LENGTH_LONG
                 ).show()
-                is Resource.Loading -> Unit
+            } finally {
+                isDeleting.value = false
             }
-            isDeleting.value = false
         }
     }
 
@@ -303,10 +313,22 @@ private fun ResumableMatchCard(
                 TextButton(
                     enabled = !isDeleting,
                     onClick = {
-                        showDeleteConfirmation = false
                         onDelete()
                     }
-                ) { Text(if (isDeleting) "Deleting…" else "Delete", color = Color(0xFFB3261E)) }
+                ) {
+                    if (isDeleting) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color(0xFFB3261E),
+                                strokeWidth = 2.dp
+                            )
+                            Text("Deleting…", color = Color(0xFFB3261E))
+                        }
+                    } else {
+                        Text("Delete", color = Color(0xFFB3261E))
+                    }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirmation = false }, enabled = !isDeleting) {

@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -51,6 +52,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -214,6 +216,7 @@ private fun TournamentRegistrationScreen(
 ) {
     val tournamentState by viewModel.tournamentState.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
 
     LaunchedEffect(uiState) {
         if (uiState is TournamentRegistrationViewModel.UiState.Success) {
@@ -259,7 +262,10 @@ private fun TournamentRegistrationScreen(
             BannerUploader(logoPreview, logoUploading, onPickLogo, bannerPreview, bannerUploading, onPickBanner)
             TournamentModePicker(
                 selectedType = tournamentState.type,
-                onModeSelected = viewModel::updateMode
+                onModeSelected = viewModel::updateMode,
+                onSeriesClick = {
+                    Toast.makeText(context, "Coming soon", Toast.LENGTH_SHORT).show()
+                }
             )
             TournamentBasicFields(
                 state = tournamentState,
@@ -477,7 +483,11 @@ private fun BannerUploader(
 }
 
 @Composable
-private fun TournamentModePicker(selectedType: String, onModeSelected: (String) -> Unit) {
+private fun TournamentModePicker(
+    selectedType: String,
+    onModeSelected: (String) -> Unit,
+    onSeriesClick: () -> Unit
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Choose event type", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -491,11 +501,11 @@ private fun TournamentModePicker(selectedType: String, onModeSelected: (String) 
             )
             ModeCard(
                 title = "Series",
-                subtitle = "Friendly matches",
+                subtitle = "Coming soon",
                 imageRes = R.drawable.freindlymatch,
-                selected = selectedType == "Series",
+                selected = false,
                 accent = FormCyan,
-                modifier = Modifier.weight(1f).clickable { onModeSelected("Series") }
+                modifier = Modifier.weight(1f).alpha(0.48f).clickable(onClick = onSeriesClick)
             )
         }
     }

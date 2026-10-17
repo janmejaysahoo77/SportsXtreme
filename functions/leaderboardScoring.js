@@ -9,7 +9,7 @@ const SCORING = Object.freeze({
 });
 // Keep this aligned with InningsProjectionCalculator. The scorer currently
 // treats these four dismissal types as not credited to the bowler.
-const NON_BOWLER_CREDITED_DISMISSALS = new Set(["RUN_OUT", "RETIRED_OUT", "RETIRED_HURT", "OBSTRUCTING_THE_FIELD"]);
+const NON_BOWLER_CREDITED_DISMISSALS = new Set(["RUN_OUT", "RETIRED_OUT", "RETIRED_HURT", "OBSTRUCTING_THE_FIELD", "HIT_BALL_TWICE"]);
 
 function scoreBatting({ runs = 0, fours = 0, sixes = 0 }) {
   const milestone = runs >= 100 ? SCORING.batting.century : runs >= 50 ? SCORING.batting.halfCentury : 0;

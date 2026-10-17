@@ -66,6 +66,7 @@ enum class DismissalType {
     OBSTRUCTING_THE_FIELD,
     RETIRED_OUT,
     RETIRED_HURT,
+    HIT_BALL_TWICE,
     OTHER
 }
 

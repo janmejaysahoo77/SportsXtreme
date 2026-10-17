@@ -377,6 +377,37 @@ class MatchRepositoryImpl @Inject constructor(
         Resource.Success(matchStateFor(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to select batter") }
 
+    override suspend fun selectNextBowler(matchId: String, playerId: String): Resource<MatchState> = runCatching {
+        database.withTransaction {
+            val innings = requireNotNull(inningsDao.getLatestInnings(matchId)) { "Innings not found" }
+            require(innings.status == InningsStatus.LIVE.name) { "This innings is not live" }
+            require(innings.legalBalls > 0 && innings.legalBalls % 6 == 0) { "The over is not complete" }
+            require(playerId != innings.currentBowlerId) { "A bowler cannot bowl consecutive overs" }
+            val player = requireNotNull(playerDao.getPlayer(playerId)) { "Selected bowler was not found" }
+            require(player.teamId == innings.bowlingTeamId) { "Selected player is not in the bowling team" }
+            val selectedIds = playerDao.getPlayingXI(matchId, innings.bowlingTeamId).map { it.playerId }
+            require(selectedIds.isEmpty() || playerId in selectedIds) { "Select a bowler from the playing XI" }
+            val match = requireMatch(matchId)
+            match.maxOversPerBowler?.let { limit ->
+                require(limit > 0) { "The maximum overs per bowler setting is invalid" }
+                val events = ballEventDao.getBallEvents(matchId, innings.inningsId).map { it.toDomain() }
+                val reversedDeliveryIds = events.asSequence()
+                    .filter { it.eventType == BallEventType.REVERSAL }
+                    .mapNotNull { it.reversedEventId }
+                    .toSet()
+                val legalBallsByBowler = events.asSequence()
+                    .filter { it.eventType == BallEventType.DELIVERY && it.ballId !in reversedDeliveryIds && it.isLegalDelivery }
+                    .filter { it.bowlerId == playerId }
+                    .count()
+                require(legalBallsByBowler + 6 <= limit * 6) { "$limit over${if (limit == 1) "" else "s"} per bowler maximum reached" }
+            }
+            inningsDao.updateInnings(innings.copy(currentBowlerId = playerId))
+            matchDao.updateMatch(match.copy(currentBowlerId = playerId, updatedAtEpochMs = System.currentTimeMillis()))
+        }
+        loadAndSyncMatch(matchId)
+        Resource.Success(matchStateFor(matchId))
+    }.getOrElse { Resource.Error(it.message ?: "Unable to select bowler") }
+
     override suspend fun startSecondInnings(
         matchId: String,
         strikerId: String,
@@ -690,6 +721,7 @@ class MatchRepositoryImpl @Inject constructor(
             currentOverEvents = currentOverEvents,
             target = latestInnings?.target,
             currentInnings = latestInnings?.toDomain(),
+            maxOversPerBowler = match.maxOversPerBowler,
             updatedAtEpochMs = match.updatedAtEpochMs
         )
     }

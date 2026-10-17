@@ -1,24 +1,19 @@
 package com.example.sportsxtreme.presentation.match
 
 import com.example.sportsxtreme.R
-import com.example.sportsxtreme.presentation.tournament.*
-import com.example.sportsxtreme.presentation.components.*
-import com.example.sportsxtreme.presentation.auth.*
-import com.example.sportsxtreme.presentation.scoring.*
-import com.example.sportsxtreme.presentation.match.*
-import com.example.sportsxtreme.presentation.media.*
-import com.example.sportsxtreme.presentation.home.*
 import com.example.sportsxtreme.presentation.team.*
-import com.example.sportsxtreme.presentation.profile.*
-import com.example.sportsxtreme.presentation.store.*
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -60,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,51 +63,183 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import coil3.compose.AsyncImage
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.functions.FirebaseFunctions
+import android.widget.Toast
 
-class ViewDetailsScreenWhileStartMatch : ComponentActivity() {
+class AddPlayingTeamByOrganizer : ComponentActivity() {
+    private var selectedPlayerIds by mutableStateOf<Set<String>>(emptySet())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
-        val finalSquadLauncher = registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            if (result.resultCode == RESULT_OK) {
-                setResult(RESULT_OK, result.data)
-                finish()
-            }
-        }
+        val teamId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID).orEmpty()
+        val matchId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
+        val teamSlot = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT).orEmpty()
+        val selectedTeamName = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME).orEmpty()
         setContent {
+            val uiState = rememberOrganizerTeamDetails(teamId)
             ViewDetailsStartMatchScreen(
+                uiState = uiState,
+                selectedPlayerIds = selectedPlayerIds,
+                onTogglePlayer = { player -> selectedPlayerIds = if (player.userId in selectedPlayerIds) selectedPlayerIds - player.userId else selectedPlayerIds + player.userId },
                 onBack = { finish() },
-                onAddPlayer = { startActivity(Intent(this, AddPlayerActivity::class.java)) },
+                onAddPlayer = {
+                    startActivity(Intent(this, AddPlayerActivity::class.java)
+                        .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_ID, teamId)
+                        .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_NAME, uiState.details.name.ifBlank { selectedTeamName }))
+                },
                 onNext = {
-                    finalSquadLauncher.launch(
-                        Intent(this, FinalSquadActivity::class.java).putExtras(intent)
-                    )
+                    val selected = uiState.details.members.filter { it.userId in selectedPlayerIds }
+                    if (selected.isEmpty()) {
+                        Toast.makeText(this, "Select at least one player for this match.", Toast.LENGTH_SHORT).show()
+                    } else if (matchId.isBlank() || teamSlot.isBlank()) {
+                        Toast.makeText(this, "Match information is missing. Reopen team selection and try again.", Toast.LENGTH_LONG).show()
+                    } else {
+                        saveOrganizerMatchSquad(matchId, teamId, teamSlot, selectedTeamName.ifBlank { uiState.details.name }, selected) {
+                            val resultIntent = Intent().apply {
+                                putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, teamSlot)
+                                if (teamSlot == "A") {
+                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID, teamId)
+                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME, selectedTeamName.ifBlank { uiState.details.name })
+                                } else {
+                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID, teamId)
+                                    putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME, selectedTeamName.ifBlank { uiState.details.name })
+                                }
+                            }
+                            setResult(RESULT_OK, resultIntent)
+                            finish()
+                        }
+                    }
                 }
             )
         }
     }
+
+    private fun saveOrganizerMatchSquad(matchId: String, teamId: String, teamSlot: String, teamName: String, players: List<OrganizerPlayer>, onSaved: () -> Unit) {
+        val squad = mapOf(
+            "teamId" to teamId,
+            "teamName" to teamName,
+            "players" to players.map { player -> mapOf("userId" to player.userId, "displayName" to player.name, "playingRole" to "Player", "permanentTeamRoles" to emptyList<String>(), "matchRoles" to emptyList<String>()) },
+            "updatedAtEpochMs" to System.currentTimeMillis()
+        )
+        FirebaseFirestore.getInstance().collection("matches").document(matchId)
+            .set(mapOf("matchSquads" to mapOf(teamSlot to squad)), com.google.firebase.firestore.SetOptions.merge())
+            .addOnSuccessListener { onSaved() }
+            .addOnFailureListener { error -> Toast.makeText(this, error.message ?: "Unable to save match players", Toast.LENGTH_LONG).show() }
+    }
+
 }
 
 private val DetailsAccent = Color(0xFFC1FF00)
-private val DetailsBg = Color(0xFF020A15)
-private val DetailsPanel = Color(0xFF07101A)
-private val DetailsCard = Color(0xFF0B1523)
-private val DetailsStroke = Color(0xFF25314A)
 private val DetailsMuted = Color(0xFFADB8BD)
 
+private data class OrganizerPlayer(
+    val userId: String,
+    val name: String,
+    val photoUrl: String = "",
+    val matches: Int = 0,
+    val playedLastMatch: Boolean = false,
+    val selected: Boolean = true
+)
+
+private data class OrganizerTeamDetails(
+    val name: String = "",
+    val location: String = "",
+    val logoUrl: String = "",
+    val members: List<OrganizerPlayer> = emptyList()
+)
+
+private data class OrganizerTeamUiState(
+    val details: OrganizerTeamDetails = OrganizerTeamDetails(),
+    val isLoadingPlayers: Boolean = true
+)
+
 @Composable
-private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> Unit, onNext: () -> Unit) {
+private fun rememberOrganizerTeamDetails(teamId: String): OrganizerTeamUiState {
+    var state by remember(teamId) { mutableStateOf(OrganizerTeamUiState()) }
+    androidx.compose.runtime.DisposableEffect(teamId) {
+        if (teamId.isBlank()) return@DisposableEffect onDispose { }
+        val firestore = FirebaseFirestore.getInstance()
+        var matchListener: ListenerRegistration? = null
+        val teamListener = firestore.collection("teams").document(teamId).addSnapshotListener { team, _ ->
+            if (team == null || !team.exists()) return@addSnapshotListener
+            val roster = (team.get("members") as? List<*>).orEmpty()
+                .mapNotNull { it as? Map<*, *> }
+                .mapNotNull { member ->
+                    val userId = member["userId"] as? String ?: return@mapNotNull null
+                    OrganizerPlayer(
+                        userId = userId,
+                        name = (member["displayName"] as? String).orEmpty().ifBlank { "Team member" },
+                        photoUrl = (member["profilePhotoUrl"] as? String).orEmpty()
+                    )
+                }.distinctBy { it.userId }
+            state = OrganizerTeamUiState(details = OrganizerTeamDetails(
+                name = team.getString("teamName") ?: team.getString("name").orEmpty(),
+                location = team.getString("city") ?: team.getString("cityTown") ?: team.getString("location").orEmpty(),
+                logoUrl = listOf("logoUrl", "teamLogoUrl", "photoUrl").firstNotNullOfOrNull { team.getString(it)?.takeIf(String::isNotBlank) }.orEmpty(),
+                members = roster
+            ), isLoadingPlayers = roster.isNotEmpty())
+            FirebaseFunctions.getInstance().getHttpsCallable("getTeamMemberProfiles")
+                .call(mapOf("teamId" to teamId))
+                .addOnSuccessListener { result ->
+                    val profiles = ((result.data as? Map<*, *>)?.get("members") as? List<*>).orEmpty()
+                        .mapNotNull { it as? Map<*, *> }
+                        .associateBy { (it["userId"] as? String).orEmpty() }
+                    val enriched = roster.map { player ->
+                        val profile = profiles[player.userId]
+                        player.copy(
+                            name = (profile?.get("displayName") as? String).orEmpty().ifBlank { player.name },
+                            photoUrl = (profile?.get("profilePhotoUrl") as? String).orEmpty().ifBlank { player.photoUrl }
+                        )
+                    }
+                    state = state.copy(details = state.details.copy(members = enriched), isLoadingPlayers = false)
+                }
+                .addOnFailureListener { state = state.copy(isLoadingPlayers = false) }
+            matchListener?.remove()
+            matchListener = firestore.collection("matches").addSnapshotListener { matches, _ ->
+                val docs = matches?.documents.orEmpty()
+                val withCounts = roster.map { player ->
+                    val playerKeys = setOf(player.userId, "$teamId::${player.userId}")
+                    val appearances = docs.filter { match ->
+                        val lineups = (match.get("playingXI") as? Map<*, *>).orEmpty().values
+                            .flatMap { ((it as? Map<*, *>)?.get("playerIds") as? List<*>).orEmpty().filterIsInstance<String>() }
+                        val squadPlayers = (match.get("matchSquads") as? Map<*, *>).orEmpty().values
+                            .flatMap { ((it as? Map<*, *>)?.get("players") as? List<*>).orEmpty() }
+                            .filterIsInstance<Map<*, *>>()
+                            .mapNotNull { it["userId"] as? String }
+                        lineups.any { it in playerKeys } || player.userId in squadPlayers
+                    }
+                    val latestMatch = docs.maxByOrNull { it.getLong("updatedAtEpochMs") ?: it.getLong("createdAtEpochMs") ?: 0L }
+                    player.copy(matches = appearances.size, playedLastMatch = appearances.any { it.id == latestMatch?.id })
+                }
+                state = state.copy(details = state.details.copy(members = withCounts.map { counted ->
+                    val profile = state.details.members.firstOrNull { it.userId == counted.userId }
+                    counted.copy(name = profile?.name ?: counted.name, photoUrl = profile?.photoUrl ?: counted.photoUrl)
+                }))
+            }
+        }
+        onDispose {
+            teamListener.remove()
+            matchListener?.remove()
+        }
+    }
+    return state
+}
+
+@Composable
+private fun ViewDetailsStartMatchScreen(uiState: OrganizerTeamUiState, selectedPlayerIds: Set<String>, onTogglePlayer: (OrganizerPlayer) -> Unit, onBack: () -> Unit, onAddPlayer: () -> Unit, onNext: () -> Unit) {
+    val details = uiState.details
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(DetailsBg)
+            .background(Color(0xFF0A101C))
             .drawBehind {
-                drawCircle(Color(0x251B5BFF), radius = size.width * 0.62f, center = Offset(size.width * 0.52f, size.height * 0.18f))
-                drawCircle(Color(0x20C1FF00), radius = size.width * 0.5f, center = Offset(size.width * 0.5f, size.height * 0.34f))
+                drawRect(Brush.radialGradient(listOf(DetailsAccent.copy(alpha = 0.15f), Color.Transparent), center = Offset(size.width / 2f, -50f), radius = size.height * 0.6f))
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -122,8 +250,8 @@ private fun ViewDetailsStartMatchScreen(onBack: () -> Unit, onAddPlayer: () -> U
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 11.dp, vertical = 21.dp)
             ) {
-                TeamSummaryCard()
-                AvailablePlayersSection(onAddPlayer = onAddPlayer)
+                TeamSummaryCard(details)
+                AvailablePlayersSection(details.members, uiState.isLoadingPlayers, selectedPlayerIds, onTogglePlayer, onAddPlayer = onAddPlayer)
                 Spacer(Modifier.height(100.dp))
             }
         }
@@ -137,13 +265,13 @@ private fun DetailsTopBar(onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .height(55.dp)
-            .background(DetailsPanel)
+            .background(Color(0xFF0A101C))
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         DetailsArrow(Modifier.size(25.dp).clickable(onClick = onBack), Color.White)
         Text(
-            "Dinabandhu",
+            "Add Playing Team",
             color = Color.White,
             fontSize = 22.sp,
             fontWeight = FontWeight.Black,
@@ -154,7 +282,7 @@ private fun DetailsTopBar(onBack: () -> Unit) {
 }
 
 @Composable
-private fun TeamSummaryCard() {
+private fun TeamSummaryCard(details: OrganizerTeamDetails) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -182,24 +310,20 @@ private fun TeamSummaryCard() {
                     .background(Color(0xFF202838)),
                 contentAlignment = Alignment.Center
             ) {
-                BatBallIcon(Modifier.size(29.dp), DetailsAccent)
+                if (details.logoUrl.isNotBlank()) {
+                    AsyncImage(model = details.logoUrl, contentDescription = "${details.name} team photo", modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
+                } else {
+                    val fallbackColors = listOf(Color(0xFF1E73FF), Color(0xFF007A70), Color(0xFF7B32D9), Color(0xFFD51D49))
+                    val color = fallbackColors[(details.name.hashCode() and Int.MAX_VALUE) % fallbackColors.size]
+                    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(color, color.copy(alpha = 0.55f)))), contentAlignment = Alignment.Center) {
+                        val initials = details.name.split(Regex("\\s+")).filter { it.isNotBlank() }.take(2).joinToString("") { it.first().uppercase() }.ifBlank { "TM" }
+                        Text(initials, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    }
+                }
             }
             Column(modifier = Modifier.padding(start = 15.dp).weight(1f)) {
-                Text("Dinabandhu", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1)
-                Text("Established 2024", color = DetailsMuted, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            }
-            Box(
-                modifier = Modifier
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .border(1.dp, Color(0xFF516927), RoundedCornerShape(7.dp))
-                    .padding(horizontal = 14.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    EditPencilIcon(Modifier.size(15.dp), DetailsAccent)
-                    Text("Edit", color = DetailsAccent, fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 6.dp))
-                }
+                Text(details.name.ifBlank { "Team" }, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1)
+                Text(details.location.ifBlank { "Location unavailable" }, color = DetailsMuted, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
         }
         Row(
@@ -207,31 +331,15 @@ private fun TeamSummaryCard() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             GroupIcon(Modifier.size(18.dp), Color(0xFF64C8FF))
-            Text("1 Player", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 7.dp))
+            Text("${details.members.size} ${if (details.members.size == 1) "Player" else "Players"}", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 7.dp))
             ShieldIcon(Modifier.padding(start = 64.dp).size(18.dp), DetailsAccent)
             Text("Janaman Gana", color = DetailsMuted, fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 8.dp))
         }
     }
 }
 
-private data class StartPlayer(
-    val name: String,
-    val initials: String,
-    val playedLastMatch: Boolean,
-    val selected: Boolean,
-    val matches: Int,
-    val color: Color
-)
-
 @Composable
-private fun AvailablePlayersSection(onAddPlayer: () -> Unit) {
-    val players = listOf(
-        StartPlayer("ANSHU Gita", "AG", playedLastMatch = true, selected = true, matches = 0, color = Color(0xFF3B2430)),
-        StartPlayer("ASHWINI Gita", "AG", playedLastMatch = true, selected = false, matches = 0, color = Color(0xFF4D3220)),
-        StartPlayer("Abhimanyu Majhi", "AM", playedLastMatch = true, selected = true, matches = 0, color = Color(0xFF154453)),
-        StartPlayer("Raj Kumar", "RK", playedLastMatch = false, selected = false, matches = 12, color = Color(0xFF362530))
-    )
-
+private fun AvailablePlayersSection(players: List<OrganizerPlayer>, isLoading: Boolean, selectedPlayerIds: Set<String>, onTogglePlayer: (OrganizerPlayer) -> Unit, onAddPlayer: () -> Unit) {
     SearchBox(Modifier.padding(top = 18.dp))
     Row(
         modifier = Modifier
@@ -259,9 +367,36 @@ private fun AvailablePlayersSection(onAddPlayer: () -> Unit) {
         modifier = Modifier.padding(top = 15.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        players.forEach { player ->
-            PlayerSelectionRow(player = player)
+        when {
+            isLoading -> repeat(4) { index -> PlayerSkeletonRow(index) }
+            players.isEmpty() -> Text("No players found in this team.", color = DetailsMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp))
+            else -> players.forEach { player -> PlayerSelectionRow(player = player.copy(selected = player.userId in selectedPlayerIds), onClick = { onTogglePlayer(player) }) }
         }
+    }
+}
+
+@Composable
+private fun PlayerSkeletonRow(index: Int) {
+    val transition = rememberInfiniteTransition(label = "organizer-player-skeleton-$index")
+    val alpha by transition.animateFloat(
+        initialValue = 0.28f,
+        targetValue = 0.72f,
+        animationSpec = infiniteRepeatable(tween(850), repeatMode = RepeatMode.Reverse),
+        label = "organizer-player-skeleton-alpha-$index"
+    )
+    val bone = Color(0xFF708199).copy(alpha = alpha)
+    Row(
+        Modifier.fillMaxWidth().height(76.dp).clip(RoundedCornerShape(14.dp))
+            .background(Brush.horizontalGradient(listOf(Color(0xFF101929), Color(0xFF0A101C))))
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(45.dp).clip(CircleShape).background(bone))
+        Column(Modifier.weight(1f).padding(start = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.fillMaxWidth(0.68f).height(12.dp).clip(RoundedCornerShape(6.dp)).background(bone))
+            Box(Modifier.fillMaxWidth(0.4f).height(8.dp).clip(RoundedCornerShape(5.dp)).background(bone.copy(alpha = alpha * 0.7f)))
+        }
+        Box(Modifier.size(22.dp, 28.dp).clip(RoundedCornerShape(5.dp)).background(bone))
     }
 }
 
@@ -283,11 +418,12 @@ private fun SearchBox(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PlayerSelectionRow(player: StartPlayer) {
+private fun PlayerSelectionRow(player: OrganizerPlayer, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .bounceClick()
+            .clickable(onClick = onClick)
             .height(76.dp)
             .shadow(if (player.selected) 16.dp else 8.dp, RoundedCornerShape(14.dp), spotColor = if (player.selected) DetailsAccent.copy(alpha = 0.6f) else Color.Black, clip = false)
             .clip(RoundedCornerShape(14.dp))
@@ -300,11 +436,13 @@ private fun PlayerSelectionRow(player: StartPlayer) {
                 modifier = Modifier
                     .size(45.dp)
                     .clip(CircleShape)
-                    .background(Brush.radialGradient(listOf(player.color.copy(alpha = 0.95f), Color(0xFF101820)), radius = 54f))
+                    .background(Color(0xFF1A2840))
                     .border(1.dp, Color(0xFF364158), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                PlayerAvatar(Modifier.size(36.dp), player.initials)
+                if (player.photoUrl.isNotBlank()) {
+                    AsyncImage(model = player.photoUrl, contentDescription = "${player.name} profile photo", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                } else PlayerAvatar(Modifier.size(36.dp), player.name.split(" ").mapNotNull { it.firstOrNull() }.take(2).joinToString("").uppercase())
             }
             if (player.selected) {
                 Box(
@@ -326,10 +464,10 @@ private fun PlayerSelectionRow(player: StartPlayer) {
                     modifier = Modifier
                         .size(5.dp)
                         .clip(CircleShape)
-                        .background(if (player.playedLastMatch) DetailsAccent else Color(0xFF708199))
+                    .background(if (player.playedLastMatch) DetailsAccent else Color(0xFF708199))
                 )
                 Text(
-                    if (player.playedLastMatch) "Played last match" else "Available",
+                    if (player.playedLastMatch) "Played in recent match" else "Available",
                     color = Color(0xFF9EACBB),
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
@@ -349,7 +487,7 @@ private fun BottomActions(modifier: Modifier = Modifier, onAddPlayer: () -> Unit
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6020A15), DetailsBg)))
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE60A101C), Color(0xFF0A101C))))
             .padding(horizontal = 16.dp, vertical = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -536,3 +674,4 @@ fun Modifier.bounceClick(onClick: (() -> Unit)? = null) = composed {
             }
         }
 }
+

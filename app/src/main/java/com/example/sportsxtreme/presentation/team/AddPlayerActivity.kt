@@ -15,8 +15,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,7 +50,8 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class AddPlayerActivity : ComponentActivity() {
     @Inject lateinit var functions: FirebaseFunctions
-    private var isCreatingInvite = false
+    private var isCreatingInvite by mutableStateOf(false)
+    private var isCreatingWhatsAppInvite by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,7 +64,9 @@ class AddPlayerActivity : ComponentActivity() {
             AddPlayerScreen(
                 teamName = teamName,
                 onBack = ::finish,
-                onInvite = { createAndShareInvite(teamId, teamName) },
+                isCreatingInvite = isCreatingInvite,
+                isCreatingWhatsAppInvite = isCreatingWhatsAppInvite,
+                onInvite = { viaWhatsApp -> createAndShareInvite(teamId, teamName, viaWhatsApp) },
                 onAddByMobileNumber = {
                     startActivity(
                         Intent(this, AddPlayerByMobileNumberActivity::class.java)
@@ -67,18 +74,25 @@ class AddPlayerActivity : ComponentActivity() {
                             .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_ID, teamId)
                     )
                 },
-                onScanQrCode = { startActivity(Intent(this, QRForPlayerAddingActivity::class.java)) }
+                onShowInviteQrCode = {
+                    startActivity(
+                        Intent(this, QRForPlayerAddingActivity::class.java)
+                            .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_ID, teamId)
+                            .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_NAME, teamName)
+                    )
+                }
             )
         }
     }
 
-    private fun createAndShareInvite(teamId: String, teamName: String) {
+    private fun createAndShareInvite(teamId: String, teamName: String, viaWhatsApp: Boolean) {
         if (isCreatingInvite) return
         if (teamId.isBlank()) {
             Toast.makeText(this, "This team is missing its ID. Please reopen it and try again.", Toast.LENGTH_SHORT).show()
             return
         }
         isCreatingInvite = true
+        isCreatingWhatsAppInvite = viaWhatsApp
         functions.getHttpsCallable(CREATE_TEAM_INVITE_FUNCTION)
             .call(mapOf("teamId" to teamId))
             .addOnSuccessListener { result ->
@@ -86,7 +100,7 @@ class AddPlayerActivity : ComponentActivity() {
                 if (invitationUrl.isNullOrBlank()) {
                     Toast.makeText(this, "Could not create an invitation.", Toast.LENGTH_SHORT).show()
                 } else {
-                    shareInvite(teamName, invitationUrl)
+                    shareInvite(teamName, invitationUrl, viaWhatsApp)
                 }
             }
             .addOnFailureListener { error ->
@@ -95,17 +109,21 @@ class AddPlayerActivity : ComponentActivity() {
             .addOnCompleteListener { isCreatingInvite = false }
     }
 
-    private fun shareInvite(teamName: String, invitationUrl: String) {
+    private fun shareInvite(teamName: String, invitationUrl: String, viaWhatsApp: Boolean) {
         val shareText = "Join $teamName on SportsXtreme:\n$invitationUrl"
-        startActivity(
-            Intent.createChooser(
-                Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, shareText)
-                },
-                "Invite members to $teamName"
-            )
-        )
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, shareText)
+        }
+        if (viaWhatsApp) {
+            try {
+                startActivity(sendIntent.setPackage("com.whatsapp"))
+            } catch (_: android.content.ActivityNotFoundException) {
+                Toast.makeText(this, "WhatsApp is not installed.", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            startActivity(Intent.createChooser(sendIntent, "Invite members to $teamName"))
+        }
     }
 
     private companion object {
@@ -122,7 +140,15 @@ private val Muted = Color(0xFF9BAABD)
 private val Primary = Color(0xFFF4F7FA)
 
 @Composable
-private fun AddPlayerScreen(teamName: String, onBack: () -> Unit, onInvite: () -> Unit, onAddByMobileNumber: () -> Unit, onScanQrCode: () -> Unit) {
+private fun AddPlayerScreen(
+    teamName: String,
+    isCreatingInvite: Boolean,
+    isCreatingWhatsAppInvite: Boolean,
+    onBack: () -> Unit,
+    onInvite: (Boolean) -> Unit,
+    onAddByMobileNumber: () -> Unit,
+    onShowInviteQrCode: () -> Unit
+) {
     Box(
         Modifier.fillMaxSize().background(ScreenBg).drawBehind {
             drawCircle(Accent.copy(alpha = .045f), size.width * .72f, Offset(size.width * .78f, size.height * .04f))
@@ -135,9 +161,9 @@ private fun AddPlayerScreen(teamName: String, onBack: () -> Unit, onInvite: () -
                 Text("ADD TO YOUR SQUAD", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 26.dp))
                 Text("Choose an invite method", color = Primary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 7.dp))
                 Text("Build your team in the way that works best for you.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
-                InviteCard(Modifier.padding(top = 25.dp), onInvite)
+                InviteCard(Modifier.padding(top = 25.dp), isCreatingInvite, isCreatingWhatsAppInvite, onInvite)
                 MethodCard(Modifier.padding(top = 12.dp), "Add by Mobile Number", "Quickly add a player using their phone number.", { PhoneIcon(Modifier.size(23.dp), Accent) }, onAddByMobileNumber)
-                MethodCard(Modifier.padding(top = 12.dp), "Scan QR Code", "Scan a player's QR code to add them instantly.", { QrIcon(Modifier.size(22.dp), Accent) }, onScanQrCode)
+                MethodCard(Modifier.padding(top = 12.dp), "Invite by QR Code", "Show your team invite QR code so players can scan and join.", { QrIcon(Modifier.size(22.dp), Accent) }, onShowInviteQrCode)
                 InfoCard(Modifier.padding(top = 22.dp))
                 Spacer(Modifier.height(28.dp))
             }
@@ -159,7 +185,12 @@ private fun TopBar(teamName: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun InviteCard(modifier: Modifier, onInvite: () -> Unit) {
+private fun InviteCard(
+    modifier: Modifier,
+    isCreatingInvite: Boolean,
+    isCreatingWhatsAppInvite: Boolean,
+    onInvite: (Boolean) -> Unit
+) {
     Column(modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Brush.verticalGradient(listOf(Color(0xFF15231C), SurfaceRaised))).border(1.dp, Accent.copy(alpha = .48f), RoundedCornerShape(18.dp)).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             MethodIcon(true) { ShareIcon(Modifier.size(23.dp), Color(0xFF13200A)) }
@@ -170,8 +201,8 @@ private fun InviteCard(modifier: Modifier, onInvite: () -> Unit) {
             Text("Recommended", color = Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
         }
         Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ShareButton("Share", Modifier.weight(1f), false, onInvite)
-            ShareButton("WhatsApp", Modifier.weight(1f), true, onInvite)
+            ShareButton("Share", Modifier.weight(1f), false, isCreatingInvite && !isCreatingWhatsAppInvite, isCreatingInvite) { onInvite(false) }
+            ShareButton("WhatsApp", Modifier.weight(1f), true, isCreatingInvite && isCreatingWhatsAppInvite, isCreatingInvite) { onInvite(true) }
         }
     }
 }
@@ -194,9 +225,22 @@ private fun MethodIcon(selected: Boolean, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun ShareButton(text: String, modifier: Modifier, isWhatsApp: Boolean, onClick: () -> Unit) {
-    Row(modifier.height(42.dp).clip(RoundedCornerShape(11.dp)).background(if (isWhatsApp) Accent else Color.Transparent).border(1.dp, if (isWhatsApp) Accent else StrokeColor, RoundedCornerShape(11.dp)).clickable(onClick = onClick), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        if (isWhatsApp) Image(painterResource(R.drawable.whatsappicon), "WhatsApp", Modifier.size(16.dp)) else SmallShareIcon(Modifier.size(16.dp), Accent)
+private fun ShareButton(
+    text: String,
+    modifier: Modifier,
+    isWhatsApp: Boolean,
+    showLoading: Boolean,
+    isBusy: Boolean,
+    onClick: () -> Unit
+) {
+    Row(modifier.height(42.dp).clip(RoundedCornerShape(11.dp)).background(if (isWhatsApp) Accent else Color.Transparent).border(1.dp, if (isWhatsApp) Accent else StrokeColor, RoundedCornerShape(11.dp)).clickable(enabled = !isBusy, onClick = onClick), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        if (showLoading) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = if (isWhatsApp) Color(0xFF10170B) else Accent, strokeWidth = 2.dp)
+        } else if (isWhatsApp) {
+            Image(painterResource(R.drawable.whatsappicon), "WhatsApp", Modifier.size(16.dp))
+        } else {
+            SmallShareIcon(Modifier.size(16.dp), Accent)
+        }
         Text(text, color = if (isWhatsApp) Color(0xFF10170B) else Primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp))
     }
 }

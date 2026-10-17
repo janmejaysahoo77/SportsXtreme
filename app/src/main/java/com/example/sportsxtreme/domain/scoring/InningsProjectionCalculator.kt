@@ -140,6 +140,7 @@ object InningsProjectionCalculator {
         DismissalType.RUN_OUT,
         DismissalType.RETIRED_OUT,
         DismissalType.RETIRED_HURT,
-        DismissalType.OBSTRUCTING_THE_FIELD
+        DismissalType.OBSTRUCTING_THE_FIELD,
+        DismissalType.HIT_BALL_TWICE
     )
 }

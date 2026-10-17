@@ -61,6 +61,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.domain.repository.TournamentRepository
@@ -136,13 +137,12 @@ class LeagueMatchSetupActivity : ComponentActivity() {
                 },
                 onContinue = {
                     startActivity(
-                        Intent(this, SelectPlayingTeamsActivity::class.java)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_SCHEDULE_FLOW, !isTournamentMatchFlow)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_MATCH_FLOW, isTournamentMatchFlow)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_NAME, tournament?.name ?: fallbackTournamentName)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
-                            .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_STAGE, stage)
+                        Intent(this, TournamentDetailsActivity::class.java)
+                            .putExtra(TournamentDetailsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                            .putExtra(TournamentDetailsActivity.EXTRA_TOURNAMENT_NAME, tournament?.name ?: fallbackTournamentName)
+                            .putExtra(TournamentDetailsActivity.EXTRA_MATCH_ID, matchId)
+                            .putExtra(TournamentDetailsActivity.EXTRA_SELECTED_STAGE, stage)
+                            .putExtra(TournamentDetailsActivity.EXTRA_TOURNAMENT_MATCH_FLOW, isTournamentMatchFlow)
                     )
                 }
             )
@@ -156,7 +156,7 @@ class LeagueMatchSetupActivity : ComponentActivity() {
 }
 
 private val SetupAccent = XtremeLime
-private val SetupBg = XtremeBgBlue
+private val SetupBg = Color(0xFF0A101C)
 private val SetupPanel = XtremeCardBlue
 private val SetupCard = XtremeCardBlue
 private val SetupMuted = XtremeMuted
@@ -183,8 +183,13 @@ private fun LeagueMatchSetupScreen(
             .fillMaxSize()
             .background(SetupBg)
             .drawBehind {
-                drawCircle(Color(0x191C5DFF), radius = size.width * 0.72f, center = Offset(size.width * 0.9f, size.height * 0.92f))
-                drawCircle(Color(0x102A3B13), radius = size.width * 0.64f, center = Offset(size.width * 0.02f, size.height * 0.14f))
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(SetupAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
+                    )
+                )
             }
     ) {
         SetupTopBar(onBack)
@@ -263,83 +268,93 @@ private fun SetupTournamentCard(tournament: Tournament?, fallbackTournamentName:
         ?: tournament?.requirements?.location?.takeIf { it.isNotBlank() }
         ?: "Location not set"
     val teamCount = tournament?.requirements?.numberOfTeams?.takeIf { it.isNotBlank() } ?: "—"
-    Row(
+    val defaultBannerRes = when ((tournament?.id.orEmpty().hashCode() and Int.MAX_VALUE) % 4) {
+        0 -> R.drawable.stadium
+        1 -> R.drawable.club_stadium
+        2 -> R.drawable.trophyfull
+        else -> R.drawable.cricketblast
+    }
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(172.dp)
-            .drawBehind {
-                drawRoundRect(
-                    color = Color.Black.copy(alpha = 0.56f),
-                    topLeft = Offset(0f, 13.dp.toPx()),
-                    size = Size(size.width, size.height),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx(), 16.dp.toPx())
-                )
-                drawRoundRect(
-                    color = SetupAccent.copy(alpha = 0.12f),
-                    topLeft = Offset(0f, 5.dp.toPx()),
-                    size = Size(size.width, size.height),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx(), 16.dp.toPx())
-                )
-            }
+            .height(196.dp)
             .shadow(26.dp, RoundedCornerShape(16.dp), clip = false)
             .clip(RoundedCornerShape(16.dp))
             .background(SetupCard)
-            .drawBehind {
-                drawCircle(Color.White.copy(alpha = 0.14f), radius = size.width * 0.38f, center = Offset(size.width * 0.98f, -size.height * 0.05f))
-                drawCircle(SetupAccent.copy(alpha = 0.10f), radius = size.width * 0.36f, center = Offset(size.width * 0.9f, size.height * 0.08f))
-            }
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(width = 7.dp, height = 138.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(SetupAccent)
-        )
-        Column(modifier = Modifier.padding(start = 15.dp).weight(1f)) {
-            Text(tournament?.name?.ifBlank { "Tournament" } ?: fallbackTournamentName.ifBlank { "Loading tournament…" }, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Box(
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(SetupAccent)
-                    .padding(horizontal = 10.dp, vertical = 3.dp)
-            ) {
-                Text("ACTIVE SEASON 2024", color = Color(0xFF111604), fontSize = 9.sp, fontWeight = FontWeight.Black)
-            }
-            Row(modifier = Modifier.padding(top = 32.dp), verticalAlignment = Alignment.CenterVertically) {
-                SetupGlyphIcon(SetupGlyph.PIN, Modifier.size(19.dp), SetupAccent)
-                Text(location, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                SetupGlyphIcon(SetupGlyph.TEAMS, Modifier.padding(start = 22.dp).size(19.dp), SetupAccent)
-                Text("$teamCount Teams", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 7.dp), maxLines = 1)
-            }
-            Row(modifier = Modifier.padding(top = 23.dp), verticalAlignment = Alignment.CenterVertically) {
-                SetupGlyphIcon(SetupGlyph.TROPHY, Modifier.size(18.dp), SetupAccent)
-                Text(tournament?.requirements?.tournamentFormat?.ifBlank { "Tournament" } ?: "Tournament", color = Color.White, fontSize = 16.5.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 8.dp))
-            }
-        }
-        Box(
-            modifier = Modifier
-                .size(64.dp)
-                .shadow(16.dp, RoundedCornerShape(12.dp), clip = false)
-                .clip(RoundedCornerShape(12.dp))
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(Color(0xFF273623), Color(0xFF07101A)),
-                        radius = 62f
-                    )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                painter = painterResource(R.drawable.tournamentlogo),
-                contentDescription = "Tournament logo",
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(6.dp)),
+        if (!tournament?.bannerUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = tournament?.bannerUrl,
+                contentDescription = "Tournament banner",
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
+        } else {
+            Image(
+                painter = painterResource(defaultBannerRes),
+                contentDescription = "Default tournament banner",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x44071123), Color(0xF2071123)))))
+        Row(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(width = 6.dp, height = 158.dp).clip(RoundedCornerShape(8.dp)).background(SetupAccent))
+            Column(
+                modifier = Modifier.weight(1f).padding(start = 13.dp, end = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    tournament?.name?.ifBlank { "Tournament" } ?: fallbackTournamentName.ifBlank { "Loading tournament…" },
+                    color = Color.White, fontSize = 21.sp, lineHeight = 25.sp, fontWeight = FontWeight.Black,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SetupGlyphIcon(SetupGlyph.PIN, Modifier.size(16.dp), SetupAccent)
+                    Text(location, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SetupGlyphIcon(SetupGlyph.TEAMS, Modifier.size(16.dp), SetupAccent)
+                    Text("$teamCount Teams", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+                Row(
+                    modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(SetupAccent).padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SetupGlyphIcon(SetupGlyph.TROPHY, Modifier.size(14.dp), Color(0xFF111604))
+                    Text(
+                        tournament?.requirements?.tournamentFormat?.ifBlank { "Tournament" } ?: "Tournament",
+                        color = Color(0xFF111604), fontSize = 12.sp, fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(start = 6.dp), maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier.size(62.dp).shadow(12.dp, RoundedCornerShape(14.dp), clip = false)
+                    .clip(RoundedCornerShape(14.dp)).background(Color(0xFF07101A)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!tournament?.logoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = tournament?.logoUrl,
+                        contentDescription = "Tournament profile image",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    val tournamentInitial = (tournament?.name?.ifBlank { fallbackTournamentName }
+                        ?.trim()?.firstOrNull()?.uppercaseChar() ?: 'T').toString()
+                    Text(
+                        text = tournamentInitial,
+                        color = SetupAccent,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
         }
     }
 }

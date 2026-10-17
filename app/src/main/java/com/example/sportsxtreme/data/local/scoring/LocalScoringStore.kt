@@ -47,6 +47,31 @@ class LocalScoringStore @Inject constructor(
         require(innings.matchId == event.matchId) { "Delivery does not belong to this innings" }
         require(innings.number == event.inningsNumber) { "Delivery innings number does not match" }
 
+        val existingEvents = ballEventDao.getBallEvents(event.matchId, event.inningsId).map { it.toDomain() }
+        val reversedDeliveryIds = existingEvents.asSequence()
+            .filter { it.eventType == BallEventType.REVERSAL }
+            .mapNotNull { it.reversedEventId }
+            .toSet()
+        val activeDeliveries = existingEvents.filter {
+            it.eventType == BallEventType.DELIVERY && it.ballId !in reversedDeliveryIds
+        }
+        require(innings.currentBowlerId == event.bowlerId) { "Select the next bowler before scoring" }
+        if (innings.legalBalls > 0 && innings.legalBalls % 6 == 0) {
+            val previousOverNumber = innings.legalBalls / 6 - 1
+            val previousOverBowlerId = activeDeliveries
+                .lastOrNull { it.overNumber == previousOverNumber }
+                ?.bowlerId
+            require(previousOverBowlerId != event.bowlerId) { "Select a different bowler for the next over" }
+        }
+        val matchSettings = matchDao.getMatch(event.matchId)
+        matchSettings?.maxOversPerBowler?.let { limit ->
+            require(limit > 0) { "The maximum overs per bowler setting is invalid" }
+            if (event.isLegalDelivery) {
+                val alreadyBowled = activeDeliveries.count { it.bowlerId == event.bowlerId && it.isLegalDelivery }
+                require(alreadyBowled < limit * 6) { "$limit over${if (limit == 1) "" else "s"} per bowler maximum reached" }
+            }
+        }
+
         val inserted = ballEventDao.insertBall(event.copy(syncState = SyncState.PENDING).toEntity()) != -1L
         val events = ballEventDao.getBallEvents(event.matchId, event.inningsId).map { it.toDomain() }
         val projection = InningsProjectionCalculator.calculate(events)

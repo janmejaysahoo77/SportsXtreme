@@ -253,6 +253,7 @@ class ScoringRepositoryImpl @Inject constructor(
             currentOverEvents = currentOverEvents,
             target = innings?.target,
             currentInnings = innings?.toDomain(),
+            maxOversPerBowler = match.maxOversPerBowler,
             updatedAtEpochMs = match.updatedAtEpochMs
         )
     }

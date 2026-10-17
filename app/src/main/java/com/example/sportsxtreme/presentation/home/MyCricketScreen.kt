@@ -193,7 +193,6 @@ private fun rememberPlayerMatches(userId: String?, playerTeamLogosById: Map<Stri
             return@DisposableEffect onDispose { }
         }
 
-        state = PlayerMatchesState()
         val registration = FirebaseFirestore.getInstance().collection("matches")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -203,11 +202,17 @@ private fun rememberPlayerMatches(userId: String?, playerTeamLogosById: Map<Stri
                     val matches = documents
                         .filter { document -> document.isPlayerMatch(userId, playerTeamLogosById.keys) }
                         .mapNotNull { document -> document.toPlayerCricketMatch(playerTeamLogosById) }
-                        .sortedWith(compareBy<CricketMatch> { it.status == "Finished" }.thenBy { it.dateEpochMs })
+                        .sortedWith(
+                            compareByDescending<CricketMatch> { it.status == "Finished" }
+                                .thenByDescending { it.dateEpochMs }
+                        )
                     val hostedMatches = documents
                         .filter { document -> document.isHostedBy(userId) }
                         .mapNotNull { document -> document.toPlayerCricketMatch(playerTeamLogosById) }
-                        .sortedWith(compareBy<CricketMatch> { it.status == "Finished" }.thenBy { it.dateEpochMs })
+                        .sortedWith(
+                            compareByDescending<CricketMatch> { it.status == "Finished" }
+                                .thenByDescending { it.dateEpochMs }
+                        )
                     state = PlayerMatchesState(
                         loading = false,
                         matches = matches,

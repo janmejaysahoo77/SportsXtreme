@@ -134,18 +134,34 @@ private fun FriendlyMatchSetupScreen(
 ) {
     var format by remember { mutableIntStateOf(1) }
     var ballType by remember { mutableIntStateOf(1) }
-    var selectedOvers by remember { mutableIntStateOf(1) }
+    var selectedOvers by remember { mutableIntStateOf(2) }
     var customOvers by remember { mutableStateOf("15") }
     var showCustomOversDialog by remember { mutableStateOf(false) }
     var customOversError by remember { mutableStateOf(false) }
-    var selectedBowlerOvers by remember { mutableIntStateOf(-1) }
+    var selectedBowlerOvers by remember { mutableIntStateOf(1) }
     var customBowlerOvers by remember { mutableStateOf("") }
     var showCustomBowlerOversDialog by remember { mutableStateOf(false) }
     var customBowlerOversError by remember { mutableStateOf(false) }
-    val formats = listOf("Limited Overs", "T20 Match", "Test Match")
+    val formats = listOf("Limited Overs", "T20 Match", "T10 Match", "Test Match")
     val overs = listOf("5", "10", "20", "Custom")
-    val matchFormats = listOf(MatchFormat.ODI, MatchFormat.T20, MatchFormat.TEST)
+    val matchFormats = listOf(MatchFormat.ODI, MatchFormat.T20, MatchFormat.T10, MatchFormat.TEST)
     val ballTypes = listOf(BallType.LEATHER, BallType.TENNIS, BallType.OTHER)
+    val totalOversLocked = format == 1 || format == 2
+
+    fun selectFormat(index: Int) {
+        format = index
+        when (index) {
+            1 -> {
+                selectedOvers = 2
+                selectedBowlerOvers = 1
+            }
+            2 -> {
+                selectedOvers = 1
+                selectedBowlerOvers = 0
+            }
+            else -> if (totalOversLocked) selectedOvers = 0
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -180,12 +196,18 @@ private fun FriendlyMatchSetupScreen(
                     )
                 }
                 FriendlySectionTitle("Choose Format")
-                Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    formats.take(2).forEachIndexed { index, option ->
-                        FriendlyFormatChip(option, format == index) { format = index }
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        listOf(0, 1).forEach { index ->
+                            FriendlyFormatChip(formats[index], format == index) { selectFormat(index) }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        listOf(2, 3).forEach { index ->
+                            FriendlyFormatChip(formats[index], format == index) { selectFormat(index) }
+                        }
                     }
                 }
-                FriendlyFormatChip("Test Match", format == 2) { format = 2 }
 
                 FriendlySectionTitle("Select Ball Type")
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -212,7 +234,7 @@ private fun FriendlyMatchSetupScreen(
                                 .fillMaxSize()
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(if (selectedOvers == index) FriendlyAccent else Color.Transparent)
-                                .clickable {
+                                .clickable(enabled = !totalOversLocked) {
                                     if (index == 3) {
                                         showCustomOversDialog = true
                                     } else {
@@ -223,7 +245,7 @@ private fun FriendlyMatchSetupScreen(
                         ) {
                             Text(
                                 value,
-                                color = if (selectedOvers == index) Color(0xFF142008) else Color(0xFFBAC4C0),
+                                color = if (selectedOvers == index) Color(0xFF142008) else if (totalOversLocked) Color(0xFF647078) else Color(0xFFBAC4C0),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Black
                             )

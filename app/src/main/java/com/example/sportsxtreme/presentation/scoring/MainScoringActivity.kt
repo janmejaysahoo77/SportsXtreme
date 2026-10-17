@@ -84,6 +84,7 @@ import com.example.sportsxtreme.domain.repository.MatchRepository
 import javax.inject.Inject
 import kotlinx.coroutines.launch
 import com.example.sportsxtreme.domain.model.Player
+import com.example.sportsxtreme.domain.model.DismissalType
 
 @AndroidEntryPoint
 class MainScoringActivity : ComponentActivity() {
@@ -106,6 +107,7 @@ class MainScoringActivity : ComponentActivity() {
                 scorerName = uiState.scorerName,
                 onLoadPlayers = scoringViewModel::loadPlayers,
                 onSelectNextBatter = scoringViewModel::selectNextBatter,
+                onSelectNextBowler = { playerId, onSelected, onError -> scoringViewModel.selectNextBowler(playerId, onSelected, onError) },
                 onStartSecondInnings = scoringViewModel::startSecondInnings,
                 onFinishMatch = {
                     scoringViewModel.finishMatch(
@@ -116,7 +118,7 @@ class MainScoringActivity : ComponentActivity() {
                 onBack = ::pauseScoringAndFinish,
                 onRun = { runs, dir, meta -> scoringViewModel.recordRuns(runs, dir, meta) },
                 onExtra = scoringViewModel::recordExtra,
-                onWicket = scoringViewModel::recordWicket,
+                onRecordOut = scoringViewModel::recordWicket,
                 onUndo = scoringViewModel::undoLastBall
             )
         }
@@ -154,17 +156,19 @@ private fun MainScoringScreen(
     scorerName: String,
     onLoadPlayers: ((List<Player>, List<Player>) -> Unit) -> Unit,
     onSelectNextBatter: (String) -> Unit,
+    onSelectNextBowler: (String, () -> Unit, (String) -> Unit) -> Unit,
     onStartSecondInnings: (String, String, String, (String) -> Unit) -> Unit,
     onFinishMatch: () -> Unit,
     onBack: () -> Unit,
     onRun: (Int, String?, Map<String, String>) -> Unit,
     onExtra: (com.example.sportsxtreme.domain.model.ExtraType) -> Unit,
-    onWicket: () -> Unit,
+    onRecordOut: (DismissalType, String) -> Unit,
     onUndo: () -> Unit
 ) {
     var showAdvanced by remember { mutableStateOf(false) }
     var showWagonWheel by remember { mutableStateOf(false) }
     var showBoundaryGround by remember { mutableStateOf(false) }
+    var showOutPicker by remember { mutableStateOf(false) }
     var wagonRun by remember { mutableStateOf(0) }
     var battingPlayers by remember { mutableStateOf(emptyList<Player>()) }
     var bowlingPlayers by remember { mutableStateOf(emptyList<Player>()) }
@@ -172,6 +176,7 @@ private fun MainScoringScreen(
     var secondNonStrikerId by remember { mutableStateOf<String?>(null) }
     var secondBowlerId by remember { mutableStateOf<String?>(null) }
     var pickerError by remember { mutableStateOf<String?>(null) }
+    var bowlerPickerCompletedOver by remember { mutableStateOf<Int?>(null) }
     val scorecard = uiState.scorecard
     val matchState = uiState.matchState
     val innings = matchState?.currentInnings
@@ -252,7 +257,7 @@ private fun MainScoringScreen(
                     }
                 },
                 onExtra = onExtra,
-                onWicket = onWicket,
+                onWicket = { showOutPicker = true },
                 onUndo = onUndo
             )
             // More actions bar
@@ -304,6 +309,19 @@ private fun MainScoringScreen(
             )
         }
 
+        if (showOutPicker) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color(0x88000000)).clickable { showOutPicker = false }
+            )
+            OutSelectionBottomSheet(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                onSelect = { type, variant ->
+                    showOutPicker = false
+                    onRecordOut(type, variant)
+                }
+            )
+        }
+
         val needsReplacement = innings?.status?.name == "LIVE" &&
             (matchState?.striker == null || matchState.nonStriker == null)
         if (needsReplacement) {
@@ -318,6 +336,38 @@ private fun MainScoringScreen(
                     selectedId = null,
                     onSelect = { onSelectNextBatter(it) }
                 )
+            }
+        }
+
+        val completedOverNumber = innings?.legalBalls?.div(6)
+        val previousOverBowlerId = remember(completedOverNumber) { matchState?.bowler?.id }
+        val needsNextBowler = innings?.status?.name == "LIVE" && innings.legalBalls > 0 && innings.legalBalls % 6 == 0 && bowlerPickerCompletedOver != completedOverNumber
+        val bowlerOverLimit = matchState?.maxOversPerBowler
+        val eligibleNextBowlers = bowlingPlayers
+            .filterNot { it.id == previousOverBowlerId }
+            .filter { player ->
+                val limit = bowlerOverLimit
+                limit == null || (scorecard?.bowling?.firstOrNull { it.playerId == player.id }?.legalBalls ?: 0) + 6 <= limit * 6
+            }
+        if (needsNextBowler && !needsReplacement) {
+            Dialog(onDismissRequest = { /* A completed over needs a new bowler before play resumes. */ },
+                properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                Column(modifier = Modifier.fillMaxSize().background(ScoringBg).verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.Center) {
+                    Text("OVER COMPLETE", color = ScoringAccent, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                    Text("Choose the bowler for the next over.", color = Color.White, modifier = Modifier.padding(top = 8.dp, bottom = 16.dp))
+                    ScoringSelectionPage(
+                        title = "NEXT BOWLER",
+                        subtitle = bowlerOverLimit?.let { "Maximum $it over${if (it == 1) "" else "s"} per bowler; previous bowler cannot go consecutive" }
+                            ?: "The previous bowler cannot bowl consecutive overs",
+                        players = eligibleNextBowlers,
+                        selectedId = null,
+                        onSelect = { playerId ->
+                            pickerError = null
+                            onSelectNextBowler(playerId, { bowlerPickerCompletedOver = completedOverNumber }, { pickerError = it })
+                        }
+                    )
+                    pickerError?.let { Text(it, color = Color(0xFFFF6677), modifier = Modifier.padding(top = 8.dp)) }
+                }
             }
         }
 
@@ -354,6 +404,90 @@ private fun MainScoringScreen(
                 }
             }
         }
+    }
+}
+
+private data class OutOption(val title: String, val type: DismissalType, val icon: Int?)
+
+private val outOptions = listOf(
+    OutOption("Bowled", DismissalType.BOWLED, R.drawable.bowled),
+    OutOption("Caught", DismissalType.CAUGHT, R.drawable.caught),
+    OutOption("Caught\nBehind", DismissalType.CAUGHT, R.drawable.stumped),
+    OutOption("Caught &\nbowled", DismissalType.CAUGHT, R.drawable.caughtandbowled),
+    OutOption("Run out", DismissalType.RUN_OUT, null),
+    OutOption("LBW", DismissalType.LBW, R.drawable.lbw),
+    OutOption("Stumped", DismissalType.STUMPED, R.drawable.stumping),
+    OutOption("Retired\nhurt", DismissalType.RETIRED_HURT, R.drawable.retiredhurt),
+    OutOption("Run out\n(mankaded)", DismissalType.RUN_OUT, R.drawable.mankadd),
+    OutOption("Hit\nwicket", DismissalType.HIT_WICKET, R.drawable.hitwicket),
+    OutOption("Absent\nHurt", DismissalType.RETIRED_HURT, R.drawable.absenthurt),
+    OutOption("Retired\nout", DismissalType.RETIRED_OUT, R.drawable.retiredout),
+    OutOption("Hit the ball\ntwice", DismissalType.HIT_BALL_TWICE, R.drawable.hittheballtwice),
+    OutOption("Obstructing\nthe field", DismissalType.OBSTRUCTING_THE_FIELD, R.drawable.obstructingthefield),
+    OutOption("Timed out", DismissalType.TIMED_OUT, R.drawable.timeout),
+    OutOption("Retired", DismissalType.RETIRED_OUT, null)
+)
+
+@Composable
+private fun OutSelectionBottomSheet(
+    modifier: Modifier = Modifier,
+    onSelect: (DismissalType, String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(true) }
+    Column(
+        modifier = modifier.fillMaxWidth().heightIn(max = 560.dp)
+            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+            .background(Color.White)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.weight(1f).height(1.dp).background(Color(0xFFD5D5D5)))
+            Text("Select out type", color = Color(0xFF4B4B4B), fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+            Spacer(Modifier.weight(1f).height(1.dp).background(Color(0xFFD5D5D5)))
+        }
+        (if (expanded) outOptions else outOptions.take(8)).chunked(4).forEach { rowOptions ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                rowOptions.forEach { option ->
+                    Column(
+                        modifier = Modifier.weight(1f).clickable { onSelect(option.type, option.title.replace('\n', ' ')) }.padding(vertical = 7.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            Modifier.size(68.dp).clip(CircleShape).background(Color(0xFFF1F1F1)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (option.icon != null) {
+                                Image(
+                                    painter = painterResource(option.icon),
+                                    contentDescription = option.title.replace('\n', ' '),
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.size(54.dp)
+                                )
+                            } else {
+                                Text("•", color = Color(0xFF565656), fontSize = 34.sp, lineHeight = 34.sp)
+                            }
+                        }
+                        Text(
+                            option.title,
+                            color = Color(0xFF202020),
+                            fontSize = 10.sp,
+                            lineHeight = 12.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 5.dp).heightIn(min = 26.dp)
+                        )
+                    }
+                }
+                repeat(4 - rowOptions.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        Text(
+            if (expanded) "Show less" else "Show all",
+            color = Color(0xFF009688),
+            fontSize = 13.sp,
+            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp).clickable { expanded = !expanded }
+        )
     }
 }
 

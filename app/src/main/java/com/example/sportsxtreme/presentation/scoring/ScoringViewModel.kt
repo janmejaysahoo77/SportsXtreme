@@ -51,6 +51,9 @@ class ScoringViewModel @Inject constructor(
     private val matchRepository: MatchRepository,
     private val teamRepository: TeamRepository
 ) : ViewModel() {
+    private var deliveryInFlight = false
+    private var awaitingNextBowler = false
+    private var latestRecordedState: MatchState? = null
     private val _scorerName = kotlinx.coroutines.flow.MutableStateFlow("Scorer")
     private val scorerNameFlow: StateFlow<String> = _scorerName
 
@@ -102,17 +105,35 @@ class ScoringViewModel @Inject constructor(
         isLegalDelivery = type !in setOf(ExtraType.WIDE, ExtraType.NO_BALL)
     )
 
-    fun recordWicket() = recordDelivery(
-        dismissal = Dismissal(DismissalType.BOWLED, currentState()?.striker?.id.orEmpty())
-    )
+    fun recordWicket(type: DismissalType, variant: String) {
+        val state = scoringState() ?: return
+        val dismissedPlayerId = state.striker?.id ?: return
+        val assistingPlayers = if (variant.equals("Caught & bowled", ignoreCase = true)) {
+            listOfNotNull(state.bowler?.id)
+        } else {
+            emptyList()
+        }
+        recordDelivery(
+            dismissal = Dismissal(type, dismissedPlayerId, assistingPlayers),
+            metadata = mapOf("dismissalVariant" to variant)
+        )
+    }
 
     fun undoLastBall() {
-        val state = currentState() ?: return
-        viewModelScope.launch { undoBall(state.matchId, LOCAL_SCORER_ID) }
+        val state = scoringState() ?: return
+        viewModelScope.launch {
+            when (val result = undoBall(state.matchId, LOCAL_SCORER_ID)) {
+                is Resource.Success -> {
+                    latestRecordedState = result.data
+                    awaitingNextBowler = false
+                }
+                else -> Unit
+            }
+        }
     }
 
     fun loadPlayers(onLoaded: (List<Player>, List<Player>) -> Unit) {
-        val state = currentState() ?: return
+        val state = scoringState() ?: return
         val battingTeamId = state.battingTeam?.teamId ?: return
         val bowlingTeamId = state.bowlingTeam?.teamId ?: return
         viewModelScope.launch {
@@ -132,12 +153,31 @@ class ScoringViewModel @Inject constructor(
         }
     }
 
+    fun selectNextBowler(playerId: String, onSelected: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        val state = scoringState() ?: return
+        viewModelScope.launch {
+            when (val result = matchRepository.selectNextBowler(state.matchId, playerId)) {
+                is Resource.Error -> onError(result.message ?: "Unable to select bowler")
+                is Resource.Success -> {
+                    latestRecordedState = result.data ?: return@launch
+                    awaitingNextBowler = false
+                    onSelected()
+                }
+                is Resource.Loading -> Unit
+            }
+        }
+    }
+
     fun startSecondInnings(strikerId: String, nonStrikerId: String, bowlerId: String, onError: (String) -> Unit = {}) {
-        val state = currentState() ?: return
+        val state = scoringState() ?: return
         viewModelScope.launch {
             when (val result = matchRepository.startSecondInnings(state.matchId, strikerId, nonStrikerId, bowlerId)) {
                 is Resource.Error -> onError(result.message ?: "Unable to start second innings")
-                else -> Unit
+                is Resource.Success -> {
+                    latestRecordedState = result.data
+                    awaitingNextBowler = false
+                }
+                is Resource.Loading -> Unit
             }
         }
     }
@@ -163,9 +203,21 @@ class ScoringViewModel @Inject constructor(
         isLegalDelivery: Boolean = true,
         metadata: Map<String, String> = emptyMap()
     ) {
-        val state = currentState() ?: return
+        if (deliveryInFlight || awaitingNextBowler) return
+        val state = scoringState() ?: return
         val innings = state.currentInnings ?: return
         if (innings.status != com.example.sportsxtreme.domain.model.InningsStatus.LIVE) return
+        // The flow can lag behind the last saved ball. Never allow another tap to
+        // reuse the previous bowler once an over boundary has been reached.
+        val previousOverBowlerId = state.currentOverEvents
+            .lastOrNull { it.isLegalDelivery }
+            ?.takeIf { state.currentOverEvents.count { event -> event.isLegalDelivery } >= 6 }
+            ?.bowlerId
+        if (state.legalBalls > 0 && state.legalBalls % 6 == 0 &&
+            state.bowler?.id == previousOverBowlerId) {
+            awaitingNextBowler = true
+            return
+        }
         val strikerId = state.striker?.id ?: return
         val nonStrikerId = state.nonStriker?.id ?: return
         val bowlerId = state.bowler?.id ?: return
@@ -195,10 +247,32 @@ class ScoringViewModel @Inject constructor(
             previousEventId = previousEvent?.ballId,
             metadata = metadata
         )
-        viewModelScope.launch { recordBall(event) }
+        deliveryInFlight = true
+        viewModelScope.launch {
+            try {
+                when (val result = recordBall(event)) {
+                    is Resource.Success -> {
+                        val updated = result.data ?: return@launch
+                        latestRecordedState = updated
+                        if (event.isLegalDelivery && updated.legalBalls > 0 && updated.legalBalls % 6 == 0) {
+                            awaitingNextBowler = true
+                        }
+                    }
+                    else -> Unit
+                }
+            } finally {
+                deliveryInFlight = false
+            }
+        }
     }
 
     private fun currentState(): MatchState? = uiState.value.matchState
+
+    private fun scoringState(): MatchState? {
+        val observed = currentState()
+        val recorded = latestRecordedState ?: return observed
+        return if (observed == null || recorded.updatedAtEpochMs > observed.updatedAtEpochMs) recorded else observed
+    }
 
     private companion object {
         const val LOCAL_SCORER_ID = "local_scorer"

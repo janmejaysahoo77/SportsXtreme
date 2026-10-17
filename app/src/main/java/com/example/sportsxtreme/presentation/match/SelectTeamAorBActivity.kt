@@ -197,7 +197,7 @@ class SelectTeamAorBActivity : ComponentActivity() {
                 },
                 onViewDetails = { selectedTeam ->
                     finalSquadLauncher.launch(
-                        Intent(this, ViewDetailsScreenWhileStartMatch::class.java)
+                        Intent(this, AddPlayingTeamByOrganizer::class.java)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, matchId)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID, selectedTeam.id)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME, selectedTeam.name)

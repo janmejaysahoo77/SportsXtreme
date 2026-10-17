@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -87,6 +88,10 @@ import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.data.remote.cloudinary.CloudinaryTournamentImageUploader
 import com.example.sportsxtreme.presentation.home.HomeScreenView
+import com.example.sportsxtreme.presentation.auth.MainActivity
+import com.example.sportsxtreme.presentation.profile.ProfileActivity
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import com.example.sportsxtreme.presentation.match.StartMatchActivity
 import com.example.sportsxtreme.presentation.match.RegisteredTeamsOfATournament
 import com.example.sportsxtreme.presentation.match.SelectPlayingTeamsActivity
@@ -146,6 +151,9 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = navigateBackFromTournament()
+        })
         WindowCompat.setDecorFitsSystemWindows(window, true)
         val pageBackground = android.graphics.Color.rgb(10, 16, 28)
         window.statusBarColor = pageBackground
@@ -161,9 +169,9 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
                 tournament = viewModel.tournament.collectAsState().value,
                 initialTab = initialTab,
                 initialMatchTab = initialMatchTab,
-                onBack = { finish() },
-                onPickLogo = { logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                onPickBanner = { bannerPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onBack = ::navigateBackFromTournament,
+                onPickLogo = { if (viewModel.tournament.value?.hostUid == FirebaseAuth.getInstance().currentUser?.uid) logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onPickBanner = { if (viewModel.tournament.value?.hostUid == FirebaseAuth.getInstance().currentUser?.uid) bannerPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 logoUploading = logoUploading,
                 bannerUploading = bannerUploading,
                 onSaveTournamentDetails = viewModel::saveTournamentDetails,
@@ -183,6 +191,13 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
                 }
             )
         }
+    }
+
+    private fun navigateBackFromTournament() {
+        if (isTaskRoot) {
+            startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        }
+        finish()
     }
 
     companion object {
@@ -215,13 +230,46 @@ private fun RegisterTournamentFinalPage(
     onSaveTeamDetails: (String, String) -> Unit,
     onDeleteTournament: () -> Unit
 ) {
+    if (tournament == null) {
+        Box(Modifier.fillMaxSize().background(FinalBg), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                androidx.compose.material3.CircularProgressIndicator(color = FinalAccent)
+                Text("Loading tournament…", color = FinalMuted, modifier = Modifier.padding(top = 12.dp))
+            }
+        }
+        return
+    }
     var selectedTab by remember { mutableIntStateOf(initialTab) }
     var pointsGroupName by remember { mutableStateOf<String?>(null) }
     var pointsGroupTeams by remember { mutableStateOf<List<PointsGroupTeam>>(emptyList()) }
+    val isOrganizer = tournament != null && tournament.hostUid.isNotBlank() && tournament.hostUid == com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+    DisposableEffect(tournament?.id) {
+        val tournamentId = tournament?.id.orEmpty()
+        if (tournamentId.isBlank()) return@DisposableEffect onDispose { }
+        val registration = FirebaseFirestore.getInstance().collection("tournaments").document(tournamentId)
+            .collection("pointsTable").document("current")
+            .addSnapshotListener { snapshot, _ ->
+                pointsGroupName = snapshot?.getString("groupName")?.takeIf(String::isNotBlank)
+                @Suppress("UNCHECKED_CAST")
+                val savedTeams = snapshot?.get("teams") as? List<Map<String, String>>
+                pointsGroupTeams = savedTeams.orEmpty().mapNotNull { item ->
+                    val id = item["id"].orEmpty()
+                    if (id.isBlank()) null else PointsGroupTeam(id, item["name"].orEmpty().ifBlank { "Team" })
+                }
+            }
+        onDispose { registration.remove() }
+    }
+    fun savePointsTable(name: String?, teams: List<PointsGroupTeam>) {
+        if (!isOrganizer || tournament.id.isBlank()) return
+        val reference = FirebaseFirestore.getInstance().collection("tournaments").document(tournament.id)
+            .collection("pointsTable").document("current")
+        if (name == null) reference.delete()
+        else reference.set(mapOf("groupName" to name, "teams" to teams.map { mapOf("id" to it.id, "name" to it.name) }))
+    }
     val tabs = listOf("Overview", "Teams", "Matches", "Points", "Leaderboard")
     Column(Modifier.fillMaxSize().background(FinalBg)) {
-        FinalTopBar(onBack, onDeleteTournament)
-        FinalTournamentHeader(tournament, onPickLogo, onPickBanner, logoUploading, bannerUploading)
+        FinalTopBar(onBack, if (isOrganizer) onDeleteTournament else null)
+        FinalTournamentHeader(tournament, onPickLogo, onPickBanner, logoUploading, bannerUploading, isOrganizer)
         FinalTournamentTabs(tabs, selectedTab) { selectedTab = it }
         Box(
             Modifier
@@ -257,15 +305,16 @@ private fun RegisterTournamentFinalPage(
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
                     when (selectedTab) {
-                        0 -> AboutTab(tournament, onSaveTournamentDetails, onSaveTeamDetails)
-                        1 -> TeamsTab(tournament)
+                        0 -> AboutTab(tournament, onSaveTournamentDetails, onSaveTeamDetails, isOrganizer)
+                        1 -> TeamsTab(tournament, isOrganizer)
                         2 -> MatchesTab(tournament, initialMatchTab)
                         3 -> PointsTab(
                             tournamentId = tournament?.id.orEmpty(),
                             groupName = pointsGroupName,
                             teams = pointsGroupTeams,
-                            onGroupNameChange = { pointsGroupName = it },
-                            onTeamsChange = { pointsGroupTeams = it }
+                            onGroupNameChange = { pointsGroupName = it; savePointsTable(it, if (it == null) emptyList() else pointsGroupTeams) },
+                            onTeamsChange = { pointsGroupTeams = it; pointsGroupName?.let { name -> savePointsTable(name, it) } },
+                            canEdit = isOrganizer
                         )
                         else -> LeaderboardTab()
                     }
@@ -331,7 +380,7 @@ private fun FinalTournamentTabs(
 }
 
 @Composable
-private fun FinalTopBar(onBack: () -> Unit, onDeleteTournament: () -> Unit) {
+private fun FinalTopBar(onBack: () -> Unit, onDeleteTournament: (() -> Unit)?) {
     var menuExpanded by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().height(62.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -347,7 +396,7 @@ private fun FinalTopBar(onBack: () -> Unit, onDeleteTournament: () -> Unit) {
             Text("Manage every detail in one place", color = FinalMuted, fontSize = 9.sp)
         }
         Spacer(Modifier.weight(1f))
-        Box(Modifier.size(40.dp).clip(CircleShape).background(FinalPanelLight), contentAlignment = Alignment.Center) {
+        if (onDeleteTournament != null) Box(Modifier.size(40.dp).clip(CircleShape).background(FinalPanelLight), contentAlignment = Alignment.Center) {
             Text("⋮", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             Box(Modifier.matchParentSize().clickable { menuExpanded = true })
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
@@ -369,7 +418,7 @@ private fun FinalTopBar(onBack: () -> Unit, onDeleteTournament: () -> Unit) {
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = {
                     confirmDelete = false
-                    onDeleteTournament()
+                    onDeleteTournament?.invoke()
                 }) { Text("Delete", color = Color(0xFFB3261E)) }
             },
             dismissButton = {
@@ -385,7 +434,8 @@ private fun FinalTournamentHeader(
     onPickLogo: () -> Unit,
     onPickBanner: () -> Unit,
     logoUploading: Boolean,
-    bannerUploading: Boolean
+    bannerUploading: Boolean,
+    isOrganizer: Boolean
 ) {
     val context = LocalContext.current
     val tournamentName = tournament?.name?.ifBlank { "Tournament" } ?: "Loading tournament…"
@@ -415,7 +465,7 @@ private fun FinalTournamentHeader(
             if (bannerUploading) {
                 Text("Uploading banner…", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomStart).padding(12.dp))
             }
-            Box(
+            if (isOrganizer) Box(
                 Modifier.align(Alignment.TopEnd).padding(10.dp).size(32.dp).clip(CircleShape)
                     .background(Color.Black.copy(alpha = .62f)).clickable(enabled = !bannerUploading, onClick = onPickBanner),
                 contentAlignment = Alignment.Center
@@ -438,7 +488,7 @@ private fun FinalTournamentHeader(
                         Text("🏏", fontSize = 23.sp)
                     }
                 }
-                Box(
+                if (isOrganizer) Box(
                     Modifier.align(Alignment.BottomEnd).size(22.dp).clip(CircleShape)
                         .background(FinalAccent).clickable(enabled = !logoUploading, onClick = onPickLogo),
                     contentAlignment = Alignment.Center
@@ -495,7 +545,8 @@ private fun FinalTournamentHeader(
 private fun AboutTab(
     tournament: Tournament?,
     onSaveTournamentDetails: (String, String, String, String) -> Unit,
-    onSaveTeamDetails: (String, String) -> Unit
+    onSaveTeamDetails: (String, String) -> Unit,
+    isOrganizer: Boolean
 ) {
     val requirements = tournament?.requirements
     Column(
@@ -508,8 +559,8 @@ private fun AboutTab(
             startDate = tournament?.startDate?.ifBlank { "Not set" } ?: "Not set",
             location = listOf(tournament?.ground, tournament?.city).filterNotNull().filter { it.isNotBlank() }.joinToString(", ").ifBlank { "Not set" }
         )
-        TournamentDetailsCard(tournament, onSaveTournamentDetails)
-        TeamDetailsCard(tournament, onSaveTeamDetails)
+        TournamentDetailsCard(tournament, onSaveTournamentDetails, isOrganizer)
+        TeamDetailsCard(tournament, onSaveTeamDetails, isOrganizer)
         OrganizerCard(tournament)
         TournamentQrCard(tournament)
         SetupHelpCard()
@@ -574,12 +625,26 @@ private fun SetupHelpCard() {
 @Composable
 private fun OrganizerCard(tournament: Tournament?) {
     val organizerName = tournament?.organizerName?.ifBlank { "Organizer" } ?: "Organizer"
+    var photoUrl by remember(tournament?.hostUid) { mutableStateOf("") }
+    val context = LocalContext.current
+    DisposableEffect(tournament?.hostUid) {
+        val hostUid = tournament?.hostUid.orEmpty()
+        if (hostUid.isBlank()) return@DisposableEffect onDispose { }
+        val registration = FirebaseFirestore.getInstance().collection("users").document(hostUid)
+            .addSnapshotListener { snapshot, _ ->
+                photoUrl = listOf("profilePhotoUrl", "photoUrl", "imageUrl").firstNotNullOfOrNull { snapshot?.getString(it)?.takeIf(String::isNotBlank) }.orEmpty()
+            }
+        onDispose { registration.remove() }
+    }
     Column(
-        Modifier.fillMaxWidth().shadow(7.dp, FinalCardShape).clip(FinalCardShape).background(FinalPanel).padding(18.dp)
+        Modifier.fillMaxWidth().shadow(7.dp, FinalCardShape).clip(FinalCardShape).background(FinalPanel).clickable {
+            if (!tournament?.hostUid.isNullOrBlank()) context.startActivity(Intent(context, ProfileActivity::class.java).putExtra(ProfileActivity.EXTRA_USER_ID, tournament?.hostUid).putExtra(ProfileActivity.EXTRA_DISPLAY_NAME, organizerName).putExtra(ProfileActivity.EXTRA_PROFILE_PHOTO_URL, photoUrl))
+        }.padding(18.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(38.dp).clip(CircleShape).background(FinalPanelLight), contentAlignment = Alignment.Center) {
-                Text(organizerName.take(1).uppercase(), color = FinalAccent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                if (photoUrl.isNotBlank()) AsyncImage(model = photoUrl, contentDescription = "Organizer profile photo", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                else Text(organizerName.take(1).uppercase(), color = FinalAccent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
             Column(Modifier.padding(start = 11.dp).weight(1f)) {
                 Text("Organizer", color = FinalMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
@@ -594,7 +659,8 @@ private fun OrganizerCard(tournament: Tournament?) {
 @Composable
 private fun TournamentDetailsCard(
     tournament: Tournament?,
-    onSave: (String, String, String, String) -> Unit
+    onSave: (String, String, String, String) -> Unit,
+    canEdit: Boolean
 ) {
     var isEditing by remember(tournament?.id) { mutableStateOf(false) }
     var name by remember(tournament?.id) { mutableStateOf(tournament?.name.orEmpty()) }
@@ -607,7 +673,7 @@ private fun TournamentDetailsCard(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(3.dp).height(14.dp).clip(CircleShape).background(FinalAccent))
             Text("Tournament Details", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 7.dp))
-            Text(
+            if (canEdit) Text(
                 if (isEditing) "SAVE" else "✎ Edit",
                 color = FinalAccent,
                 fontSize = 11.sp,
@@ -629,7 +695,7 @@ private fun TournamentDetailsCard(
 }
 
 @Composable
-private fun TeamDetailsCard(tournament: Tournament?, onSave: (String, String) -> Unit) {
+private fun TeamDetailsCard(tournament: Tournament?, onSave: (String, String) -> Unit, canEdit: Boolean) {
     var isEditing by remember(tournament?.id) { mutableStateOf(false) }
     var entryFee by remember(tournament?.id) { mutableStateOf(tournament?.requirements?.entryFee.orEmpty()) }
     var teamCapacity by remember(tournament?.id) { mutableStateOf(tournament?.requirements?.numberOfTeams.orEmpty()) }
@@ -639,7 +705,7 @@ private fun TeamDetailsCard(tournament: Tournament?, onSave: (String, String) ->
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(3.dp).height(14.dp).clip(CircleShape).background(FinalAccent))
             Text("Team Details", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 7.dp))
-            Text(
+            if (canEdit) Text(
                 if (isEditing) "SAVE" else "✎ Edit",
                 color = FinalAccent,
                 fontSize = 11.sp,
@@ -1063,7 +1129,7 @@ private fun MatchActions(modifier: Modifier, onSchedule: () -> Unit, onStart: ()
 }
 
 @Composable
-private fun TeamsTab(tournament: Tournament?) {
+private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
     val context = LocalContext.current
     var isCreatingInvite by remember { mutableStateOf(false) }
     var isAddingTeamId by remember { mutableStateOf<String?>(null) }
@@ -1158,7 +1224,7 @@ private fun TeamsTab(tournament: Tournament?) {
                 Box(Modifier.clip(RoundedCornerShape(20.dp)).background(FinalAccent.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
                     Text("${joinedTeams.size} TEAMS", color = FinalAccent, fontSize = 11.sp, fontWeight = FontWeight.Black)
                 }
-                if (joinedTeams.isNotEmpty()) {
+                if (canManage && joinedTeams.isNotEmpty()) {
                     Box {
                         Row(
                             Modifier.shadow(10.dp, RoundedCornerShape(14.dp), ambientColor = FinalAccent, spotColor = FinalAccent)
@@ -1201,7 +1267,7 @@ private fun TeamsTab(tournament: Tournament?) {
             }
         }
         Spacer(Modifier.height(12.dp))
-        if (joinedTeams.isEmpty()) Box(Modifier.fillMaxWidth().clip(FinalCardShape).background(FinalPanel).border(1.dp, FinalDivider, FinalCardShape).padding(horizontal = 20.dp, vertical = 26.dp), contentAlignment = Alignment.Center) {
+        if (joinedTeams.isEmpty() && canManage) Box(Modifier.fillMaxWidth().clip(FinalCardShape).background(FinalPanel).border(1.dp, FinalDivider, FinalCardShape).padding(horizontal = 20.dp, vertical = 26.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.size(84.dp).clip(CircleShape).background(FinalAccent.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
                     Text("01", color = FinalAccent, fontSize = 26.sp, fontWeight = FontWeight.Black)
@@ -1214,6 +1280,11 @@ private fun TeamsTab(tournament: Tournament?) {
                 FinalActionButton(if (isCreatingInvite) "CREATING LINK…" else "SHARE INVITE LINK", filled = true, enabled = !isCreatingInvite, onClick = ::shareInvite)
                 Text("OR", color = Color(0xFF65718A), fontSize = 11.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(vertical = 17.dp))
                 FinalActionButton("ADD A TEAM MANUALLY", filled = false, onClick = { showManualTeamPicker = true })
+            }
+        }
+        if (joinedTeams.isEmpty() && !canManage) {
+            Box(Modifier.fillMaxWidth().clip(FinalCardShape).background(FinalPanel).border(1.dp, FinalDivider, FinalCardShape).padding(24.dp), contentAlignment = Alignment.Center) {
+                Text("No teams have registered yet.", color = FinalMuted, fontSize = 13.sp, textAlign = TextAlign.Center)
             }
         }
         if (showManualTeamPicker) {
@@ -1277,7 +1348,8 @@ private fun PointsTab(
     groupName: String?,
     teams: List<PointsGroupTeam>,
     onGroupNameChange: (String?) -> Unit,
-    onTeamsChange: (List<PointsGroupTeam>) -> Unit
+    onTeamsChange: (List<PointsGroupTeam>) -> Unit,
+    canEdit: Boolean
 ) {
     var draftGroupName by remember { mutableStateOf("") }
     var showCreateGroupSheet by remember { mutableStateOf(false) }
@@ -1308,22 +1380,23 @@ private fun PointsTab(
                     groupName = groupName.orEmpty(),
                     teams = teams,
                     onAddTeam = {
-                        if (tournamentId.isNotBlank()) {
+                        if (canEdit && tournamentId.isNotBlank()) {
                             registeredTeamPicker.launch(
                                 Intent(context, RegisteredTeamsOfATournament::class.java)
                                     .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
                             )
-                        } else {
+                        } else if (canEdit) {
                             Toast.makeText(context, "Tournament is still loading", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    onDeleteGroup = { onGroupNameChange(null); onTeamsChange(emptyList()) }
+                    onDeleteGroup = { if (canEdit) { onGroupNameChange(null); onTeamsChange(emptyList()) } },
+                    canEdit = canEdit
                 )
             } else {
-                NoGroupsPointsTab()
+                NoGroupsPointsTab(canEdit)
             }
         }
-        CreateGroupButton {
+        if (canEdit) CreateGroupButton {
             draftGroupName = ""
             showCreateGroupSheet = true
         }
@@ -1431,7 +1504,7 @@ private fun PointsTab(
 }
 
 @Composable
-private fun NoGroupsPointsTab() {
+private fun NoGroupsPointsTab(canEdit: Boolean) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1467,20 +1540,22 @@ private fun NoGroupsPointsTab() {
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                "No Groups Yet",
+                if (canEdit) "No Groups Yet" else "NO Points Tabale Created Yet By Organiser",
                 color = Color.White,
-                fontSize = 22.sp,
+                fontSize = if (canEdit) 22.sp else 18.sp,
                 fontWeight = FontWeight.Black,
                 textAlign = TextAlign.Center
             )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Create groups and add teams\nto generate a points table.",
-                color = FinalMuted,
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-                textAlign = TextAlign.Center
-            )
+            if (canEdit) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Create groups and add teams\nto generate a points table.",
+                    color = FinalMuted,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 }
@@ -1518,7 +1593,8 @@ private fun GroupPointsTab(
     groupName: String,
     teams: List<PointsGroupTeam>,
     onAddTeam: () -> Unit,
-    onDeleteGroup: () -> Unit
+    onDeleteGroup: () -> Unit,
+    canEdit: Boolean
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 3.dp),
@@ -1532,8 +1608,8 @@ private fun GroupPointsTab(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(groupName.uppercase(), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
-            GroupAction("♙", "Add Team", onAddTeam)
-            GroupAction("▣", "Remove", onDeleteGroup)
+            if (canEdit) GroupAction("♙", "Add Team", onAddTeam)
+            if (canEdit) GroupAction("▣", "Remove", onDeleteGroup)
         }
         if (teams.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
