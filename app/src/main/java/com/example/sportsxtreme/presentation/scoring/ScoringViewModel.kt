@@ -52,6 +52,7 @@ class ScoringViewModel @Inject constructor(
     private val teamRepository: TeamRepository
 ) : ViewModel() {
     private var deliveryInFlight = false
+    private var undoInFlight = false
     private var awaitingNextBowler = false
     private var latestRecordedState: MatchState? = null
     private val _scorerName = kotlinx.coroutines.flow.MutableStateFlow("Scorer")
@@ -105,29 +106,128 @@ class ScoringViewModel @Inject constructor(
         isLegalDelivery = type !in setOf(ExtraType.WIDE, ExtraType.NO_BALL)
     )
 
-    fun recordWicket(type: DismissalType, variant: String) {
+    fun recordObstructingField(batterId: String, deliveryType: ExtraType, runsScored: Int) {
         val state = scoringState() ?: return
-        val dismissedPlayerId = state.striker?.id ?: return
-        val assistingPlayers = if (variant.equals("Caught & bowled", ignoreCase = true)) {
-            listOfNotNull(state.bowler?.id)
+        if (batterId != state.striker?.id && batterId != state.nonStriker?.id) return
+        if (deliveryType !in setOf(ExtraType.WIDE, ExtraType.NO_BALL, ExtraType.BYE, ExtraType.LEG_BYE)) return
+        if (runsScored !in 0..5) return
+
+        val runsOffBat = if (deliveryType == ExtraType.NO_BALL) runsScored else 0
+        val extras = when (deliveryType) {
+            ExtraType.WIDE -> listOf(ExtraRun(ExtraType.WIDE, runsScored + 1))
+            ExtraType.NO_BALL -> listOf(ExtraRun(ExtraType.NO_BALL, 1))
+            ExtraType.BYE, ExtraType.LEG_BYE -> listOf(ExtraRun(deliveryType, runsScored))
+            else -> emptyList()
+        }
+        recordDelivery(
+            runsOffBat = runsOffBat,
+            extras = extras,
+            dismissal = Dismissal(DismissalType.OBSTRUCTING_THE_FIELD, batterId),
+            isLegalDelivery = deliveryType !in setOf(ExtraType.WIDE, ExtraType.NO_BALL),
+            metadata = mapOf(
+                "dismissalVariant" to "Obstructing the field",
+                "obstructingDeliveryType" to deliveryType.name,
+                "obstructingRunsScored" to runsScored.toString()
+            )
+        )
+    }
+
+    fun recordRunOut(
+        batterId: String,
+        fielder1Id: String,
+        fielder2Id: String?,
+        directHit: Boolean,
+        deliveryType: ExtraType,
+        runsScored: Int
+    ) {
+        val state = scoringState() ?: return
+        if (batterId != state.striker?.id && batterId != state.nonStriker?.id) return
+        if (fielder1Id.isBlank() || fielder1Id == fielder2Id) return
+        if (directHit && fielder2Id != null) return
+        if (!directHit && (fielder2Id == null || fielder2Id.isBlank())) return
+        if (deliveryType !in setOf(ExtraType.WIDE, ExtraType.NO_BALL, ExtraType.BYE, ExtraType.LEG_BYE)) return
+        if (runsScored !in 0..5) return
+
+        val runsOffBat = if (deliveryType == ExtraType.NO_BALL) runsScored else 0
+        val extras = when (deliveryType) {
+            ExtraType.WIDE -> listOf(ExtraRun(ExtraType.WIDE, runsScored + 1))
+            ExtraType.NO_BALL -> listOf(ExtraRun(ExtraType.NO_BALL, 1))
+            ExtraType.BYE, ExtraType.LEG_BYE -> listOf(ExtraRun(deliveryType, runsScored))
+            else -> emptyList()
+        }
+        recordDelivery(
+            runsOffBat = runsOffBat,
+            extras = extras,
+            dismissal = Dismissal(
+                type = DismissalType.RUN_OUT,
+                dismissedPlayerId = batterId,
+                assistedByPlayerIds = listOfNotNull(fielder1Id, fielder2Id)
+            ),
+            isLegalDelivery = deliveryType !in setOf(ExtraType.WIDE, ExtraType.NO_BALL),
+            metadata = mapOf(
+                "dismissalVariant" to "Run out",
+                "directHit" to directHit.toString(),
+                "runOutDeliveryType" to deliveryType.name,
+                "runOutRunsScored" to runsScored.toString()
+            )
+        )
+    }
+
+    fun recordWicket(type: DismissalType, variant: String, fielderId: String?, optionChecked: Boolean) {
+        val state = scoringState() ?: return
+        val retiredHurtSheet = type == DismissalType.RETIRED_HURT && variant == "Retired hurt"
+        val dismissedPlayerId = if (retiredHurtSheet) {
+            fielderId?.takeIf { it == state.striker?.id || it == state.nonStriker?.id } ?: return
         } else {
-            emptyList()
+            state.striker?.id ?: return
+        }
+        if (type == DismissalType.CAUGHT && variant == "Caught" && fielderId == null) return
+        if (type == DismissalType.STUMPED && fielderId == null) return
+        val assistingPlayers = when {
+            retiredHurtSheet -> emptyList()
+            fielderId != null -> listOf(fielderId)
+            variant.equals("Caught & bowled", ignoreCase = true) -> listOfNotNull(state.bowler?.id)
+            else -> emptyList()
+        }
+        val wideStumping = type == DismissalType.STUMPED && optionChecked
+        val wideHitWicket = type == DismissalType.HIT_WICKET && optionChecked
+        val noBallHitBallTwice = type == DismissalType.HIT_BALL_TWICE && optionChecked
+        val dontCountBall = retiredHurtSheet && optionChecked
+        val metadata = mapOf("dismissalVariant" to variant) + when (type) {
+            DismissalType.CAUGHT -> mapOf("brilliantCatch" to optionChecked.toString())
+            DismissalType.STUMPED -> mapOf("wideBall" to wideStumping.toString())
+            DismissalType.HIT_WICKET -> mapOf("wideBall" to wideHitWicket.toString())
+            DismissalType.HIT_BALL_TWICE -> mapOf("noBall" to noBallHitBallTwice.toString())
+            DismissalType.RETIRED_HURT -> mapOf("dontCountBall" to dontCountBall.toString())
+            else -> emptyMap()
         }
         recordDelivery(
             dismissal = Dismissal(type, dismissedPlayerId, assistingPlayers),
-            metadata = mapOf("dismissalVariant" to variant)
+            extras = when {
+                wideStumping || wideHitWicket -> listOf(ExtraRun(ExtraType.WIDE, 1))
+                noBallHitBallTwice -> listOf(ExtraRun(ExtraType.NO_BALL, 1))
+                else -> emptyList()
+            },
+            isLegalDelivery = !wideStumping && !wideHitWicket && !noBallHitBallTwice && !dontCountBall,
+            metadata = metadata
         )
     }
 
     fun undoLastBall() {
+        if (undoInFlight || deliveryInFlight) return
         val state = scoringState() ?: return
+        undoInFlight = true
         viewModelScope.launch {
-            when (val result = undoBall(state.matchId, LOCAL_SCORER_ID)) {
-                is Resource.Success -> {
-                    latestRecordedState = result.data
-                    awaitingNextBowler = false
+            try {
+                when (val result = undoBall(state.matchId, LOCAL_SCORER_ID)) {
+                    is Resource.Success -> {
+                        latestRecordedState = result.data
+                        awaitingNextBowler = false
+                    }
+                    else -> Unit
                 }
-                else -> Unit
+            } finally {
+                undoInFlight = false
             }
         }
     }
@@ -144,11 +244,17 @@ class ScoringViewModel @Inject constructor(
     }
 
     fun selectNextBatter(playerId: String, onError: (String) -> Unit = {}) {
-        val state = currentState() ?: return
+        // The observable match flow can briefly lag behind the just-recorded wicket.
+        // Use the freshest local state so replacement selection doesn't run against
+        // the old pair of batters and silently fail with "No batter slot is available".
+        val state = scoringState() ?: return
         viewModelScope.launch {
             when (val result = matchRepository.selectNextBatter(state.matchId, playerId)) {
                 is Resource.Error -> onError(result.message ?: "Unable to select batter")
-                else -> Unit
+                is Resource.Success -> {
+                    latestRecordedState = result.data
+                }
+                is Resource.Loading -> onError("Player selection is still saving. Please try again shortly.")
             }
         }
     }
@@ -203,7 +309,7 @@ class ScoringViewModel @Inject constructor(
         isLegalDelivery: Boolean = true,
         metadata: Map<String, String> = emptyMap()
     ) {
-        if (deliveryInFlight || awaitingNextBowler) return
+        if (deliveryInFlight || undoInFlight || awaitingNextBowler) return
         val state = scoringState() ?: return
         val innings = state.currentInnings ?: return
         if (innings.status != com.example.sportsxtreme.domain.model.InningsStatus.LIVE) return

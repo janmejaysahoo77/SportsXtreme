@@ -87,7 +87,8 @@ class HomeScreenView @JvmOverloads constructor(
     private val topMode: TopMode = TopMode.SPORTS,
     private val liveMatchViewModel: LiveMatchViewModel? = null,
     private val hostTournamentsViewModel: HostTournamentsViewModel? = null,
-    private val startInMyCricketTeams: Boolean = false
+    private val startInMyCricketTeams: Boolean = false,
+    private val startInQuickScoringTab: Boolean = false
 ) : FrameLayout(context, attrs) {
 
     enum class TopMode { SPORTS, MEDIA, CART }
@@ -969,7 +970,7 @@ class HomeScreenView @JvmOverloads constructor(
                 )
 
                 lateinit var switchHostTab: (Int) -> Unit
-                var selectedHostTab = 0
+                var selectedHostTab = if (startInQuickScoringTab) 2 else 0
                 val hostScroll = HostTabScrollView(context).apply {
                     clipToPadding = false
                     setPadding(0, 0, 0, dp(22))
@@ -1050,6 +1051,16 @@ class HomeScreenView @JvmOverloads constructor(
                         }
                         addView(quickScoringContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
                         quickScoringContent.visibility = View.GONE
+
+                        if (selectedHostTab == 2) {
+                            hostContent.visibility = View.GONE
+                            quickScoringContent.visibility = View.VISIBLE
+                        }
+                        listOf(hostTabButton, yourTournamentTabButton, quickScoringTabButton).forEachIndexed { index, tab ->
+                            val active = index == selectedHostTab
+                            tab.isSelected = active
+                            updateHostTabStyle(tab, active)
+                        }
 
                         switchHostTab = switch@{ targetTab ->
                             if (targetTab == selectedHostTab) return@switch

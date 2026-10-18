@@ -603,6 +603,7 @@ private data class BallOutcome(val label: String, val kind: String)
 private data class ScorecardBattingRow(
     val playerId: String,
     val name: String,
+    val dismissal: String?,
     val runs: Int,
     val balls: Int,
     val fours: Int,
@@ -649,9 +650,36 @@ private fun List<Map<String, Any?>>.scorecardBattingRows(
                     val batter = match.currentBatters.firstOrNull { it.id == playerId }
                     val deliveryName = balls.firstNotNullOfOrNull { it["batsmanName"] as? String }
                     val resolvedName = playerNames.resolvePlayerName(playerId, knownName ?: deliveryName)
+                    val dismissalDelivery = balls.firstOrNull {
+                        (it["dismissedPlayerId"] as? String) == playerId
+                    }
                     ScorecardBattingRow(
                         playerId = playerId,
                         name = resolvedName + if (batter?.isStriker == true) "*" else "",
+                        dismissal = dismissalDelivery?.let { delivery ->
+                            val type = (delivery["dismissalType"] as? String).orEmpty()
+                            val bowlerId = delivery["bowlerId"] as? String
+                            val fielderId = delivery["fielderId"] as? String
+                            val bowlerName = playerNames.resolvePlayerName(bowlerId, delivery["bowlerName"] as? String)
+                            val fielderName = playerNames.resolvePlayerName(fielderId, delivery["fielderName"] as? String)
+                            when (type) {
+                                "BOWLED" -> "b $bowlerName"
+                                "CAUGHT" -> if (!fielderId.isNullOrBlank() && fielderId == bowlerId) {
+                                    "c & b $bowlerName"
+                                } else if (!fielderId.isNullOrBlank()) {
+                                    "c $fielderName b $bowlerName"
+                                } else {
+                                    "caught b $bowlerName"
+                                }
+                                "STUMPED" -> if (!fielderId.isNullOrBlank()) "st $fielderName b $bowlerName" else "stumped b $bowlerName"
+                                "LBW" -> "lbw b $bowlerName"
+                                "HIT_WICKET" -> "hit wicket b $bowlerName"
+                                "RUN_OUT" -> if (!fielderId.isNullOrBlank()) "run out ($fielderName)" else "run out"
+                                "RETIRED_OUT" -> "retired out"
+                                "RETIRED_HURT" -> "retired hurt"
+                                else -> null
+                            }
+                        } ?: "not out",
                         runs = runs,
                         balls = faced,
                         fours = balls.count { (it["runs"] as? Number)?.toInt() == 4 },
@@ -1451,6 +1479,7 @@ private fun ScorecardTab(match: MatchDetail, onOpenPlayer: (String, String) -> U
                     BatterTableRow(
                         playerId = row.playerId,
                         name = row.name,
+                        dismissal = row.dismissal,
                         runs = row.runs.toString(),
                         balls = row.balls.toString(),
                         fours = row.fours.toString(),
@@ -1642,7 +1671,7 @@ private fun PlayerTableHeader(first: String, columns: List<String>) {
 }
 
 @Composable
-private fun BatterTableRow(playerId: String, name: String, runs: String, balls: String, fours: String, sixes: String, sr: String, active: Boolean, nameLoading: Boolean = false, onOpenPlayer: (String, String) -> Unit) {
+private fun BatterTableRow(playerId: String, name: String, dismissal: String? = null, runs: String, balls: String, fours: String, sixes: String, sr: String, active: Boolean, nameLoading: Boolean = false, onOpenPlayer: (String, String) -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.985f else 1f, label = "batterRowPress")
@@ -1656,11 +1685,16 @@ private fun BatterTableRow(playerId: String, name: String, runs: String, balls: 
             .padding(horizontal = 10.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (nameLoading) PlayerNameSkeleton(Modifier.weight(1.9f)) else Text(
-            name, color = if (active) Accent else Color(0xFFE4ECE8), fontSize = 14.sp,
-            fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic,
-            modifier = Modifier.weight(1.9f).clickable(enabled = playerId.isNotBlank()) { onOpenPlayer(playerId, name.removeSuffix("*")) }, maxLines = 1, overflow = TextOverflow.Ellipsis
-        )
+        if (nameLoading) PlayerNameSkeleton(Modifier.weight(1.9f)) else Column(Modifier.weight(1.9f)) {
+            Text(
+                name, color = if (active) Accent else Color(0xFFE4ECE8), fontSize = 14.sp,
+                fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic,
+                modifier = Modifier.clickable(enabled = playerId.isNotBlank()) { onOpenPlayer(playerId, name.removeSuffix("*")) }, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            dismissal?.let {
+                Text(it, color = SoftText, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
         listOf(runs, balls, fours, sixes, sr).forEachIndexed { index, value ->
             Text(
                 value,

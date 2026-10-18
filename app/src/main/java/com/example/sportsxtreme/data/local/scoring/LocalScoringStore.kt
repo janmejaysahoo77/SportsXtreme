@@ -18,6 +18,8 @@ import com.example.sportsxtreme.data.local.mapper.toDomain
 import com.example.sportsxtreme.data.local.mapper.toEntity
 import com.example.sportsxtreme.domain.model.BallEvent
 import com.example.sportsxtreme.domain.model.BallEventType
+import com.example.sportsxtreme.domain.model.DismissalType
+import com.example.sportsxtreme.domain.model.ExtraType
 import com.example.sportsxtreme.domain.model.SyncState
 import com.example.sportsxtreme.domain.scoring.InningsProjection
 import com.example.sportsxtreme.domain.scoring.InningsProjectionCalculator
@@ -46,6 +48,84 @@ class LocalScoringStore @Inject constructor(
         val innings = requireNotNull(inningsDao.getInnings(event.inningsId)) { "Innings not found" }
         require(innings.matchId == event.matchId) { "Delivery does not belong to this innings" }
         require(innings.number == event.inningsNumber) { "Delivery innings number does not match" }
+        event.dismissal?.takeIf { it.type == DismissalType.BOWLED }?.let { dismissal ->
+            require(innings.strikerId != null && event.strikerId == innings.strikerId && dismissal.dismissedPlayerId == innings.strikerId) {
+                "A bowled dismissal must dismiss the striker"
+            }
+        }
+        event.dismissal?.takeIf { event.metadata["dismissalVariant"] == "Retired hurt" }?.let { dismissal ->
+            require(dismissal.type == DismissalType.RETIRED_HURT) { "Retired hurt must use the retired-hurt dismissal type" }
+            require(
+                dismissal.dismissedPlayerId == innings.strikerId || dismissal.dismissedPlayerId == innings.nonStrikerId
+            ) { "Select the current striker or non-striker" }
+            val dontCountBall = event.metadata["dontCountBall"] == "true"
+            require(event.isLegalDelivery == !dontCountBall) { "Retired-hurt ball count does not match the selected option" }
+            require(event.extras.isEmpty()) { "Retired hurt cannot add delivery extras" }
+        }
+        event.dismissal?.takeIf { event.metadata["dismissalVariant"] == "Obstructing the field" }?.let { dismissal ->
+            require(dismissal.type == DismissalType.OBSTRUCTING_THE_FIELD) {
+                "Obstructing the field must use the correct dismissal type"
+            }
+            require(
+                dismissal.dismissedPlayerId == innings.strikerId || dismissal.dismissedPlayerId == innings.nonStrikerId
+            ) { "Select the current striker or non-striker" }
+        }
+        event.dismissal?.takeIf { it.type == DismissalType.HIT_BALL_TWICE }?.let { dismissal ->
+            require(dismissal.dismissedPlayerId == innings.strikerId && event.strikerId == innings.strikerId) {
+                "Hit the ball twice must dismiss the striker"
+            }
+            val noBall = event.metadata["noBall"] == "true"
+            require(event.isLegalDelivery == !noBall) { "No-ball setting does not match the delivery" }
+            require(event.extras.none { it.type == com.example.sportsxtreme.domain.model.ExtraType.WIDE }) {
+                "Hit the ball twice cannot record a wide"
+            }
+            require(event.extras.any { it.type == com.example.sportsxtreme.domain.model.ExtraType.NO_BALL } == noBall) {
+                "No-ball extra does not match the selected option"
+            }
+        }
+        event.dismissal?.takeIf { event.metadata["dismissalVariant"] == "Run out" }?.let { dismissal ->
+            require(dismissal.type == DismissalType.RUN_OUT) { "Run out must use the correct dismissal type" }
+            require(
+                dismissal.dismissedPlayerId == innings.strikerId || dismissal.dismissedPlayerId == innings.nonStrikerId
+            ) { "Select the current striker or non-striker" }
+            val directHit = event.metadata["directHit"] == "true"
+            require(dismissal.assistedByPlayerIds.size == (if (directHit) 1 else 2)) {
+                "Select one fielder for a direct hit or two fielders otherwise"
+            }
+            dismissal.assistedByPlayerIds.forEach { fielderId ->
+                val fielder = requireNotNull(playerDao.getPlayer(fielderId)) { "Selected fielder was not found" }
+                require(fielder.teamId == innings.bowlingTeamId) { "Run-out fielders must be from the fielding team" }
+            }
+            val type = event.metadata["runOutDeliveryType"]?.let { ExtraType.valueOf(it) }
+                ?: error("Select the run-out delivery type")
+            require(type in setOf(ExtraType.WIDE, ExtraType.NO_BALL, ExtraType.BYE, ExtraType.LEG_BYE)) {
+                "Invalid run-out delivery type"
+            }
+            require(event.isLegalDelivery == (type != ExtraType.WIDE && type != ExtraType.NO_BALL)) {
+                "Run-out delivery type does not match the legal-ball count"
+            }
+        }
+        event.dismissal?.takeIf { event.metadata["dismissalVariant"] == "Caught" }?.let { dismissal ->
+            val fielderId = dismissal.assistedByPlayerIds.firstOrNull()
+                ?: error("Select the fielder who took the catch")
+            val fielder = requireNotNull(playerDao.getPlayer(fielderId)) { "Selected fielder was not found" }
+            require(fielder.teamId == innings.bowlingTeamId) { "The catcher must be from the fielding team" }
+        }
+        event.dismissal?.takeIf { event.metadata["dismissalVariant"] == "Stumped" }?.let { dismissal ->
+            val keeperId = dismissal.assistedByPlayerIds.firstOrNull()
+                ?: error("Select the wicket-keeper")
+            val keeper = requireNotNull(playerDao.getPlayer(keeperId)) { "Selected wicket-keeper was not found" }
+            require(keeper.teamId == innings.bowlingTeamId) { "The wicket-keeper must be from the fielding team" }
+            val selectedXI = playerDao.getPlayingXI(event.matchId, innings.bowlingTeamId)
+            val teamKeepers = if (selectedXI.isNotEmpty()) {
+                selectedXI.mapNotNull { playerDao.getPlayer(it.playerId) }.filter { it.role == "WICKET_KEEPER" }
+            } else {
+                playerDao.getPlayers(innings.bowlingTeamId).filter { it.role == "WICKET_KEEPER" }
+            }
+            if (teamKeepers.isNotEmpty()) require(teamKeepers.any { it.playerId == keeperId }) {
+                "Select the designated wicket-keeper"
+            }
+        }
 
         val existingEvents = ballEventDao.getBallEvents(event.matchId, event.inningsId).map { it.toDomain() }
         val reversedDeliveryIds = existingEvents.asSequence()

@@ -103,7 +103,9 @@ object InningsProjectionCalculator {
         return BattingProjection(
             playerId = this,
             runs = facedDeliveries.sumOf { it.runsOffBat },
-            balls = facedDeliveries.count { delivery -> delivery.extras.none { it.type == ExtraType.WIDE } },
+            balls = facedDeliveries.count { delivery ->
+                delivery.extras.none { it.type == ExtraType.WIDE } && delivery.metadata["dontCountBall"] != "true"
+            },
             fours = facedDeliveries.count { it.runsOffBat == 4 },
             sixes = facedDeliveries.count { it.runsOffBat == 6 },
             status = status,

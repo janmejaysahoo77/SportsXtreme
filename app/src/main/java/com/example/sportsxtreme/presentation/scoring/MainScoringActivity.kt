@@ -11,9 +11,11 @@ import com.example.sportsxtreme.presentation.home.*
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.activity.OnBackPressedCallback
@@ -24,11 +26,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -85,12 +92,14 @@ import javax.inject.Inject
 import kotlinx.coroutines.launch
 import com.example.sportsxtreme.domain.model.Player
 import com.example.sportsxtreme.domain.model.DismissalType
+import com.example.sportsxtreme.domain.model.ExtraType
 
 @AndroidEntryPoint
 class MainScoringActivity : ComponentActivity() {
     private val scoringViewModel: ScoringViewModel by viewModels()
     @Inject lateinit var matchRepository: MatchRepository
     @Inject lateinit var expiryScheduler: PausedScoringExpiryScheduler
+    private var isLeavingScoring = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -106,7 +115,7 @@ class MainScoringActivity : ComponentActivity() {
                 uiState = uiState,
                 scorerName = uiState.scorerName,
                 onLoadPlayers = scoringViewModel::loadPlayers,
-                onSelectNextBatter = scoringViewModel::selectNextBatter,
+                onSelectNextBatter = { playerId, onError -> scoringViewModel.selectNextBatter(playerId, onError) },
                 onSelectNextBowler = { playerId, onSelected, onError -> scoringViewModel.selectNextBowler(playerId, onSelected, onError) },
                 onStartSecondInnings = scoringViewModel::startSecondInnings,
                 onFinishMatch = {
@@ -116,24 +125,57 @@ class MainScoringActivity : ComponentActivity() {
                     )
                 },
                 onBack = ::pauseScoringAndFinish,
+                onLeaveScoring = ::leaveScoringToHostQuickScoring,
                 onRun = { runs, dir, meta -> scoringViewModel.recordRuns(runs, dir, meta) },
                 onExtra = scoringViewModel::recordExtra,
-                onRecordOut = scoringViewModel::recordWicket,
+                onRecordOut = { type, variant, fielderId, brilliantCatch ->
+                    scoringViewModel.recordWicket(type, variant, fielderId, brilliantCatch)
+                },
+                onRecordObstructingField = scoringViewModel::recordObstructingField,
+                onRecordRunOut = scoringViewModel::recordRunOut,
                 onUndo = scoringViewModel::undoLastBall
             )
         }
     }
 
     private fun pauseScoringAndFinish() {
+        pauseScoringAndFinish(returnToHostQuickScoring = false)
+    }
+
+    private fun leaveScoringToHostQuickScoring() {
+        pauseScoringAndFinish(returnToHostQuickScoring = true)
+    }
+
+    private fun pauseScoringAndFinish(returnToHostQuickScoring: Boolean) {
+        if (isLeavingScoring) return
+        isLeavingScoring = true
         val matchId = intent.getStringExtra(com.example.sportsxtreme.presentation.match.SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
         if (matchId.isBlank()) {
+            if (returnToHostQuickScoring) {
+                startActivity(
+                    Intent(this, com.example.sportsxtreme.presentation.auth.MainActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        .putExtra(com.example.sportsxtreme.presentation.auth.MainActivity.EXTRA_OPEN_HOST_QUICK_SCORING, true)
+                )
+            }
             finish()
             return
         }
         lifecycleScope.launch {
-            val pausedAt = matchRepository.pauseScoring(matchId)
-            if (pausedAt != null) expiryScheduler.schedule(matchId, pausedAt)
-            finish()
+            try {
+                runCatching { matchRepository.pauseScoring(matchId) }
+                    .getOrNull()
+                    ?.let { pausedAt -> runCatching { expiryScheduler.schedule(matchId, pausedAt) } }
+            } finally {
+                if (returnToHostQuickScoring) {
+                    startActivity(
+                        Intent(this@MainScoringActivity, com.example.sportsxtreme.presentation.auth.MainActivity::class.java)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                            .putExtra(com.example.sportsxtreme.presentation.auth.MainActivity.EXTRA_OPEN_HOST_QUICK_SCORING, true)
+                    )
+                }
+                finish()
+            }
         }
     }
 
@@ -149,26 +191,37 @@ private val ScoringCard = Color(0xFF0B1523)
 private val ScoringStroke = Color(0xFF25314A)
 private val ScoringMuted = Color(0xFFAAB6C4)
 private val ScoringBlue = Color(0xFF00D2FF)
+private val OutSheetBackground = Color(0xFF0A101C)
 
 @Composable
 private fun MainScoringScreen(
     uiState: ScoringUiState,
     scorerName: String,
     onLoadPlayers: ((List<Player>, List<Player>) -> Unit) -> Unit,
-    onSelectNextBatter: (String) -> Unit,
+    onSelectNextBatter: (String, (String) -> Unit) -> Unit,
     onSelectNextBowler: (String, () -> Unit, (String) -> Unit) -> Unit,
     onStartSecondInnings: (String, String, String, (String) -> Unit) -> Unit,
     onFinishMatch: () -> Unit,
     onBack: () -> Unit,
+    onLeaveScoring: () -> Unit,
     onRun: (Int, String?, Map<String, String>) -> Unit,
     onExtra: (com.example.sportsxtreme.domain.model.ExtraType) -> Unit,
-    onRecordOut: (DismissalType, String) -> Unit,
+    onRecordOut: (DismissalType, String, String?, Boolean) -> Unit,
+    onRecordObstructingField: (String, ExtraType, Int) -> Unit,
+    onRecordRunOut: (String, String, String?, Boolean, ExtraType, Int) -> Unit,
     onUndo: () -> Unit
 ) {
     var showAdvanced by remember { mutableStateOf(false) }
     var showWagonWheel by remember { mutableStateOf(false) }
     var showBoundaryGround by remember { mutableStateOf(false) }
     var showOutPicker by remember { mutableStateOf(false) }
+    var pendingCaughtVariant by remember { mutableStateOf<String?>(null) }
+    var showStumpedSheet by remember { mutableStateOf(false) }
+    var showRetiredHurtSheet by remember { mutableStateOf(false) }
+    var showHitWicketSheet by remember { mutableStateOf(false) }
+    var showHitBallTwiceSheet by remember { mutableStateOf(false) }
+    var showObstructingFieldSheet by remember { mutableStateOf(false) }
+    var showRunOutSheet by remember { mutableStateOf(false) }
     var wagonRun by remember { mutableStateOf(0) }
     var battingPlayers by remember { mutableStateOf(emptyList<Player>()) }
     var bowlingPlayers by remember { mutableStateOf(emptyList<Player>()) }
@@ -176,10 +229,22 @@ private fun MainScoringScreen(
     var secondNonStrikerId by remember { mutableStateOf<String?>(null) }
     var secondBowlerId by remember { mutableStateOf<String?>(null) }
     var pickerError by remember { mutableStateOf<String?>(null) }
+    var batterPickerError by remember { mutableStateOf<String?>(null) }
     var bowlerPickerCompletedOver by remember { mutableStateOf<Int?>(null) }
     val scorecard = uiState.scorecard
     val matchState = uiState.matchState
     val innings = matchState?.currentInnings
+    var showLeaveScoringConfirmation by remember { mutableStateOf(false) }
+    val needsReplacement = innings?.status?.name == "LIVE" &&
+        (matchState?.striker == null || matchState.nonStriker == null)
+    BackHandler(enabled = needsReplacement) {
+        showLeaveScoringConfirmation = true
+    }
+    LaunchedEffect(innings?.id) {
+        // Over numbers restart at zero in each innings, so the previous innings'
+        // selected-over marker must not suppress this innings' bowler picker.
+        bowlerPickerCompletedOver = null
+    }
     LaunchedEffect(matchState?.matchId, matchState?.battingTeam?.teamId, matchState?.bowlingTeam?.teamId) {
         onLoadPlayers { batting, bowling ->
             battingPlayers = batting
@@ -207,6 +272,12 @@ private fun MainScoringScreen(
             ScoreSummaryCard(
                 score = "${scorecard?.summary?.totalScore ?: 0}/${scorecard?.summary?.wickets ?: 0}",
                 overs = scorecard?.summary?.overs?.display ?: "0.0",
+                fullOvers = scorecard?.summary?.scheduledOvers,
+                chaseText = scorecard?.summary?.let { summary -> summary.target?.let { target ->
+                    val runsNeeded = (target - summary.totalScore).coerceAtLeast(0)
+                    val ballsRemaining = summary.scheduledOvers?.let { (it * 6 - summary.legalBalls).coerceAtLeast(0) }
+                    ballsRemaining?.let { "$runsNeeded runs needed from $it ${if (it == 1) "ball" else "balls"}" }
+                } },
                 runRate = scorecard?.summary?.currentRunRate ?: 0.0,
                 target = scorecard?.summary?.target,
                 modifier = Modifier.padding(horizontal = 10.dp)
@@ -317,25 +388,167 @@ private fun MainScoringScreen(
                 modifier = Modifier.align(Alignment.BottomCenter),
                 onSelect = { type, variant ->
                     showOutPicker = false
-                    onRecordOut(type, variant)
+                    if (type == DismissalType.CAUGHT && variant == "Caught") {
+                        pendingCaughtVariant = variant
+                    } else if (type == DismissalType.STUMPED && variant == "Stumped") {
+                        showStumpedSheet = true
+                    } else if (type == DismissalType.RETIRED_HURT && variant == "Retired hurt") {
+                        showRetiredHurtSheet = true
+                    } else if (type == DismissalType.HIT_WICKET && variant == "Hit wicket") {
+                        showHitWicketSheet = true
+                    } else if (type == DismissalType.OBSTRUCTING_THE_FIELD) {
+                        showObstructingFieldSheet = true
+                    } else if (type == DismissalType.HIT_BALL_TWICE && variant == "Hit the ball twice") {
+                        showHitBallTwiceSheet = true
+                    } else if (type == DismissalType.RUN_OUT && variant == "Run out") {
+                        showRunOutSheet = true
+                    } else {
+                        onRecordOut(type, variant, null, false)
+                    }
                 }
             )
         }
 
-        val needsReplacement = innings?.status?.name == "LIVE" &&
-            (matchState?.striker == null || matchState.nonStriker == null)
+        pendingCaughtVariant?.let { variant ->
+            CaughtOutBottomSheet(
+                strikerName = matchState?.striker?.displayName.orEmpty(),
+                fielders = bowlingPlayers,
+                onDismiss = { pendingCaughtVariant = null },
+                onConfirm = { fielderId, brilliantCatch ->
+                    pendingCaughtVariant = null
+                    onRecordOut(DismissalType.CAUGHT, variant, fielderId, brilliantCatch)
+                }
+            )
+        }
+
+        if (showStumpedSheet) {
+            StumpedOutBottomSheet(
+                strikerName = matchState?.striker?.displayName.orEmpty(),
+                fielders = bowlingPlayers,
+                onDismiss = { showStumpedSheet = false },
+                onConfirm = { wicketKeeperId, wideBall ->
+                    showStumpedSheet = false
+                    onRecordOut(DismissalType.STUMPED, "Stumped", wicketKeeperId, wideBall)
+                }
+            )
+        }
+
+        if (showRetiredHurtSheet) {
+            RetiredHurtBottomSheet(
+                strikerName = matchState?.striker?.displayName.orEmpty(),
+                nonStrikerName = matchState?.nonStriker?.displayName.orEmpty(),
+                strikerId = matchState?.striker?.id,
+                nonStrikerId = matchState?.nonStriker?.id,
+                onDismiss = { showRetiredHurtSheet = false },
+                onConfirm = { batterId, dontCountBall ->
+                    showRetiredHurtSheet = false
+                    onRecordOut(DismissalType.RETIRED_HURT, "Retired hurt", batterId, dontCountBall)
+                }
+            )
+        }
+
+        if (showHitWicketSheet) {
+            HitWicketOutBottomSheet(
+                strikerName = matchState?.striker?.displayName.orEmpty(),
+                onDismiss = { showHitWicketSheet = false },
+                onConfirm = { wideBall ->
+                    showHitWicketSheet = false
+                    onRecordOut(DismissalType.HIT_WICKET, "Hit wicket", null, wideBall)
+                }
+            )
+        }
+
+        if (showObstructingFieldSheet) {
+            ObstructingFieldBottomSheet(
+                strikerName = matchState?.striker?.displayName.orEmpty(),
+                nonStrikerName = matchState?.nonStriker?.displayName.orEmpty(),
+                strikerId = matchState?.striker?.id,
+                nonStrikerId = matchState?.nonStriker?.id,
+                onDismiss = { showObstructingFieldSheet = false },
+                onConfirm = { batterId, deliveryType, runs ->
+                    showObstructingFieldSheet = false
+                    onRecordObstructingField(batterId, deliveryType, runs)
+                }
+            )
+        }
+
+        if (showHitBallTwiceSheet) {
+            HitBallTwiceBottomSheet(
+                strikerName = matchState?.striker?.displayName.orEmpty(),
+                onDismiss = { showHitBallTwiceSheet = false },
+                onConfirm = { noBall ->
+                    showHitBallTwiceSheet = false
+                    onRecordOut(DismissalType.HIT_BALL_TWICE, "Hit the ball twice", null, noBall)
+                }
+            )
+        }
+
+        if (showRunOutSheet) {
+            RunOutBottomSheet(
+                strikerName = matchState?.striker?.displayName.orEmpty(),
+                nonStrikerName = matchState?.nonStriker?.displayName.orEmpty(),
+                strikerId = matchState?.striker?.id,
+                nonStrikerId = matchState?.nonStriker?.id,
+                fielders = bowlingPlayers,
+                onDismiss = { showRunOutSheet = false },
+                onConfirm = { batterId, fielder1Id, fielder2Id, directHit, deliveryType, runs ->
+                    showRunOutSheet = false
+                    onRecordRunOut(batterId, fielder1Id, fielder2Id, directHit, deliveryType, runs)
+                }
+            )
+        }
+
         if (needsReplacement) {
             val alreadyUsed = scorecard?.batting.orEmpty().map { it.playerId }.toSet()
             val eligible = battingPlayers.filterNot { it.id in alreadyUsed }
-            Dialog(onDismissRequest = { /* A dismissed batter must be replaced before play resumes. */ },
-                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+            Dialog(onDismissRequest = { showLeaveScoringConfirmation = true },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
                 ScoringSelectionPage(
                     title = "SELECT NEXT BATTER",
                     subtitle = "Choose a player to continue the innings",
                     players = eligible,
                     selectedId = null,
-                    onSelect = { onSelectNextBatter(it) }
+                    onSelect = { playerId ->
+                        batterPickerError = null
+                        onSelectNextBatter(playerId) { error -> batterPickerError = error.ifBlank { null } }
+                    }
                 )
+                batterPickerError?.let {
+                    Text(it, color = Color(0xFFFF6677), fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                }
+            }
+        }
+
+        if (showLeaveScoringConfirmation && needsReplacement) {
+            Dialog(
+                onDismissRequest = { showLeaveScoringConfirmation = false },
+                properties = DialogProperties(usePlatformDefaultWidth = true, dismissOnClickOutside = false)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                        .background(OutSheetBackground).border(1.dp, ScoringStroke, RoundedCornerShape(16.dp))
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Text("Leave scoring?", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    Text(
+                        "You are leaving the scoring screen. You can continue from the Quick Scoring tab on the host screen.",
+                        color = ScoringMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp)
+                    )
+                    Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.End) {
+                        Text(
+                            "NO", color = ScoringMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable { showLeaveScoringConfirmation = false }.padding(horizontal = 16.dp, vertical = 12.dp)
+                        )
+                        Text(
+                            "YES", color = ScoringAccent, fontSize = 13.sp, fontWeight = FontWeight.Black,
+                            modifier = Modifier.clickable {
+                                showLeaveScoringConfirmation = false
+                                onLeaveScoring()
+                            }.padding(horizontal = 16.dp, vertical = 12.dp)
+                        )
+                    }
+                }
             }
         }
 
@@ -350,8 +563,8 @@ private fun MainScoringScreen(
                 limit == null || (scorecard?.bowling?.firstOrNull { it.playerId == player.id }?.legalBalls ?: 0) + 6 <= limit * 6
             }
         if (needsNextBowler && !needsReplacement) {
-            Dialog(onDismissRequest = { /* A completed over needs a new bowler before play resumes. */ },
-                properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Dialog(onDismissRequest = onBack,
+                properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
                 Column(modifier = Modifier.fillMaxSize().background(ScoringBg).verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.Center) {
                     Text("OVER COMPLETE", color = ScoringAccent, fontSize = 22.sp, fontWeight = FontWeight.Black)
                     Text("Choose the bowler for the next over.", color = Color.White, modifier = Modifier.padding(top = 8.dp, bottom = 16.dp))
@@ -374,7 +587,7 @@ private fun MainScoringScreen(
         if (innings?.status?.name == "COMPLETED") {
             val firstInningsComplete = innings.number == 1
             if (firstInningsComplete) {
-                Dialog(onDismissRequest = { }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                Dialog(onDismissRequest = onBack, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
                     Column(modifier = Modifier.fillMaxSize().background(ScoringBg).verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.Center) {
                         Text("INNINGS BREAK", color = ScoringAccent, fontSize = 22.sp, fontWeight = FontWeight.Black)
                         Text("${matchState?.battingTeam?.name.orEmpty()} finished on ${innings.score}/${innings.wickets}. Choose the chasing team's openers and bowler.", color = Color.White, modifier = Modifier.padding(top = 10.dp, bottom = 20.dp))
@@ -395,7 +608,7 @@ private fun MainScoringScreen(
                     }
                 }
             } else {
-                Dialog(onDismissRequest = { }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                Dialog(onDismissRequest = onBack, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
                     Column(modifier = Modifier.fillMaxSize().background(ScoringBg).padding(24.dp), verticalArrangement = Arrangement.Center) {
                         Text("MATCH FINISHED", color = ScoringAccent, fontSize = 24.sp, fontWeight = FontWeight.Black)
                         Text("${matchState?.score ?: innings.score}/${innings.wickets} • ${innings.legalBalls / 6}.${innings.legalBalls % 6} overs", color = Color.White, modifier = Modifier.padding(vertical = 16.dp))
@@ -437,15 +650,24 @@ private fun OutSelectionBottomSheet(
     Column(
         modifier = modifier.fillMaxWidth().heightIn(max = 560.dp)
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-            .background(Color.White)
+            .background(OutSheetBackground)
+            .drawBehind {
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(ScoringAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
+                    )
+                )
+            }
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 8.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Spacer(Modifier.weight(1f).height(1.dp).background(Color(0xFFD5D5D5)))
-            Text("Select out type", color = Color(0xFF4B4B4B), fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
-            Spacer(Modifier.weight(1f).height(1.dp).background(Color(0xFFD5D5D5)))
+            Spacer(Modifier.weight(1f).height(1.dp).background(ScoringStroke))
+            Text("Select out type", color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+            Spacer(Modifier.weight(1f).height(1.dp).background(ScoringStroke))
         }
         (if (expanded) outOptions else outOptions.take(8)).chunked(4).forEach { rowOptions ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -455,7 +677,13 @@ private fun OutSelectionBottomSheet(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Box(
-                            Modifier.size(68.dp).clip(CircleShape).background(Color(0xFFF1F1F1)),
+                            Modifier.size(68.dp).clip(CircleShape).then(
+                                if (option.icon == null) {
+                                    Modifier.background(Color(0xFF111A29)).border(1.dp, ScoringStroke, CircleShape)
+                                } else {
+                                    Modifier
+                                }
+                            ),
                             contentAlignment = Alignment.Center
                         ) {
                             if (option.icon != null) {
@@ -463,15 +691,15 @@ private fun OutSelectionBottomSheet(
                                     painter = painterResource(option.icon),
                                     contentDescription = option.title.replace('\n', ' '),
                                     contentScale = ContentScale.Fit,
-                                    modifier = Modifier.size(54.dp)
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
                                 )
                             } else {
-                                Text("•", color = Color(0xFF565656), fontSize = 34.sp, lineHeight = 34.sp)
+                                Text("•", color = ScoringMuted, fontSize = 34.sp, lineHeight = 34.sp)
                             }
                         }
                         Text(
                             option.title,
-                            color = Color(0xFF202020),
+                            color = Color.White,
                             fontSize = 10.sp,
                             lineHeight = 12.sp,
                             textAlign = TextAlign.Center,
@@ -484,10 +712,811 @@ private fun OutSelectionBottomSheet(
         }
         Text(
             if (expanded) "Show less" else "Show all",
-            color = Color(0xFF009688),
+            color = ScoringAccent,
             fontSize = 13.sp,
             modifier = Modifier.padding(top = 8.dp, bottom = 2.dp).clickable { expanded = !expanded }
         )
+    }
+}
+
+@Composable
+private fun CaughtOutBottomSheet(
+    strikerName: String,
+    fielders: List<Player>,
+    onDismiss: () -> Unit,
+    onConfirm: (fielderId: String, brilliantCatch: Boolean) -> Unit
+) {
+    var fieldPickerExpanded by remember { mutableStateOf(false) }
+    var selectedFielderId by remember { mutableStateOf<String?>(null) }
+    var brilliantCatch by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(onClick = onDismiss))
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .heightIn(max = this@BoxWithConstraints.maxHeight * 0.94f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(OutSheetBackground)
+                .drawBehind {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(ScoringAccent.copy(alpha = 0.15f), Color.Transparent),
+                            center = Offset(size.width / 2f, -50f),
+                            radius = size.height * 0.6f
+                        )
+                    )
+                }
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(ScoringStroke))
+            Text("Caught", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 12.dp))
+
+            Column(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalAlignment = Alignment.Start) {
+                Text("Who?", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                StrikerDismissalCard(strikerName)
+            }
+
+            Column(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalAlignment = Alignment.Start) {
+                Text("Select fielder", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Box(
+                    modifier = Modifier.padding(top = 7.dp).size(136.dp).clip(RoundedCornerShape(9.dp))
+                        .clickable { fieldPickerExpanded = !fieldPickerExpanded },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.caught),
+                        contentDescription = "Choose fielder",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    )
+                    if (selectedFielderId != null) {
+                        Box(Modifier.align(Alignment.TopEnd).size(25.dp).clip(CircleShape).background(ScoringAccent), contentAlignment = Alignment.Center) {
+                            Text("✓", color = ScoringBg, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
+                Text(
+                    fielders.firstOrNull { it.id == selectedFielderId }?.displayName ?: "Tap icon to choose",
+                    color = if (selectedFielderId == null) ScoringMuted else ScoringAccent,
+                    fontSize = 11.sp,
+                    modifier = Modifier.width(136.dp).padding(top = 4.dp),
+                    textAlign = TextAlign.Center,
+                    maxLines = 2
+                )
+                if (fieldPickerExpanded) {
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = 160.dp).padding(top = 7.dp)
+                            .clip(RoundedCornerShape(9.dp)).background(ScoringCard)
+                            .verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        fielders.forEach { fielder ->
+                            Text(
+                                text = (if (fielder.id == selectedFielderId) "✓  " else "") + fielder.displayName,
+                                color = if (fielder.id == selectedFielderId) ScoringAccent else Color.White,
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    selectedFielderId = fielder.id
+                                    fieldPickerExpanded = false
+                                }.padding(vertical = 9.dp)
+                            )
+                        }
+                        if (fielders.isEmpty()) Text("No fielders available", color = ScoringMuted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(8.dp))
+                    .clickable { brilliantCatch = !brilliantCatch }.padding(vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(20.dp).border(1.dp, if (brilliantCatch) ScoringAccent else ScoringMuted, RoundedCornerShape(3.dp))
+                        .background(if (brilliantCatch) ScoringAccent else Color.Transparent, RoundedCornerShape(3.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (brilliantCatch) Text("✓", color = ScoringBg, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                }
+                Text("Brilliant catch", color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(start = 9.dp))
+            }
+
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).padding(top = 8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selectedFielderId != null) ScoringAccent else ScoringStroke)
+                    .clickable(enabled = selectedFielderId != null) {
+                        selectedFielderId?.let { onConfirm(it, brilliantCatch) }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("OUT", color = if (selectedFielderId != null) ScoringBg else ScoringMuted, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StumpedOutBottomSheet(
+    strikerName: String,
+    fielders: List<Player>,
+    onDismiss: () -> Unit,
+    onConfirm: (wicketKeeperId: String, wideBall: Boolean) -> Unit
+) {
+    var keeperPickerExpanded by remember { mutableStateOf(false) }
+    var selectedKeeperId by remember { mutableStateOf<String?>(null) }
+    var wideBall by remember { mutableStateOf(false) }
+    val designatedKeepers = fielders.filter { it.role.name == "WICKET_KEEPER" }
+    val keeperOptions = designatedKeepers.ifEmpty { fielders }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(onClick = onDismiss))
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .heightIn(max = this@BoxWithConstraints.maxHeight * 0.94f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(OutSheetBackground)
+                .drawBehind {
+                    drawRect(Brush.radialGradient(
+                        colors = listOf(ScoringAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
+                    ))
+                }
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(ScoringStroke))
+            Text("Stumped", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 12.dp))
+
+            Column(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalAlignment = Alignment.Start) {
+                Text("Who?", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                StrikerDismissalCard(strikerName)
+            }
+
+            Column(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalAlignment = Alignment.Start) {
+                Text("Wicket-keeper", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Column(
+                    modifier = Modifier.padding(top = 8.dp).width(150.dp)
+                        .clip(RoundedCornerShape(9.dp)).background(ScoringCard)
+                        .border(1.dp, ScoringStroke, RoundedCornerShape(9.dp))
+                        .clickable { keeperPickerExpanded = !keeperPickerExpanded },
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(Modifier.fillMaxWidth().height(132.dp).background(Color(0xFF111A29)), contentAlignment = Alignment.Center) {
+                        Image(
+                            painter = painterResource(R.drawable.wicketkeeper),
+                            contentDescription = "Wicket-keeper profile",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize().padding(5.dp).clip(RoundedCornerShape(7.dp))
+                        )
+                        if (selectedKeeperId != null) {
+                            Box(Modifier.fillMaxSize().background(Color(0x6611A79D)), contentAlignment = Alignment.Center) {
+                                Text("✓", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+                    }
+                    Text(
+                        keeperOptions.firstOrNull { it.id == selectedKeeperId }?.displayName ?: "Tap to choose",
+                        color = if (selectedKeeperId == null) ScoringMuted else Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 9.dp)
+                    )
+                    if (selectedKeeperId != null) {
+                        Text("Wicket-keeper", color = ScoringMuted, fontSize = 10.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, modifier = Modifier.padding(bottom = 8.dp))
+                    }
+                }
+                if (keeperPickerExpanded) {
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = 150.dp).padding(top = 7.dp)
+                            .clip(RoundedCornerShape(9.dp)).background(ScoringCard)
+                            .verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        keeperOptions.forEach { keeper ->
+                            Text(
+                                text = (if (keeper.id == selectedKeeperId) "✓  " else "") + keeper.displayName,
+                                color = if (keeper.id == selectedKeeperId) ScoringAccent else Color.White,
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    selectedKeeperId = keeper.id
+                                    keeperPickerExpanded = false
+                                }.padding(vertical = 9.dp)
+                            )
+                        }
+                        if (keeperOptions.isEmpty()) Text("No wicket-keepers available", color = ScoringMuted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp).clickable { wideBall = !wideBall }.padding(vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(20.dp).border(1.dp, if (wideBall) ScoringAccent else ScoringMuted, RoundedCornerShape(3.dp))
+                        .background(if (wideBall) ScoringAccent else Color.Transparent, RoundedCornerShape(3.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (wideBall) Text("✓", color = ScoringBg, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                }
+                Text("Wide Ball", color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(start = 9.dp))
+            }
+
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).padding(top = 8.dp).clip(RoundedCornerShape(8.dp))
+                    .background(if (selectedKeeperId != null) ScoringAccent else ScoringStroke)
+                    .clickable(enabled = selectedKeeperId != null) {
+                        selectedKeeperId?.let { onConfirm(it, wideBall) }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("OUT", color = if (selectedKeeperId != null) ScoringBg else ScoringMuted, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HitWicketOutBottomSheet(
+    strikerName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (wideBall: Boolean) -> Unit
+) {
+    var wideBall by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(onClick = onDismiss))
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .heightIn(max = this@BoxWithConstraints.maxHeight * 0.94f)
+                .fillMaxHeight(0.94f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(OutSheetBackground)
+                .drawBehind {
+                    drawRect(Brush.radialGradient(
+                        colors = listOf(ScoringAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
+                    ))
+                }
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Box(Modifier.align(Alignment.CenterHorizontally).width(38.dp).height(4.dp).clip(CircleShape).background(ScoringStroke))
+            Text("Hit Wicket", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 12.dp))
+            Text("Who?", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 22.dp))
+            StrikerDismissalCard(strikerName)
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).clickable { wideBall = !wideBall }.padding(vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(20.dp).border(1.dp, if (wideBall) ScoringAccent else ScoringMuted, RoundedCornerShape(3.dp))
+                        .background(if (wideBall) ScoringAccent else Color.Transparent, RoundedCornerShape(3.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (wideBall) Text("✓", color = ScoringBg, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                }
+                Text("Wide Ball", color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(start = 9.dp))
+            }
+
+            Spacer(Modifier.weight(1f))
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(8.dp))
+                    .background(ScoringAccent).clickable { onConfirm(wideBall) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("OUT", color = ScoringBg, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HitBallTwiceBottomSheet(
+    strikerName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (noBall: Boolean) -> Unit
+) {
+    var noBall by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(onClick = onDismiss))
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .fillMaxHeight(0.94f).heightIn(max = this@BoxWithConstraints.maxHeight * 0.94f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(OutSheetBackground)
+                .drawBehind {
+                    drawRect(Brush.radialGradient(
+                        colors = listOf(ScoringAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
+                    ))
+                }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Box(Modifier.align(Alignment.CenterHorizontally).width(38.dp).height(4.dp).clip(CircleShape).background(ScoringStroke))
+            Text("Hit the Ball Twice", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 12.dp))
+            Text("Who?", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 22.dp))
+            RetiredHurtPlayerCard(
+                name = strikerName,
+                role = "Striker",
+                image = R.drawable.striker,
+                selected = true,
+                modifier = Modifier.padding(top = 6.dp).width(150.dp),
+                onClick = {}
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).clickable { noBall = !noBall }.padding(vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(20.dp).border(1.dp, if (noBall) ScoringAccent else ScoringMuted, RoundedCornerShape(3.dp))
+                        .background(if (noBall) ScoringAccent else Color.Transparent, RoundedCornerShape(3.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (noBall) Text("✓", color = ScoringBg, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                }
+                Text("No Ball", color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(start = 9.dp))
+            }
+
+            Spacer(Modifier.weight(1f))
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(8.dp))
+                    .background(ScoringAccent).clickable { onConfirm(noBall) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("OUT", color = ScoringBg, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ObstructingFieldBottomSheet(
+    strikerName: String,
+    nonStrikerName: String,
+    strikerId: String?,
+    nonStrikerId: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (batterId: String, deliveryType: ExtraType, runs: Int) -> Unit
+) {
+    var selectedBatterId by remember { mutableStateOf<String?>(null) }
+    var selectedDeliveryType by remember { mutableStateOf<ExtraType?>(null) }
+    var selectedRuns by remember { mutableStateOf(0) }
+    val deliveryTypes = listOf(
+        "WD" to ExtraType.WIDE,
+        "NB" to ExtraType.NO_BALL,
+        "Bye" to ExtraType.BYE,
+        "LB" to ExtraType.LEG_BYE
+    )
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(onClick = onDismiss))
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .fillMaxHeight(0.94f).heightIn(max = this@BoxWithConstraints.maxHeight * 0.94f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(OutSheetBackground)
+                .drawBehind {
+                    drawRect(Brush.radialGradient(
+                        colors = listOf(ScoringAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
+                    ))
+                }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(ScoringStroke))
+            Text("Obstructing the field", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 10.dp))
+
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+            ) {
+                Text("Who?", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp, bottom = 6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    RetiredHurtPlayerCard(
+                        name = strikerName, role = "Striker", image = R.drawable.striker,
+                        selected = selectedBatterId == strikerId && strikerId != null,
+                        modifier = Modifier.weight(1f),
+                        onClick = { strikerId?.let { selectedBatterId = it } }
+                    )
+                    RetiredHurtPlayerCard(
+                        name = nonStrikerName, role = "Non-striker", image = R.drawable.nonstriker,
+                        selected = selectedBatterId == nonStrikerId && nonStrikerId != null,
+                        modifier = Modifier.weight(1f),
+                        onClick = { nonStrikerId?.let { selectedBatterId = it } }
+                    )
+                }
+
+                Text("Delivery type", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    deliveryTypes.forEach { (label, type) ->
+                        OutChoiceChip(
+                            label = label,
+                            selected = selectedDeliveryType == type,
+                            modifier = Modifier.weight(1f),
+                            onClick = { selectedDeliveryType = type }
+                        )
+                    }
+                }
+
+                Text("Runs scored", color = ScoringMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (0..5).forEach { runs ->
+                        OutChoiceChip(
+                            label = if (runs == 5) "+" else runs.toString(),
+                            selected = selectedRuns == runs,
+                            modifier = Modifier.weight(1f),
+                            onClick = { selectedRuns = runs }
+                        )
+                    }
+                }
+            }
+
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).padding(top = 8.dp).clip(RoundedCornerShape(8.dp))
+                    .background(if (selectedBatterId != null && selectedDeliveryType != null) ScoringAccent else ScoringStroke)
+                    .clickable(enabled = selectedBatterId != null && selectedDeliveryType != null) {
+                        val batterId = selectedBatterId
+                        val deliveryType = selectedDeliveryType
+                        if (batterId != null && deliveryType != null) onConfirm(batterId, deliveryType, selectedRuns)
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("OUT", color = if (selectedBatterId != null && selectedDeliveryType != null) ScoringBg else ScoringMuted, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun OutChoiceChip(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier.height(38.dp).clip(RoundedCornerShape(20.dp))
+            .background(if (selected) ScoringAccent else Color(0xFF182333))
+            .border(1.dp, if (selected) ScoringAccent else ScoringStroke, RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = if (selected) ScoringBg else Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun RunOutBottomSheet(
+    strikerName: String,
+    nonStrikerName: String,
+    strikerId: String?,
+    nonStrikerId: String?,
+    fielders: List<Player>,
+    onDismiss: () -> Unit,
+    onConfirm: (batterId: String, fielder1Id: String, fielder2Id: String?, directHit: Boolean, deliveryType: ExtraType, runs: Int) -> Unit
+) {
+    var selectedBatterId by remember { mutableStateOf<String?>(null) }
+    var selectedFielder1Id by remember { mutableStateOf<String?>(null) }
+    var selectedFielder2Id by remember { mutableStateOf<String?>(null) }
+    var directHit by remember { mutableStateOf(false) }
+    var selectedDeliveryType by remember { mutableStateOf<ExtraType?>(null) }
+    var selectedRuns by remember { mutableStateOf(0) }
+    var fielderPicker by remember { mutableStateOf(0) }
+    val deliveryTypes = listOf(
+        "WD" to ExtraType.WIDE,
+        "NB" to ExtraType.NO_BALL,
+        "Bye" to ExtraType.BYE,
+        "LB" to ExtraType.LEG_BYE
+    )
+    val canConfirm = selectedBatterId != null && selectedFielder1Id != null &&
+        (directHit || selectedFielder2Id != null) && selectedDeliveryType != null
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(onClick = onDismiss))
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .fillMaxHeight(0.94f).heightIn(max = this@BoxWithConstraints.maxHeight * 0.94f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(OutSheetBackground)
+                .drawBehind {
+                    drawRect(Brush.radialGradient(
+                        colors = listOf(ScoringAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
+                    ))
+                }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(ScoringStroke))
+            Text("Run Out", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 10.dp))
+
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                Text("Who?", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    RetiredHurtPlayerCard(
+                        name = strikerName, role = "Striker", image = R.drawable.striker,
+                        selected = selectedBatterId == strikerId && strikerId != null,
+                        modifier = Modifier.weight(1f),
+                        onClick = { strikerId?.let { selectedBatterId = it } }
+                    )
+                    RetiredHurtPlayerCard(
+                        name = nonStrikerName, role = "Non-striker", image = R.drawable.nonstriker,
+                        selected = selectedBatterId == nonStrikerId && nonStrikerId != null,
+                        modifier = Modifier.weight(1f),
+                        onClick = { nonStrikerId?.let { selectedBatterId = it } }
+                    )
+                }
+
+                Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Select fielder", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Row(
+                        modifier = Modifier.clickable {
+                            directHit = !directHit
+                            if (directHit) {
+                                selectedFielder2Id = null
+                                fielderPicker = 0
+                            }
+                        },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.size(18.dp).border(1.dp, if (directHit) ScoringAccent else ScoringMuted, RoundedCornerShape(3.dp))
+                                .background(if (directHit) ScoringAccent else Color.Transparent, RoundedCornerShape(3.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (directHit) Text("✓", color = ScoringBg, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                        }
+                        Text("Direct hit", color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
+                    }
+                }
+
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    RunOutFielderCard(
+                        title = "Fielder 1",
+                        selectedName = fielders.firstOrNull { it.id == selectedFielder1Id }?.displayName,
+                        image = R.drawable.obstructingthefield,
+                        enabled = true,
+                        modifier = Modifier.weight(1f),
+                        onClick = { fielderPicker = if (fielderPicker == 1) 0 else 1 }
+                    )
+                    RunOutFielderCard(
+                        title = "Fielder 2",
+                        selectedName = fielders.firstOrNull { it.id == selectedFielder2Id }?.displayName,
+                        image = R.drawable.mankadd,
+                        enabled = !directHit,
+                        modifier = Modifier.weight(1f),
+                        onClick = { fielderPicker = if (fielderPicker == 2) 0 else 2 }
+                    )
+                }
+                if (fielderPicker != 0) {
+                    val selectedOther = if (fielderPicker == 1) selectedFielder2Id else selectedFielder1Id
+                    Column(
+                        Modifier.fillMaxWidth().padding(top = 6.dp).heightIn(max = 140.dp)
+                            .clip(RoundedCornerShape(8.dp)).background(ScoringCard)
+                            .verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        fielders.filterNot { it.id == selectedOther }.forEach { player ->
+                            Text(
+                                (if (player.id == (if (fielderPicker == 1) selectedFielder1Id else selectedFielder2Id)) "✓  " else "") + player.displayName,
+                                color = if (player.id == (if (fielderPicker == 1) selectedFielder1Id else selectedFielder2Id)) ScoringAccent else Color.White,
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    if (fielderPicker == 1) selectedFielder1Id = player.id else selectedFielder2Id = player.id
+                                    fielderPicker = 0
+                                }.padding(vertical = 8.dp)
+                            )
+                        }
+                        if (fielders.isEmpty()) Text("No fielders available", color = ScoringMuted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+                    }
+                }
+
+                Text("Delivery type", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 7.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    deliveryTypes.forEach { (label, type) ->
+                        OutChoiceChip(label, selectedDeliveryType == type, Modifier.weight(1f)) { selectedDeliveryType = type }
+                    }
+                }
+                Text("Runs scored", color = ScoringMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 5.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (0..5).forEach { runs ->
+                        OutChoiceChip(if (runs == 5) "+" else runs.toString(), selectedRuns == runs, Modifier.weight(1f)) { selectedRuns = runs }
+                    }
+                }
+            }
+
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).padding(top = 8.dp).clip(RoundedCornerShape(8.dp))
+                    .background(if (canConfirm) ScoringAccent else ScoringStroke)
+                    .clickable(enabled = canConfirm) {
+                        val batterId = selectedBatterId
+                        val fielder1Id = selectedFielder1Id
+                        val deliveryType = selectedDeliveryType
+                        if (batterId != null && fielder1Id != null && deliveryType != null && (directHit || selectedFielder2Id != null)) {
+                            onConfirm(batterId, fielder1Id, selectedFielder2Id.takeUnless { directHit }, directHit, deliveryType, selectedRuns)
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("OUT", color = if (canConfirm) ScoringBg else ScoringMuted, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RunOutFielderCard(
+    title: String,
+    selectedName: String?,
+    image: Int,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(8.dp))
+            .background(if (enabled) ScoringCard else ScoringBg)
+            .border(1.dp, if (selectedName != null) ScoringAccent else ScoringStroke, RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(Modifier.fillMaxWidth().height(95.dp).background(Color(0xFF111A29)), contentAlignment = Alignment.Center) {
+            Image(
+                painter = painterResource(image),
+                contentDescription = title,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().padding(5.dp)
+            )
+            if (selectedName != null) Box(Modifier.fillMaxSize().background(Color(0x5511A79D)), contentAlignment = Alignment.Center) {
+                Text("✓", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            }
+        }
+        Text(selectedName ?: title, color = if (selectedName == null) ScoringMuted else Color.White, fontSize = 11.sp, maxLines = 1, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 5.dp))
+    }
+}
+
+@Composable
+private fun StrikerDismissalCard(strikerName: String) {
+    Column(
+        modifier = Modifier.padding(top = 8.dp).width(150.dp)
+            .clip(RoundedCornerShape(9.dp)).background(ScoringCard)
+            .border(1.dp, ScoringStroke, RoundedCornerShape(9.dp)),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(Modifier.fillMaxWidth().height(132.dp).background(Color(0xFF111A29)), contentAlignment = Alignment.Center) {
+            Image(
+                painter = painterResource(R.drawable.striker),
+                contentDescription = "Striker ${strikerName.ifBlank { "" }}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().padding(5.dp).clip(RoundedCornerShape(7.dp))
+            )
+            Box(Modifier.fillMaxSize().background(Color(0x6611A79D)), contentAlignment = Alignment.Center) {
+                Text("✓", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black)
+            }
+        }
+        Text(strikerName.ifBlank { "Striker" }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 7.dp))
+        Text("Striker", color = ScoringMuted, fontSize = 10.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, modifier = Modifier.padding(bottom = 8.dp))
+    }
+}
+
+@Composable
+private fun RetiredHurtBottomSheet(
+    strikerName: String,
+    nonStrikerName: String,
+    strikerId: String?,
+    nonStrikerId: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (batterId: String, dontCountBall: Boolean) -> Unit
+) {
+    var selectedBatterId by remember { mutableStateOf<String?>(null) }
+    var dontCountBall by remember { mutableStateOf(true) }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(onClick = onDismiss))
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .heightIn(max = this@BoxWithConstraints.maxHeight * 0.94f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(OutSheetBackground)
+                .drawBehind {
+                    drawRect(Brush.radialGradient(
+                        colors = listOf(ScoringAccent.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
+                    ))
+                }
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(ScoringStroke))
+            Text("Retired hurt", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 12.dp))
+            Text("Who?", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 8.dp))
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                RetiredHurtPlayerCard(
+                    name = strikerName,
+                    role = "Striker",
+                    image = R.drawable.striker,
+                    selected = selectedBatterId == strikerId && strikerId != null,
+                    modifier = Modifier.weight(1f),
+                    onClick = { strikerId?.let { selectedBatterId = it } }
+                )
+                RetiredHurtPlayerCard(
+                    name = nonStrikerName,
+                    role = "Non-striker",
+                    image = R.drawable.nonstriker,
+                    selected = selectedBatterId == nonStrikerId && nonStrikerId != null,
+                    modifier = Modifier.weight(1f),
+                    onClick = { nonStrikerId?.let { selectedBatterId = it } }
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 14.dp).clickable { dontCountBall = !dontCountBall }.padding(vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(20.dp).border(1.dp, if (dontCountBall) ScoringAccent else ScoringMuted, RoundedCornerShape(3.dp))
+                        .background(if (dontCountBall) ScoringAccent else Color.Transparent, RoundedCornerShape(3.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (dontCountBall) Text("✓", color = ScoringBg, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                }
+                Text("Don't count the ball", color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(start = 9.dp))
+            }
+
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).padding(top = 8.dp).clip(RoundedCornerShape(8.dp))
+                    .background(if (selectedBatterId != null) ScoringAccent else ScoringStroke)
+                    .clickable(enabled = selectedBatterId != null) {
+                        selectedBatterId?.let { onConfirm(it, dontCountBall) }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Retired hurt", color = if (selectedBatterId != null) ScoringBg else ScoringMuted, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RetiredHurtPlayerCard(
+    name: String,
+    role: String,
+    image: Int,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(9.dp))
+            .background(if (selected) Color(0xFF15352F) else ScoringCard)
+            .border(1.dp, if (selected) ScoringAccent else ScoringStroke, RoundedCornerShape(9.dp))
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(Modifier.fillMaxWidth().height(136.dp).background(Color(0xFF111A29)), contentAlignment = Alignment.Center) {
+            Image(
+                painter = painterResource(image),
+                contentDescription = "$role ${name.ifBlank { "" }}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().padding(5.dp).clip(RoundedCornerShape(7.dp))
+            )
+            if (selected) {
+                Box(Modifier.fillMaxSize().background(Color(0x6611A79D)), contentAlignment = Alignment.Center) {
+                    Text("✓", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black)
+                }
+            }
+        }
+        Text(name.ifBlank { role }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 7.dp))
+        Text(role, color = ScoringMuted, fontSize = 10.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, modifier = Modifier.padding(bottom = 8.dp))
     }
 }
 
@@ -528,7 +1557,15 @@ private fun ScoringTopBar(scorerName: String, onBack: () -> Unit) {
 
 // ── Score Summary ─────────────────────────────────────────
 @Composable
-private fun ScoreSummaryCard(score: String, overs: String, runRate: Double, target: Int?, modifier: Modifier = Modifier) {
+private fun ScoreSummaryCard(score: String, overs: String, fullOvers: Int?, chaseText: String?, runRate: Double, target: Int?, modifier: Modifier = Modifier) {
+    val liveAlpha by rememberInfiniteTransition(label = "liveBlink").animateFloat(
+        initialValue = 1f,
+        targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes { durationMillis = 1800; 1f at 0; 0.25f at 900 },
+        ),
+        label = "liveAlpha"
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -548,10 +1585,13 @@ private fun ScoreSummaryCard(score: String, overs: String, runRate: Double, targ
                         .padding(horizontal = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("$overs OV", color = ScoringAccent, fontSize = 8.sp, fontWeight = FontWeight.Black)
+                    Text("$overs/${fullOvers?.let { "$it.0" } ?: "--"} OV", color = ScoringAccent, fontSize = 8.sp, fontWeight = FontWeight.Black)
                 }
                 Text("CRR  ${"%.2f".format(runRate)}", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 6.dp))
             }
+        }
+        if (chaseText != null) {
+            Text(chaseText, color = ScoringAccent, fontSize = 11.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 4.dp))
         }
         Row(
             modifier = Modifier
@@ -563,8 +1603,8 @@ private fun ScoreSummaryCard(score: String, overs: String, runRate: Double, targ
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Target: ${target ?: "--"}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
-            Text("LIVE", color = ScoringAccent, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            Text(target?.let { "Target: $it" } ?: "1st Innings", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+            Text("LIVE", color = Color(0xFFFF334F).copy(alpha = liveAlpha), fontSize = 10.sp, fontWeight = FontWeight.Black)
         }
     }
 }

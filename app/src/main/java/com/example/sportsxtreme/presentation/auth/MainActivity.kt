@@ -107,6 +107,7 @@ class MainActivity : ComponentActivity() {
     private var pendingOtpContact = ""
     private var pendingPhoneSignupNumber: String? = null
     private var openMyCricketTeamsAfterInvite by mutableStateOf(false)
+    private var openHostQuickScoringAfterReturn by mutableStateOf(false)
     private var teamWelcomeName by mutableStateOf<String?>(null)
     private val authViewModel by lazy { AuthDependencies.authViewModel() }
     private val inviteLinkViewModel: InviteLinkViewModel by viewModels()
@@ -360,14 +361,15 @@ class MainActivity : ComponentActivity() {
                 }
             )
 
-            Screen.Home -> key(openMyCricketTeamsAfterInvite) {
+            Screen.Home -> key(openMyCricketTeamsAfterInvite, openHostQuickScoringAfterReturn) {
                 AndroidView(
                     factory = { context ->
                         HomeScreenView(
                             context,
                             liveMatchViewModel = liveMatchViewModel,
                             hostTournamentsViewModel = hostTournamentsViewModel,
-                            startInMyCricketTeams = openMyCricketTeamsAfterInvite
+                            startInMyCricketTeams = openMyCricketTeamsAfterInvite,
+                            startInQuickScoringTab = openHostQuickScoringAfterReturn
                         ).also {
                             homeScreenView = it
                         }
@@ -449,6 +451,17 @@ class MainActivity : ComponentActivity() {
     fun showHomeScreen() {
         homeScreenView = null
         emailVerificationScreenView = null
+        openHostQuickScoringAfterReturn = false
+        currentScreen = Screen.Home
+        ensureComposeInitialized()
+        requestLocationPermissionAndUpdate()
+    }
+
+    private fun showHostQuickScoringTab() {
+        homeScreenView = null
+        emailVerificationScreenView = null
+        openMyCricketTeamsAfterInvite = false
+        openHostQuickScoringAfterReturn = true
         currentScreen = Screen.Home
         ensureComposeInitialized()
         requestLocationPermissionAndUpdate()
@@ -482,6 +495,10 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_HOST_QUICK_SCORING, false)) {
+            showHostQuickScoringTab()
+            return
+        }
         if (intent.getBooleanExtra(EXTRA_FORCE_LOGIN, false)) {
             homeScreenView = null
             currentScreen = Screen.Login
@@ -668,6 +685,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_START_DESTINATION = "extra_start_destination"
         const val EXTRA_FORCE_LOGIN = "extra_force_login"
+        const val EXTRA_OPEN_HOST_QUICK_SCORING = "open_host_quick_scoring"
         const val DESTINATION_SPORT_SELECTION = "sport_selection"
         private const val INVITE_SCHEME = "https"
         private const val INVITE_HOST = "sportsxtreme-95fbb.web.app"
