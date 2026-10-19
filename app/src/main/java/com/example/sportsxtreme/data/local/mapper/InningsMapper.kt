@@ -19,7 +19,9 @@ fun Innings.toEntity(): InningsEntity = InningsEntity(
     target = target,
     status = status.name,
     startedAtEpochMs = startedAtEpochMs,
-    completedAtEpochMs = completedAtEpochMs
+    completedAtEpochMs = completedAtEpochMs,
+    penaltyScoreAdjustment = this@toEntity.penaltyScoreAdjustment,
+    opponentPenaltyRuns = this@toEntity.opponentPenaltyRuns
 )
 
 fun InningsEntity.toDomain(): Innings = Innings(
@@ -37,5 +39,7 @@ fun InningsEntity.toDomain(): Innings = Innings(
     target = target,
     status = InningsStatus.valueOf(status),
     startedAtEpochMs = startedAtEpochMs,
-    completedAtEpochMs = completedAtEpochMs
+    completedAtEpochMs = completedAtEpochMs,
+    penaltyScoreAdjustment = this@toDomain.penaltyScoreAdjustment,
+    opponentPenaltyRuns = this@toDomain.opponentPenaltyRuns
 )

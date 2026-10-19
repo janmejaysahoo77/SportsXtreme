@@ -46,7 +46,8 @@ class SportSelectionView @JvmOverloads constructor(
     private data class SportItem(
         val name: String,
         val subtitle: String,
-        val imageRes: Int
+        val imageRes: Int,
+        val available: Boolean = false
     )
 
     private val primaryFixed = Color.rgb(193, 255, 0)
@@ -55,7 +56,7 @@ class SportSelectionView @JvmOverloads constructor(
     private var selectedCheck: TextView? = null
     private lateinit var chooseButtonView: TextView
     private val sports = listOf(
-        SportItem("CRICKET", "BATS, BOWLS, GLORY", R.drawable.cricket_choosesports),
+        SportItem("CRICKET", "BATS, BOWLS, GLORY", R.drawable.cricket_choosesports, available = true),
         SportItem("FOOTBALL", "PACE, PRESS, FINISH", R.drawable.football_choosesports),
         SportItem("BADMINTON", "REFLEX AND RALLY", R.drawable.badminton_choosesports),
         SportItem("VOLLEYBALL", "COURT CONTROL", R.drawable.volley_choosesports),
@@ -97,10 +98,18 @@ class SportSelectionView @JvmOverloads constructor(
             orientation = LinearLayout.VERTICAL
         }
 
-        sports.forEach { sport ->
-            grid.addView(sportCard(context, sport), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(160)).apply {
-                bottomMargin = dp(10)
-            })
+        sports.chunked(2).forEach { rowSports ->
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+            }
+            rowSports.forEachIndexed { index, sport ->
+                row.addView(sportCard(context, sport), LinearLayout.LayoutParams(0, dp(160), 1f).apply {
+                    leftMargin = if (index == 0) dp(14) else dp(5)
+                    rightMargin = if (index == 0) dp(5) else dp(14)
+                    bottomMargin = dp(10)
+                })
+            }
+            grid.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(170)))
         }
 
         content.addView(grid)
@@ -148,8 +157,8 @@ class SportSelectionView @JvmOverloads constructor(
                 setStroke(dp(1), Color.argb(56, 255, 255, 255))
             }
             foreground = cardStroke(false)
-            isClickable = true
-            isFocusable = true
+            isClickable = sport.available
+            isFocusable = sport.available
             val check = selectedCheckView(context)
 
             addView(ImageView(context).apply {
@@ -159,6 +168,25 @@ class SportSelectionView @JvmOverloads constructor(
             }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
             addView(CardShadeView(context), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            if (!sport.available) {
+                addView(TextView(context).apply {
+                    text = "COMING SOON"
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.BLACK)
+                    textSize = 9f
+                    letterSpacing = 0.08f
+                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    includeFontPadding = false
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(4).toFloat()
+                        setColor(primaryFixed)
+                    }
+                    setPadding(dp(8), dp(5), dp(8), dp(5))
+                }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
+                    topMargin = dp(12)
+                    rightMargin = dp(12)
+                })
+            }
             addView(cardLabel(context, sport), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
                 leftMargin = dp(16)
                 rightMargin = dp(16)
@@ -169,9 +197,7 @@ class SportSelectionView @JvmOverloads constructor(
                 rightMargin = dp(16)
             })
 
-            setOnClickListener {
-                selectSport(sport, this, check)
-            }
+            if (sport.available) setOnClickListener { selectSport(sport, this, check) }
         }
     }
 

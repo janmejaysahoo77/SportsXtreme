@@ -20,5 +20,7 @@ data class InningsEntity(
     val target: Int? = null,
     val status: String,
     val startedAtEpochMs: Long? = null,
-    val completedAtEpochMs: Long? = null
+    val completedAtEpochMs: Long? = null,
+    val penaltyScoreAdjustment: Int = 0,
+    val opponentPenaltyRuns: Int = 0
 )

@@ -2347,7 +2347,8 @@ class HomeScreenView @JvmOverloads constructor(
         scheduledDate: String? = null,
         scheduledTime: String? = null,
         scheduledVenue: String? = null,
-        canOpenScorecard: Boolean = true
+        canOpenScorecard: Boolean = true,
+        matchId: String? = null
     ): View {
         return FrameLayout(context).apply {
             isClickable = canOpenScorecard
@@ -2367,6 +2368,7 @@ class HomeScreenView @JvmOverloads constructor(
                     putExtra(ScorecardActivity.EXTRA_RRR, rrr)
                     putExtra(ScorecardActivity.EXTRA_WIN, win)
                     putExtra(ScorecardActivity.EXTRA_NOTE, note)
+                    matchId?.takeIf(String::isNotBlank)?.let { putExtra(ScorecardActivity.EXTRA_MATCH_ID, it) }
                 })
             }
             elevation = dp(14).toFloat()

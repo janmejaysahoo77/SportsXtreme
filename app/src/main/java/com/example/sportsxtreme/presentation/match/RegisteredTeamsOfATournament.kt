@@ -20,6 +20,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,9 +45,15 @@ class RegisteredTeamsOfATournament : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val tournamentId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID).orEmpty()
         val slot = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT).orEmpty()
+        val selectedTeamId = intent.getStringExtra(
+            if (slot == "A") SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID else SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID
+        ).orEmpty()
         setContent {
             val teams = rememberTournamentTeams(tournamentId)
             var selected by remember { mutableStateOf<RegisteredTournamentTeam?>(null) }
+            LaunchedEffect(teams, selectedTeamId) {
+                if (selectedTeamId.isNotBlank()) selected = teams.firstOrNull { it.id == selectedTeamId }
+            }
             RegisteredTeamsScreen(
                 teams = teams,
                 selected = selected,
@@ -56,6 +63,7 @@ class RegisteredTeamsOfATournament : ComponentActivity() {
                         setResult(RESULT_OK, intent
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID, team.id)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME, team.name)
+                            .putExtra(EXTRA_SELECTED_TEAM_LOGO_URL, team.logoUrl)
                             .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, slot))
                         finish()
                     }
@@ -66,7 +74,8 @@ class RegisteredTeamsOfATournament : ComponentActivity() {
     }
 }
 
-private data class RegisteredTournamentTeam(val id: String, val name: String)
+private const val EXTRA_SELECTED_TEAM_LOGO_URL = "selected_team_logo_url"
+private data class RegisteredTournamentTeam(val id: String, val name: String, val logoUrl: String = "")
 
 @Composable
 private fun rememberTournamentTeams(tournamentId: String): List<RegisteredTournamentTeam> {
@@ -76,10 +85,18 @@ private fun rememberTournamentTeams(tournamentId: String): List<RegisteredTourna
         val listener = FirebaseFirestore.getInstance().collection("tournaments")
             .document(tournamentId).collection("teams")
             .addSnapshotListener { snapshots, _ ->
-                teams = snapshots?.documents.orEmpty().map { document ->
+                val loadedTeams = snapshots?.documents.orEmpty().map { document ->
                     val name = document.getString("teamName")?.trim().orEmpty().ifBlank { "Team" }
-                    RegisteredTournamentTeam(document.id, name)
+                    val logo = listOf("logoUrl", "teamLogoUrl", "photoUrl").firstNotNullOfOrNull { document.getString(it)?.takeIf(String::isNotBlank) }.orEmpty()
+                    RegisteredTournamentTeam(document.id, name, logo)
                 }.sortedBy { it.name.lowercase() }
+                teams = loadedTeams
+                loadedTeams.filter { it.logoUrl.isBlank() }.forEach { team ->
+                    FirebaseFirestore.getInstance().collection("teams").document(team.id).get().addOnSuccessListener { details ->
+                        val logo = listOf("logoUrl", "teamLogoUrl", "photoUrl").firstNotNullOfOrNull { details.getString(it)?.takeIf(String::isNotBlank) }.orEmpty()
+                        if (logo.isNotBlank()) teams = teams.map { if (it.id == team.id) it.copy(logoUrl = logo) else it }
+                    }
+                }
             }
         onDispose { listener.remove() }
     }
@@ -119,7 +136,7 @@ private fun RegisteredTeamsScreen(
             }
         }
         Button(onClick = onDone, enabled = selected != null, modifier = Modifier.fillMaxWidth()) {
-            Text("DONE")
+            Text("CONFIRM")
         }
     }
 }

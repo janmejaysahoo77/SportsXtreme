@@ -77,7 +77,8 @@ fun TeamEntity.toMatchTeam(side: TeamSide): MatchTeam = MatchTeam(
     teamId = teamId,
     name = teamName,
     shortName = shortName,
-    side = side
+    side = side,
+    logoUrl = logo
 )
 
 fun MatchEntity.toToss(): Toss? {

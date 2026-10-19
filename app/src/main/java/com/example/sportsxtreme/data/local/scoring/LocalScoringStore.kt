@@ -160,16 +160,17 @@ class LocalScoringStore @Inject constructor(
         persistProjection(innings, projection, updatedAtEpochMs)
         val match = matchDao.getMatch(event.matchId)
         val wicketLimit = playerDao.getPlayingXI(event.matchId, innings.battingTeamId).size.let { if (it > 1) it - 1 else 10 }
+        val effectiveScore = (projection.totalScore + innings.penaltyScoreAdjustment).coerceAtLeast(0)
         val inningsComplete = (match?.overs?.let { projection.legalBalls >= it * 6 } == true) ||
             projection.wickets >= wicketLimit ||
-            (innings.target?.let { projection.totalScore >= it } == true)
+            (innings.target?.let { effectiveScore >= it } == true)
         if (inningsComplete && innings.status == "LIVE") {
             val completedAt = System.currentTimeMillis()
             inningsDao.updateInnings(innings.copy(
                 strikerId = projection.strikerId,
                 nonStrikerId = projection.nonStrikerId,
                 currentBowlerId = projection.bowlerId,
-                score = projection.totalScore,
+                score = effectiveScore,
                 wickets = projection.wickets,
                 legalBalls = projection.legalBalls,
                 status = "COMPLETED",
@@ -212,8 +213,28 @@ class LocalScoringStore @Inject constructor(
         check(ballEventDao.insertBall(reversal.toEntity()) != -1L) { "Unable to record delivery reversal" }
         val innings = requireNotNull(inningsDao.getInnings(originalDelivery.inningsId)) { "Innings not found" }
         val events = ballEventDao.getBallEvents(matchId, originalDelivery.inningsId).map { it.toDomain() }
-        val projection = InningsProjectionCalculator.calculate(events)
+        val projection = InningsProjectionCalculator.calculate(events).copy(
+            // Batter selections happen between deliveries and are therefore not
+            // represented in the event stream. The delivery being undone records
+            // the exact pair that was at the crease immediately before it.
+            strikerId = originalDelivery.strikerId,
+            nonStrikerId = originalDelivery.nonStrikerId
+        )
         persistProjection(innings, projection, timestampEpochMs)
+        val match = matchDao.getMatch(matchId)
+        val wicketLimit = playerDao.getPlayingXI(matchId, innings.battingTeamId).size.let {
+            if (it > 1) it - 1 else 10
+        }
+        val effectiveScore = (projection.totalScore + innings.penaltyScoreAdjustment).coerceAtLeast(0)
+        val inningsStillComplete = (match?.overs?.let { projection.legalBalls >= it * 6 } == true) ||
+            projection.wickets >= wicketLimit ||
+            (innings.target?.let { effectiveScore >= it } == true)
+        if (innings.status == "COMPLETED" && !inningsStillComplete) {
+            inningsDao.updateInnings(innings.copy(status = "LIVE", completedAtEpochMs = null))
+            match?.let {
+                matchDao.updateMatch(it.copy(status = "LIVE", updatedAtEpochMs = timestampEpochMs))
+            }
+        }
         enqueueDeliverySync(reversal)
 
         LocalScoringResult(inserted = true, projection = projection)
@@ -270,7 +291,7 @@ class LocalScoringStore @Inject constructor(
                 strikerId = persistedProjection.strikerId,
                 nonStrikerId = persistedProjection.nonStrikerId,
                 currentBowlerId = persistedProjection.bowlerId,
-                score = persistedProjection.totalScore,
+                score = (persistedProjection.totalScore + innings.penaltyScoreAdjustment).coerceAtLeast(0),
                 wickets = persistedProjection.wickets,
                 legalBalls = persistedProjection.legalBalls
             )
@@ -324,7 +345,7 @@ class LocalScoringStore @Inject constructor(
                 matchId = innings.matchId,
                 inningsId = innings.inningsId,
                 inningsNumber = innings.number,
-                totalScore = persistedProjection.totalScore,
+                totalScore = (persistedProjection.totalScore + innings.penaltyScoreAdjustment).coerceAtLeast(0),
                 wickets = persistedProjection.wickets,
                 legalBalls = persistedProjection.legalBalls,
                 target = innings.target,

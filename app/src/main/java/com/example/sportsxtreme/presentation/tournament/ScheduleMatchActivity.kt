@@ -7,10 +7,12 @@ import android.media.MediaPlayer
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,14 +59,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
@@ -110,10 +116,50 @@ class ScheduleMatchActivity : ComponentActivity() {
         setContent {
             val tournament by tournamentViewModel.tournament.collectAsState()
             val registeredTeams = rememberRegisteredTournamentTeams(tournamentId)
-            val teamAName = registeredTeams.firstOrNull { it.id == teamAId }?.name
-                ?.takeIf { it.isNotBlank() } ?: passedTeamAName.ifBlank { "Team A" }
-            val teamBName = registeredTeams.firstOrNull { it.id == teamBId }?.name
-                ?.takeIf { it.isNotBlank() } ?: passedTeamBName.ifBlank { "Team B" }
+            var selectedTeamAId by rememberSaveable { mutableStateOf(teamAId) }
+            var selectedTeamBId by rememberSaveable { mutableStateOf(teamBId) }
+            var selectedTeamAName by rememberSaveable { mutableStateOf(passedTeamAName) }
+            var selectedTeamBName by rememberSaveable { mutableStateOf(passedTeamBName) }
+            val teamAName = registeredTeams.firstOrNull { it.id == selectedTeamAId }?.name
+                ?.takeIf { it.isNotBlank() } ?: selectedTeamAName.ifBlank { "Team A" }
+            val teamBName = registeredTeams.firstOrNull { it.id == selectedTeamBId }?.name
+                ?.takeIf { it.isNotBlank() } ?: selectedTeamBName.ifBlank { "Team B" }
+            val teamPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                if (result.resultCode != RESULT_OK) return@rememberLauncherForActivityResult
+                val data = result.data ?: return@rememberLauncherForActivityResult
+                val slot = data.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT).orEmpty()
+                val pickedId = data.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID).orEmpty()
+                val pickedName = data.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME).orEmpty()
+                if (pickedId.isBlank() || pickedName.isBlank()) return@rememberLauncherForActivityResult
+                val otherTeamId = if (slot == "A") selectedTeamBId else selectedTeamAId
+                if (slot !in setOf("A", "B")) return@rememberLauncherForActivityResult
+                if (pickedId == otherTeamId) {
+                    Toast.makeText(this@ScheduleMatchActivity, "Choose a different team for each side", Toast.LENGTH_SHORT).show()
+                    return@rememberLauncherForActivityResult
+                }
+                if (slot == "A") {
+                    selectedTeamAId = pickedId
+                    selectedTeamAName = pickedName
+                } else {
+                    selectedTeamBId = pickedId
+                    selectedTeamBName = pickedName
+                }
+            }
+            fun openTeamPicker(slot: String) {
+                if (tournamentId.isBlank()) {
+                    Toast.makeText(this@ScheduleMatchActivity, "Tournament details are unavailable", Toast.LENGTH_SHORT).show()
+                    return
+                }
+                teamPickerLauncher.launch(
+                    Intent(this@ScheduleMatchActivity, com.example.sportsxtreme.presentation.match.RegisteredTeamsOfATournament::class.java)
+                        .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                        .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT, slot)
+                        .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID, selectedTeamAId)
+                        .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_A_NAME, teamAName)
+                        .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID, selectedTeamBId)
+                        .putExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_B_NAME, teamBName)
+                )
+            }
 
             var dateMillis by rememberSaveable { mutableLongStateOf(System.currentTimeMillis()) }
             var matchTime by rememberSaveable { mutableStateOf("08:00 PM") }
@@ -143,6 +189,8 @@ class ScheduleMatchActivity : ComponentActivity() {
                     venue = venue,
                     isSaving = isSaving,
                     onBack = { finish() },
+                    onSelectTeamA = { openTeamPicker("A") },
+                    onSelectTeamB = { openTeamPicker("B") },
                     onDateClick = { showDatePicker(dateMillis) { dateMillis = it } },
                     onTimeClick = { showTimePicker(matchTime) { matchTime = it } },
                     onVenueClick = {
@@ -154,7 +202,7 @@ class ScheduleMatchActivity : ComponentActivity() {
                             Toast.makeText(this@ScheduleMatchActivity, "Tournament or match details are missing", Toast.LENGTH_LONG).show()
                         } else if (tournament == null) {
                             Toast.makeText(this@ScheduleMatchActivity, "Tournament details are still loading", Toast.LENGTH_SHORT).show()
-                        } else if (teamAId.isBlank() || teamBId.isBlank() || teamAId == teamBId) {
+                        } else if (selectedTeamAId.isBlank() || selectedTeamBId.isBlank() || selectedTeamAId == selectedTeamBId) {
                             Toast.makeText(this@ScheduleMatchActivity, "Choose two different registered teams", Toast.LENGTH_LONG).show()
                         } else if (venue.isBlank()) {
                             Toast.makeText(this@ScheduleMatchActivity, "Enter a match venue", Toast.LENGTH_SHORT).show()
@@ -182,9 +230,9 @@ class ScheduleMatchActivity : ComponentActivity() {
                                                         "tournamentId" to tournamentId,
                                                         "tournamentName" to currentTournament?.name.orEmpty(),
                                                         "tournamentLocation" to tournamentLocation,
-                                                        "teamAId" to teamAId,
+                                                        "teamAId" to selectedTeamAId,
                                                         "teamAName" to teamAName,
-                                                        "teamBId" to teamBId,
+                                                        "teamBId" to selectedTeamBId,
                                                         "teamBName" to teamBName,
                                                         "matchDateEpochMs" to scheduledAt,
                                                         "matchDate" to formatScheduleDate(scheduledAt),
@@ -345,6 +393,8 @@ private fun ScheduleMatchScreen(
     venue: String,
     isSaving: Boolean,
     onBack: () -> Unit,
+    onSelectTeamA: () -> Unit,
+    onSelectTeamB: () -> Unit,
     onDateClick: () -> Unit,
     onTimeClick: () -> Unit,
     onVenueClick: () -> Unit,
@@ -352,120 +402,164 @@ private fun ScheduleMatchScreen(
 ) {
     Box(
         Modifier.fillMaxSize().background(ScheduleBg).drawBehind {
-            drawCircle(Color(0x20185CE5), size.width * .72f, Offset(size.width * 1.08f, size.height * .08f))
-            drawCircle(Color(0x18C6FF00), size.width * .55f, Offset(-size.width * .15f, size.height * .42f))
+            drawRect(Brush.verticalGradient(listOf(Color(0xFF0A151B), Color(0xFF071116), Color(0xFF020609))))
+            drawRect(Brush.radialGradient(listOf(Color(0x2545E9FF), Color(0x1045E9FF), Color.Transparent), center = Offset(size.width * .08f, size.height * .12f), radius = size.width * .85f))
+            drawRect(Brush.radialGradient(listOf(Color(0x20C7FF1A), Color(0x0CC7FF1A), Color.Transparent), center = Offset(size.width * .94f, size.height * .58f), radius = size.width * .72f))
         }
     ) {
-        Column(Modifier.fillMaxSize()) {
-            ScheduleTopBar(onBack)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            ScheduleTopBar(onBack, tournament, registeredTeamCount)
             Column(
-                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 13.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(13.dp)
             ) {
-                TournamentBanner(tournament, registeredTeamCount)
-                ScheduleSectionLabel("SELECT TEAMS", Icons.Default.Groups)
-                MatchTeams(teamA, teamB)
-                ScheduleSectionLabel("MATCH DATE", Icons.Default.CalendarMonth)
-                ScheduleDetailRow(Icons.Default.CalendarMonth, date, "Match date", onDateClick)
-                ScheduleSectionLabel("MATCH TIME", Icons.Default.Schedule)
-                ScheduleDetailRow(Icons.Default.Schedule, time, "Match start time", onTimeClick)
-                ScheduleSectionLabel("MATCH VENUE", Icons.Default.LocationOn)
-                ScheduleDetailRow(Icons.Default.Stadium, venue.ifBlank { "Tap to add venue" }, "Selected venue", onVenueClick)
-                ScheduleSectionLabel("MATCH PREVIEW", Icons.Default.CalendarMonth)
+                ScheduleSectionLabel("1", "Select Teams", "Choose two teams for this match")
+                MatchTeams(teamA, teamB, onSelectTeamA, onSelectTeamB)
+                ScheduleSectionLabel("2", "Match Details", "Set the date, time and venue")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ScheduleDetailTile(Icons.Default.CalendarMonth, "Match Date", date, Color(0xFF25C966), onDateClick, Modifier.weight(1f))
+                    ScheduleDetailTile(Icons.Default.Schedule, "Match Time", time, Color(0xFFFFB800), onTimeClick, Modifier.weight(1f))
+                    ScheduleDetailTile(Icons.Default.LocationOn, "Match Venue", venue.ifBlank { "Add venue" }, Color(0xFFAA5CFF), onVenueClick, Modifier.weight(1f))
+                }
+                ScheduleSectionLabel("3", "Match Preview", "Review the match details before scheduling")
                 SchedulePreview(teamA, teamB, date, time, venue, tournament?.requirements?.tournamentFormat.orEmpty())
-                Spacer(Modifier.height(76.dp))
+                ScheduleActionButton(
+                    label = if (isSaving) "SCHEDULING…" else "SCHEDULE MATCH",
+                    enabled = !isSaving,
+                    onClick = onSchedule,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
+                )
             }
         }
-        ScheduleActionButton(
-            label = if (isSaving) "SCHEDULING…" else "SCHEDULE MATCH",
-            enabled = !isSaving,
-            onClick = onSchedule,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 13.dp, vertical = 12.dp)
-        )
     }
 }
 
 @Composable
-private fun ScheduleTopBar(onBack: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Default.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(21.dp).clickable(onClick = onBack))
-        Column(Modifier.padding(start = 15.dp)) {
-            Text("Schedule Match", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text("Select the teams and set when the match will begin", color = ScheduleMuted, fontSize = 9.sp)
+private fun ScheduleTopBar(onBack: () -> Unit, tournament: Tournament?, registeredTeamCount: Int) {
+    Box(
+        Modifier.fillMaxWidth().height(205.dp)
+            .background(Color(0xFF0A101C))
+            .drawBehind {
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(ScheduleNeon.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -50f),
+                        radius = size.height * 0.6f
+                    )
+                )
+            }
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().height(101.dp).padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White, modifier = Modifier.size(25.dp).clickable(onClick = onBack))
+                Column(Modifier.padding(start = 16.dp)) {
+                    Row {
+                        Text("Schedule ", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Black)
+                        Text("Match", color = ScheduleNeon, fontSize = 25.sp, fontWeight = FontWeight.Black)
+                    }
+                    Text("Set the teams, date, time and venue to begin the match", color = Color(0xFFBBC7D2), fontSize = 10.sp)
+                }
+            }
+            TournamentBanner(tournament, registeredTeamCount, Modifier.padding(horizontal = 15.dp))
         }
     }
 }
 
 @Composable
-private fun TournamentBanner(tournament: Tournament?, registeredTeamCount: Int) {
+private fun TournamentBanner(tournament: Tournament?, registeredTeamCount: Int, modifier: Modifier = Modifier) {
     val title = tournament?.name?.takeIf { it.isNotBlank() } ?: "Loading tournament…"
     val place = listOfNotNull(tournament?.city?.takeIf { it.isNotBlank() }, tournament?.ground?.takeIf { it.isNotBlank() })
         .joinToString(" · ").ifBlank { tournament?.requirements?.location.orEmpty().ifBlank { "Tournament location" } }
     val season = tournament?.startDate?.takeIf { it.isNotBlank() } ?: "Tournament fixture"
-    val initials = title.split(" ").filter { it.isNotBlank() }.take(3).joinToString("") { it.first().uppercase() }
-        .ifBlank { "T" }
-    Row(
-        Modifier.fillMaxWidth().height(84.dp).clip(RoundedCornerShape(13.dp)).background(SchedulePanel)
-            .border(1.dp, Color(0xFF183A59), RoundedCornerShape(13.dp)).padding(11.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(11.dp)).background(Color(0xFF102438)), contentAlignment = Alignment.Center) {
-            Icon(Icons.Default.EmojiEvents, null, tint = ScheduleNeon, modifier = Modifier.size(25.dp))
+    val bannerShape = RoundedCornerShape(16.dp)
+    Box(modifier.fillMaxWidth().height(91.dp).shadow(12.dp, bannerShape, clip = false, ambientColor = Color(0x553C9FFF), spotColor = Color(0x663C9FFF)).clip(bannerShape).background(Color(0xB2071525))) {
+        tournament?.bannerUrl?.takeIf(String::isNotBlank)?.let { bannerUrl ->
+            AsyncImage(model = bannerUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        }
+        Box(Modifier.fillMaxSize().background(Color(0xA8071525)).padding(13.dp)) {
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(52.dp).clip(RoundedCornerShape(13.dp)).background(Color(0xFF102438)), contentAlignment = Alignment.Center) {
+            val logoUrl = tournament?.logoUrl.orEmpty()
+            if (logoUrl.isNotBlank()) {
+                AsyncImage(model = logoUrl, contentDescription = "$title logo", modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(13.dp)), contentScale = ContentScale.Crop)
+            } else {
+                Icon(Icons.Default.EmojiEvents, null, tint = ScheduleNeon, modifier = Modifier.size(31.dp))
+            }
         }
         Column(Modifier.padding(start = 10.dp).weight(1f)) {
-            Text(title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(season, color = Color(0xFF132000), fontSize = 7.sp, fontWeight = FontWeight.Black,
                 modifier = Modifier.padding(top = 3.dp).clip(RoundedCornerShape(6.dp)).background(ScheduleNeon).padding(horizontal = 6.dp, vertical = 2.dp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(Modifier.padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.LocationOn, null, tint = ScheduleNeon, modifier = Modifier.size(11.dp))
-                Text(place, color = ScheduleMuted, fontSize = 8.sp, modifier = Modifier.padding(start = 2.dp).weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(place, color = ScheduleMuted, fontSize = 10.sp, modifier = Modifier.padding(start = 2.dp).weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Icon(Icons.Default.Groups, null, tint = ScheduleNeon, modifier = Modifier.padding(start = 7.dp).size(11.dp))
-                Text("$registeredTeamCount Teams", color = ScheduleMuted, fontSize = 8.sp, modifier = Modifier.padding(start = 2.dp))
+                Text("$registeredTeamCount Teams", color = ScheduleMuted, fontSize = 9.sp, modifier = Modifier.padding(start = 2.dp))
             }
         }
-        Box(Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF102438)).border(1.dp, Color(0xFF365B39), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-            Text(initials, color = ScheduleNeon, fontSize = 11.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        }
         }
     }
 }
 
 @Composable
-private fun ScheduleSectionLabel(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = ScheduleNeon, modifier = Modifier.size(16.dp))
-        Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = .6.sp, modifier = Modifier.padding(start = 7.dp))
+private fun ScheduleSectionLabel(number: String, title: String, subtitle: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(32.dp).clip(CircleShape).background(ScheduleNeon), contentAlignment = Alignment.Center) {
+            Text(number, color = Color(0xFF102000), fontSize = 17.sp, fontWeight = FontWeight.Black)
+        }
+        Column(Modifier.padding(start = 10.dp).weight(1f)) {
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+            if (subtitle.isNotBlank()) Text(subtitle, color = ScheduleMuted, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
 @Composable
-private fun MatchTeams(teamA: String, teamB: String) {
+private fun MatchTeams(teamA: String, teamB: String, onSelectTeamA: () -> Unit, onSelectTeamB: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        ScheduleTeamCard("TEAM A", teamA, Color(0xFF168BFF), Modifier.weight(1f))
+        ScheduleTeamCard("TEAM A", teamA, Color(0xFF168BFF), onSelectTeamA, Modifier.weight(1f))
         Text("VS", color = ScheduleNeon, fontSize = 15.sp, fontWeight = FontWeight.Black)
-        ScheduleTeamCard("TEAM B", teamB, Color(0xFFFF5A27), Modifier.weight(1f))
+        ScheduleTeamCard("TEAM B", teamB, Color(0xFFFF5A27), onSelectTeamB, Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun ScheduleTeamCard(label: String, name: String, emblem: Color, modifier: Modifier = Modifier) {
-    Column(modifier.clip(RoundedCornerShape(12.dp)).background(ScheduleCard).border(1.dp, Color(0xFF668E14), RoundedCornerShape(12.dp)).padding(horizontal = 8.dp, vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = ScheduleMuted, fontSize = 8.sp, fontWeight = FontWeight.Black)
-        Box(Modifier.padding(top = 8.dp).size(43.dp).clip(CircleShape).background(Color(0xFF030B15)).border(1.dp, emblem, CircleShape), contentAlignment = Alignment.Center) {
-            Text(name.take(2).uppercase(), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+private fun ScheduleTeamCard(label: String, name: String, emblem: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(16.dp)
+    Column(modifier.shadow(12.dp, shape, clip = false, ambientColor = emblem.copy(alpha = .28f), spotColor = emblem.copy(alpha = .42f)).clip(shape).background(ScheduleCard).clickable(onClick = onClick).padding(horizontal = 9.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.padding(top = 3.dp).size(52.dp).shadow(6.dp, CircleShape, clip = false, ambientColor = emblem.copy(alpha = .2f), spotColor = emblem.copy(alpha = .28f)).clip(CircleShape).background(Color(0xFF030B15)), contentAlignment = Alignment.Center) {
+            Text(name.take(2).uppercase(), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
         }
-        Text(name, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 7.dp))
-        Text("Registered team", color = ScheduleMuted, fontSize = 7.sp)
-        Row(Modifier.fillMaxWidth().padding(top = 7.dp).clip(RoundedCornerShape(7.dp)).background(Color(0xFF102237)).padding(horizontal = 7.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(name, color = Color(0xFFD3DFE8), fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Icon(Icons.Default.ChevronRight, null, tint = ScheduleNeon, modifier = Modifier.size(14.dp))
+        Text(name, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
+        Text("Registered team", color = ScheduleMuted, fontSize = 8.sp)
+        Row(Modifier.fillMaxWidth().padding(top = 9.dp).clip(RoundedCornerShape(9.dp)).background(Color(0xFF102237)).padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(name, color = Color(0xFFD3DFE8), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Icon(Icons.Default.ChevronRight, null, tint = Color.White, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun ScheduleDetailTile(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, value: String, accent: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(16.dp)
+    Column(modifier.height(112.dp).shadow(12.dp, shape, clip = false, ambientColor = accent.copy(alpha = .24f), spotColor = accent.copy(alpha = .36f)).clip(shape).background(accent.copy(alpha = .08f))
+        .clickable(onClick = onClick).padding(11.dp), verticalArrangement = Arrangement.SpaceBetween) {
+        Box(Modifier.size(38.dp).shadow(5.dp, RoundedCornerShape(12.dp), clip = false, ambientColor = accent.copy(alpha = .18f), spotColor = accent.copy(alpha = .25f)).clip(RoundedCornerShape(12.dp)).background(Color(0xFF071525)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = accent, modifier = Modifier.size(21.dp))
+        }
+        Column {
+            Text(title, color = ScheduleMuted, fontSize = 9.sp, maxLines = 1)
+            Text(value, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
 @Composable
 private fun ScheduleDetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, value: String, caption: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(11.dp)).background(ScheduleCard).border(1.dp, Color(0xFF153554), RoundedCornerShape(11.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    val shape = RoundedCornerShape(11.dp)
+    Row(Modifier.fillMaxWidth().height(54.dp).shadow(8.dp, shape, clip = false, ambientColor = Color(0x443C9FFF), spotColor = Color(0x553C9FFF)).clip(shape).background(ScheduleCard).clickable(onClick = onClick).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF172A20)), contentAlignment = Alignment.Center) {
             Icon(icon, null, tint = ScheduleNeon, modifier = Modifier.size(17.dp))
         }
@@ -479,29 +573,45 @@ private fun ScheduleDetailRow(icon: androidx.compose.ui.graphics.vector.ImageVec
 
 @Composable
 private fun SchedulePreview(teamA: String, teamB: String, date: String, time: String, venue: String, format: String) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF091827)).border(1.dp, Color(0xFF163752), RoundedCornerShape(12.dp)).padding(11.dp)) {
+    Box(
+        Modifier.fillMaxWidth()
+            .shadow(14.dp, RoundedCornerShape(16.dp), clip = false, ambientColor = Color(0x3345E9FF), spotColor = Color(0x5545E9FF))
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF0A101C))
+            .drawBehind {
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(ScheduleNeon.copy(alpha = 0.15f), Color.Transparent),
+                        center = Offset(size.width / 2f, -30f),
+                        radius = size.height * 1.1f
+                    )
+                )
+            }
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            PreviewTag("🏆 ${format.ifBlank { "TOURNAMENT" }.uppercase()}", Modifier.weight(1f))
+            PreviewTag("●  SCHEDULED", Modifier.weight(1f))
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 17.dp), verticalAlignment = Alignment.CenterVertically) {
             ScheduleTeamBadge(teamA, Color(0xFF168BFF))
             Text(teamA, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 5.dp))
             Text("VS", color = ScheduleNeon, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp))
             Text(teamB, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End, modifier = Modifier.weight(1f).padding(end = 5.dp))
             ScheduleTeamBadge(teamB, Color(0xFFFF5A27))
         }
-        Row(Modifier.fillMaxWidth().padding(top = 11.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().padding(top = 17.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xDD061321)).padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             PreviewMeta(date.uppercase(), Icons.Default.CalendarMonth, Modifier.weight(1f))
             PreviewMeta(time, Icons.Default.Schedule, Modifier.weight(1f))
             PreviewMeta(venue.uppercase().ifBlank { "VENUE TBD" }, Icons.Default.LocationOn, Modifier.weight(1f))
         }
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            PreviewTag(format.ifBlank { "Tournament" }, Modifier.weight(1f))
-            PreviewTag("Scheduled", Modifier.weight(1f))
         }
-    }
+        }
 }
 
 @Composable
 private fun ScheduleTeamBadge(name: String, color: Color) {
-    Box(Modifier.size(28.dp).clip(CircleShape).background(Color(0xFF020914)).border(1.dp, color, CircleShape), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(28.dp).shadow(5.dp, CircleShape, clip = false, ambientColor = color.copy(alpha = .2f), spotColor = color.copy(alpha = .3f)).clip(CircleShape).background(Color(0xFF020914)), contentAlignment = Alignment.Center) {
         Text(name.take(2).uppercase(), color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Black)
     }
 }

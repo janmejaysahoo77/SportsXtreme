@@ -232,6 +232,28 @@ class ScoringViewModel @Inject constructor(
         }
     }
 
+    fun updateInningsTarget(target: Int, onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        val state = scoringState() ?: return
+        viewModelScope.launch {
+            when (val result = matchRepository.updateInningsTarget(state.matchId, target)) {
+                is Resource.Success -> { latestRecordedState = result.data; onSuccess() }
+                is Resource.Error -> onError(result.message ?: "Unable to update target")
+                is Resource.Loading -> onError("Target update is still saving. Please try again shortly.")
+            }
+        }
+    }
+
+    fun applyPenaltyRuns(teamId: String, runs: Int, onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        val state = scoringState() ?: return
+        viewModelScope.launch {
+            when (val result = matchRepository.applyPenaltyRuns(state.matchId, teamId, runs)) {
+                is Resource.Success -> { latestRecordedState = result.data; onSuccess() }
+                is Resource.Error -> onError(result.message ?: "Unable to apply penalty runs")
+                is Resource.Loading -> onError("Penalty runs are still saving. Please try again shortly.")
+            }
+        }
+    }
+
     fun loadPlayers(onLoaded: (List<Player>, List<Player>) -> Unit) {
         val state = scoringState() ?: return
         val battingTeamId = state.battingTeam?.teamId ?: return
