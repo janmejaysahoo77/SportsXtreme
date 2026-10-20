@@ -558,8 +558,9 @@ async function validateFinalizedScorecard(matchRef, match) {
   for (const innings of inningsList) {
     if (![participants.teamA, participants.teamB].includes(innings.battingTeamId) || ![participants.teamA, participants.teamB].includes(innings.bowlingTeamId) || innings.battingTeamId === innings.bowlingTeamId) failFinalization("data-loss", "An innings has invalid teams.");
     const projected = projectRemoteInnings(allDeliveries, matchRef.id, innings.inningsId || innings.id, innings.number, innings.battingTeamId, innings.bowlingTeamId, participants);
-    if (projected.totalScore !== asNumber(innings.score) || projected.wickets !== asNumber(innings.wickets) || projected.legalBalls !== asNumber(innings.legalBalls)) failFinalization("failed-precondition", "Saved innings totals do not match the delivery history.");
-    projections.push({ innings, ...projected });
+    const scoreWithPenalties = Math.max(0, projected.totalScore + asNumber(innings.penaltyScoreAdjustment));
+    if (scoreWithPenalties !== asNumber(innings.score) || projected.wickets !== asNumber(innings.wickets) || projected.legalBalls !== asNumber(innings.legalBalls)) failFinalization("failed-precondition", "Saved innings totals do not match the delivery history.");
+    projections.push({ innings, ...projected, totalScore: scoreWithPenalties });
   }
   const [batting, bowling, summaries] = await Promise.all([
     matchRef.collection("scorecard").doc("batting").collection("entries").get(),

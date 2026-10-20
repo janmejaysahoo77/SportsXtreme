@@ -47,6 +47,9 @@ interface MatchRepository {
     suspend fun selectNextBowler(matchId: String, playerId: String): Resource<MatchState>
     suspend fun startSecondInnings(matchId: String, strikerId: String, nonStrikerId: String, bowlerId: String): Resource<MatchState>
     suspend fun finishMatch(matchId: String): Resource<Match>
+    suspend fun abandonMatch(matchId: String): Resource<Match>
+    suspend fun updateInningsTarget(matchId: String, target: Int): Resource<MatchState>
+    suspend fun applyPenaltyRuns(matchId: String, teamId: String, runs: Int): Resource<MatchState>
     fun observeMatch(matchId: String): Flow<Resource<Match>>
     fun observeActiveMatch(): Flow<Resource<Match>>
     fun observeLatestScoringMatch(): Flow<Resource<Match>>

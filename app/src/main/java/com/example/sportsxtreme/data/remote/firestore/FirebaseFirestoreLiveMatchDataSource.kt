@@ -2,6 +2,7 @@ package com.example.sportsxtreme.data.remote.firestore
 
 import com.example.sportsxtreme.domain.model.LiveMatch
 import com.example.sportsxtreme.domain.model.LiveScorePayload
+import com.example.sportsxtreme.domain.model.MatchStatus
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import javax.inject.Inject
@@ -60,7 +61,17 @@ class FirebaseFirestoreLiveMatchDataSource @Inject constructor(
     private fun DocumentSnapshot.toLiveMatch(): LiveMatch? {
         val liveScore = get("liveScore") as? Map<*, *> ?: return null
         val matchId = getString("matchId") ?: id
-        val status = liveScore["status"] as? String ?: return null
+        // `liveScore` is a denormalized score projection and may lag behind
+        // match completion. The match document is the lifecycle source of truth.
+        val rawStatus = getString("status")
+            ?: getString("scheduleStatus")
+            ?: (liveScore["status"] as? String)
+            ?: return null
+        val status = when (rawStatus.trim().uppercase()) {
+            "COMPLETED", "FINISHED", "FINALIZATION_PENDING", "FINALIZING", "FINALIZED" ->
+                MatchStatus.COMPLETED.name
+            else -> rawStatus.trim().uppercase()
+        }
         val score = (liveScore["score"] as? Number)?.toInt() ?: 0
         val wickets = (liveScore["wickets"] as? Number)?.toInt() ?: 0
         val overs = liveScore["overs"] as? String ?: "0.0"
@@ -118,7 +129,9 @@ class FirebaseFirestoreLiveMatchDataSource @Inject constructor(
             bowlerRuns = bowlerRuns,
             bowlerWickets = bowlerWickets,
             matchStatusNote = matchStatusNote,
-            updatedAtEpochMs = updatedAtEpochMs
+            updatedAtEpochMs = updatedAtEpochMs,
+            tournamentStage = listOf("roundName", "selectedStage", "stageName")
+                .firstNotNullOfOrNull { getString(it)?.trim()?.takeIf(String::isNotBlank) }.orEmpty()
         ).toDomain()
     }
 

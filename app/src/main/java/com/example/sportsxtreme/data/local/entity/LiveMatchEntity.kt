@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 
 /**
@@ -46,5 +47,6 @@ data class LiveMatchEntity(
     val bowlerRuns: Int,
     val bowlerWickets: Int,
     val matchStatusNote: String?,
-    val updatedAtEpochMs: Long
+    val updatedAtEpochMs: Long,
+    @ColumnInfo(defaultValue = "''") val tournamentStage: String = ""
 )

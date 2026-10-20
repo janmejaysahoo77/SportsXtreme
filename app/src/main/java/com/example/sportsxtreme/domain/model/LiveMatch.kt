@@ -41,13 +41,20 @@ data class LiveMatch(
     val bowlerRuns: Int,
     val bowlerWickets: Int,
     val matchStatusNote: String?,
-    val updatedAtEpochMs: Long
+    val updatedAtEpochMs: Long,
+    val tournamentStage: String = ""
 ) {
-    /** True when the match is currently being played. */
-    val isLive: Boolean get() = status == MatchStatus.LIVE
+    /** True while play is active, including the transition between innings. */
+    val isLive: Boolean get() = status in setOf(
+        MatchStatus.LIVE,
+        MatchStatus.IN_PROGRESS,
+        MatchStatus.INNINGS_BREAK
+    )
 
     /** True when the match has finished. */
     val isCompleted: Boolean get() = status == MatchStatus.COMPLETED
+    val isPaused: Boolean get() = status == MatchStatus.PAUSED
+    val isAbandoned: Boolean get() = status == MatchStatus.ABANDONED
 
     /** True when the match is scheduled but not yet started. */
     val isUpcoming: Boolean get() = status in setOf(
@@ -102,7 +109,8 @@ data class LiveScorePayload(
     val bowlerRuns: Int,
     val bowlerWickets: Int,
     val matchStatusNote: String?,
-    val updatedAtEpochMs: Long
+    val updatedAtEpochMs: Long,
+    val tournamentStage: String = ""
 ) {
     fun toDomain(): LiveMatch = LiveMatch(
         matchId = matchId,
@@ -138,6 +146,7 @@ data class LiveScorePayload(
         bowlerRuns = bowlerRuns,
         bowlerWickets = bowlerWickets,
         matchStatusNote = matchStatusNote,
-        updatedAtEpochMs = updatedAtEpochMs
+        updatedAtEpochMs = updatedAtEpochMs,
+        tournamentStage = tournamentStage
     )
 }

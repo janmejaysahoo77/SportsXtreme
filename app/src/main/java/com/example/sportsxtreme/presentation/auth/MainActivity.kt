@@ -115,6 +115,7 @@ class MainActivity : ComponentActivity() {
     private val liveMatchViewModel: LiveMatchViewModel by viewModels()
     private val hostTournamentsViewModel: HostTournamentsViewModel by viewModels()
     private val locationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var locationPermissionPromptedThisSession = false
     private var currentScreen by mutableStateOf(Screen.Splash)
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -454,7 +455,9 @@ class MainActivity : ComponentActivity() {
         openHostQuickScoringAfterReturn = false
         currentScreen = Screen.Home
         ensureComposeInitialized()
-        requestLocationPermissionAndUpdate()
+        window.decorView.post {
+            if (currentScreen == Screen.Home) requestLocationPermissionAndUpdate()
+        }
     }
 
     private fun showHostQuickScoringTab() {
@@ -464,7 +467,9 @@ class MainActivity : ComponentActivity() {
         openHostQuickScoringAfterReturn = true
         currentScreen = Screen.Home
         ensureComposeInitialized()
-        requestLocationPermissionAndUpdate()
+        window.decorView.post {
+            if (currentScreen == Screen.Home) requestLocationPermissionAndUpdate()
+        }
     }
 
     fun showMembersScreen() {
@@ -564,7 +569,8 @@ class MainActivity : ComponentActivity() {
 
         if (hasFineLocation || hasCoarseLocation) {
             updateCurrentUserLocation()
-        } else {
+        } else if (!locationPermissionPromptedThisSession) {
+            locationPermissionPromptedThisSession = true
             locationPermissionLauncher.launch(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,

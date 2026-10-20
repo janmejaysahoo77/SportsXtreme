@@ -39,7 +39,8 @@ data class MatchTeam(
     val teamId: String,
     val name: String,
     val shortName: String,
-    val side: TeamSide
+    val side: TeamSide,
+    val logoUrl: String? = null
 )
 
 enum class MatchType {
@@ -81,6 +82,7 @@ enum class MatchStatus {
     READY,
     IN_PROGRESS,
     LIVE,
+    PAUSED,
     INNINGS_BREAK,
     COMPLETED,
     ABANDONED

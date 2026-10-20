@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -63,6 +64,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,8 +93,10 @@ import com.example.sportsxtreme.domain.repository.MatchRepository
 import javax.inject.Inject
 import kotlinx.coroutines.launch
 import com.example.sportsxtreme.domain.model.Player
+import com.example.sportsxtreme.domain.model.MatchTeam
 import com.example.sportsxtreme.domain.model.DismissalType
 import com.example.sportsxtreme.domain.model.ExtraType
+import coil3.compose.AsyncImage
 
 @AndroidEntryPoint
 class MainScoringActivity : ComponentActivity() {
@@ -124,6 +128,9 @@ class MainScoringActivity : ComponentActivity() {
                         onError = { message -> Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
                     )
                 },
+                onUpdateTarget = scoringViewModel::updateInningsTarget,
+                onApplyPenaltyRuns = scoringViewModel::applyPenaltyRuns,
+                onAbandonMatch = ::abandonMatchAndFinish,
                 onBack = ::pauseScoringAndFinish,
                 onLeaveScoring = ::leaveScoringToHostQuickScoring,
                 onRun = { runs, dir, meta -> scoringViewModel.recordRuns(runs, dir, meta) },
@@ -144,6 +151,26 @@ class MainScoringActivity : ComponentActivity() {
 
     private fun leaveScoringToHostQuickScoring() {
         pauseScoringAndFinish(returnToHostQuickScoring = true)
+    }
+
+    private fun abandonMatchAndFinish() {
+        if (isLeavingScoring) return
+        isLeavingScoring = true
+        val matchId = intent.getStringExtra(com.example.sportsxtreme.presentation.match.SelectPlayingTeamsActivity.EXTRA_MATCH_ID).orEmpty()
+        lifecycleScope.launch {
+            val result = matchRepository.abandonMatch(matchId)
+            if (result is com.example.sportsxtreme.common.Resource.Error) {
+                isLeavingScoring = false
+                Toast.makeText(this@MainScoringActivity, result.message ?: "Unable to abandon match", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            expiryScheduler.cancel(matchId)
+            startActivity(
+                Intent(this@MainScoringActivity, com.example.sportsxtreme.presentation.auth.MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            )
+            finish()
+        }
     }
 
     private fun pauseScoringAndFinish(returnToHostQuickScoring: Boolean) {
@@ -202,6 +229,9 @@ private fun MainScoringScreen(
     onSelectNextBowler: (String, () -> Unit, (String) -> Unit) -> Unit,
     onStartSecondInnings: (String, String, String, (String) -> Unit) -> Unit,
     onFinishMatch: () -> Unit,
+    onUpdateTarget: (Int, () -> Unit, (String) -> Unit) -> Unit,
+    onApplyPenaltyRuns: (String, Int, () -> Unit, (String) -> Unit) -> Unit,
+    onAbandonMatch: () -> Unit,
     onBack: () -> Unit,
     onLeaveScoring: () -> Unit,
     onRun: (Int, String?, Map<String, String>) -> Unit,
@@ -212,6 +242,16 @@ private fun MainScoringScreen(
     onUndo: () -> Unit
 ) {
     var showAdvanced by remember { mutableStateOf(false) }
+    var showTargetDialog by remember { mutableStateOf(false) }
+    var targetInput by remember { mutableStateOf("") }
+    var targetError by remember { mutableStateOf<String?>(null) }
+    var showPenaltyDialog by remember { mutableStateOf(false) }
+    var selectedPenaltyTeamId by remember { mutableStateOf<String?>(null) }
+    var penaltyEntryStep by remember { mutableStateOf(false) }
+    var penaltyRunsInput by remember { mutableStateOf("") }
+    var penaltyError by remember { mutableStateOf<String?>(null) }
+    var showMatchBreakDialog by remember { mutableStateOf(false) }
+    var showAbandonDialog by remember { mutableStateOf(false) }
     var showWagonWheel by remember { mutableStateOf(false) }
     var showBoundaryGround by remember { mutableStateOf(false) }
     var showOutPicker by remember { mutableStateOf(false) }
@@ -348,7 +388,101 @@ private fun MainScoringScreen(
             )
             AdvancedOptionsSheet(
                 modifier = Modifier.align(Alignment.BottomCenter),
-                onClose = { showAdvanced = false }
+                onClose = { showAdvanced = false },
+                canChangeTarget = innings?.number == 2,
+                onChangeTarget = {
+                    targetInput = scorecard?.summary?.target?.toString().orEmpty()
+                    targetError = null
+                    showTargetDialog = true
+                    showAdvanced = false
+                },
+                onPenaltyRuns = {
+                    selectedPenaltyTeamId = null
+                    penaltyEntryStep = false
+                    penaltyRunsInput = ""
+                    penaltyError = null
+                    showPenaltyDialog = true
+                    showAdvanced = false
+                },
+                onMatchBreak = { showMatchBreakDialog = true; showAdvanced = false },
+                onAbandonMatch = { showAbandonDialog = true; showAdvanced = false }
+            )
+        }
+
+        if (showTargetDialog) {
+            NumberEntryDialog(
+                title = "CHANGE TARGET",
+                subtitle = "Enter the new target for the second innings.",
+                value = targetInput,
+                onValueChange = { targetInput = it.filter(Char::isDigit); targetError = null },
+                error = targetError,
+                onCancel = { showTargetDialog = false },
+                confirmLabel = "UPDATE TARGET",
+                onConfirm = {
+                    val target = targetInput.toIntOrNull()
+                    if (target == null || target <= 0) targetError = "Enter a target greater than zero"
+                    else onUpdateTarget(
+                        target,
+                        { showTargetDialog = false },
+                        { targetError = it.ifBlank { null } }
+                    )
+                }
+            )
+        }
+
+        if (showPenaltyDialog) {
+            if (!penaltyEntryStep) {
+                PenaltyTeamSelectionDialog(
+                    teams = listOfNotNull(matchState?.battingTeam, matchState?.bowlingTeam),
+                    selectedTeamId = selectedPenaltyTeamId,
+                    onSelect = { selectedPenaltyTeamId = it },
+                    onCancel = { showPenaltyDialog = false },
+                    onNext = { if (selectedPenaltyTeamId != null) penaltyEntryStep = true }
+                )
+            } else {
+                NumberEntryDialog(
+                    title = "PENALTY RUNS",
+                    subtitle = "Enter the penalty runs for the selected team.",
+                    value = penaltyRunsInput,
+                    onValueChange = { penaltyRunsInput = it.filter(Char::isDigit); penaltyError = null },
+                    error = penaltyError,
+                    onCancel = { showPenaltyDialog = false },
+                    confirmLabel = "APPLY PENALTY",
+                    onConfirm = {
+                        val runs = penaltyRunsInput.toIntOrNull()
+                        val teamId = selectedPenaltyTeamId
+                        when {
+                            runs == null || runs <= 0 -> penaltyError = "Enter penalty runs greater than zero"
+                            teamId == null -> penaltyError = "Choose a team first"
+                            else -> onApplyPenaltyRuns(
+                                teamId,
+                                runs,
+                                { showPenaltyDialog = false },
+                                { penaltyError = it.ifBlank { null } }
+                            )
+                        }
+                    }
+                )
+            }
+        }
+
+        if (showMatchBreakDialog) {
+            ConfirmCancelDialog(
+                title = "MATCH BREAK",
+                message = "Pause scoring and return to the host screen?",
+                confirmLabel = "CONFIRM",
+                onCancel = { showMatchBreakDialog = false },
+                onConfirm = { showMatchBreakDialog = false; onLeaveScoring() }
+            )
+        }
+        if (showAbandonDialog) {
+            ConfirmCancelDialog(
+                title = "ABANDON MATCH?",
+                message = "Do you really want to abandon this match?",
+                confirmLabel = "YES, ABANDON",
+                destructive = true,
+                onCancel = { showAbandonDialog = false },
+                onConfirm = { showAbandonDialog = false; onAbandonMatch() }
             )
         }
 
@@ -591,6 +725,17 @@ private fun MainScoringScreen(
                     Column(modifier = Modifier.fillMaxSize().background(ScoringBg).verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.Center) {
                         Text("INNINGS BREAK", color = ScoringAccent, fontSize = 22.sp, fontWeight = FontWeight.Black)
                         Text("${matchState?.battingTeam?.name.orEmpty()} finished on ${innings.score}/${innings.wickets}. Choose the chasing team's openers and bowler.", color = Color.White, modifier = Modifier.padding(top = 10.dp, bottom = 20.dp))
+                        Text(
+                            "UNDO LAST BALL",
+                            color = ScoringAccent,
+                            fontWeight = FontWeight.Black,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .border(1.dp, ScoringAccent, RoundedCornerShape(10.dp))
+                                .clickable { onUndo() }
+                                .padding(14.dp)
+                        )
                         ScoringSelectionPage("STRIKER", "Choose the opening striker", bowlingPlayers, secondStrikerId) { secondStrikerId = it }
                         Spacer(Modifier.height(10.dp))
                         ScoringSelectionPage("NON-STRIKER", "Choose the second opener", bowlingPlayers.filterNot { it.id == secondStrikerId }, secondNonStrikerId) { secondNonStrikerId = it }
@@ -627,7 +772,7 @@ private val outOptions = listOf(
     OutOption("Caught", DismissalType.CAUGHT, R.drawable.caught),
     OutOption("Caught\nBehind", DismissalType.CAUGHT, R.drawable.stumped),
     OutOption("Caught &\nbowled", DismissalType.CAUGHT, R.drawable.caughtandbowled),
-    OutOption("Run out", DismissalType.RUN_OUT, null),
+    OutOption("Run out", DismissalType.RUN_OUT, R.drawable.runout),
     OutOption("LBW", DismissalType.LBW, R.drawable.lbw),
     OutOption("Stumped", DismissalType.STUMPED, R.drawable.stumping),
     OutOption("Retired\nhurt", DismissalType.RETIRED_HURT, R.drawable.retiredhurt),
@@ -1242,13 +1387,13 @@ private fun RunOutBottomSheet(
                 Text("Who?", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     RetiredHurtPlayerCard(
-                        name = strikerName, role = "Striker", image = R.drawable.striker,
+                        name = strikerName, role = "Striker", image = R.drawable.nonstriker,
                         selected = selectedBatterId == strikerId && strikerId != null,
                         modifier = Modifier.weight(1f),
                         onClick = { strikerId?.let { selectedBatterId = it } }
                     )
                     RetiredHurtPlayerCard(
-                        name = nonStrikerName, role = "Non-striker", image = R.drawable.nonstriker,
+                        name = nonStrikerName, role = "Non-striker", image = R.drawable.striker,
                         selected = selectedBatterId == nonStrikerId && nonStrikerId != null,
                         modifier = Modifier.weight(1f),
                         onClick = { nonStrikerId?.let { selectedBatterId = it } }
@@ -1282,7 +1427,7 @@ private fun RunOutBottomSheet(
                     RunOutFielderCard(
                         title = "Fielder 1",
                         selectedName = fielders.firstOrNull { it.id == selectedFielder1Id }?.displayName,
-                        image = R.drawable.obstructingthefield,
+                        image = R.drawable.fielder_one,
                         enabled = true,
                         modifier = Modifier.weight(1f),
                         onClick = { fielderPicker = if (fielderPicker == 1) 0 else 1 }
@@ -1290,7 +1435,7 @@ private fun RunOutBottomSheet(
                     RunOutFielderCard(
                         title = "Fielder 2",
                         selectedName = fielders.firstOrNull { it.id == selectedFielder2Id }?.displayName,
-                        image = R.drawable.mankadd,
+                        image = R.drawable.fileder_two,
                         enabled = !directHit,
                         modifier = Modifier.weight(1f),
                         onClick = { fielderPicker = if (fielderPicker == 2) 0 else 2 }
@@ -1366,12 +1511,15 @@ private fun RunOutFielderCard(
             .clickable(enabled = enabled, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(Modifier.fillMaxWidth().height(95.dp).background(Color(0xFF111A29)), contentAlignment = Alignment.Center) {
+        // These fielder assets are square cards. Keep the image viewport square
+        // so Fit can show the complete artwork without shrinking it into a wide,
+        // letterboxed strip or cropping off its neon frame.
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).background(Color(0xFF111A29)), contentAlignment = Alignment.Center) {
             Image(
                 painter = painterResource(image),
                 contentDescription = title,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().padding(5.dp)
+                modifier = Modifier.fillMaxSize()
             )
             if (selectedName != null) Box(Modifier.fillMaxSize().background(Color(0x5511A79D)), contentAlignment = Alignment.Center) {
                 Text("✓", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
@@ -1874,7 +2022,15 @@ private fun MoreActionsBar(expanded: Boolean, onToggle: () -> Unit) {
 
 // ── Advanced Options Sheet ────────────────────────────────
 @Composable
-private fun AdvancedOptionsSheet(modifier: Modifier = Modifier, onClose: () -> Unit) {
+private fun AdvancedOptionsSheet(
+    modifier: Modifier = Modifier,
+    onClose: () -> Unit,
+    canChangeTarget: Boolean,
+    onChangeTarget: () -> Unit,
+    onPenaltyRuns: () -> Unit,
+    onMatchBreak: () -> Unit,
+    onAbandonMatch: () -> Unit
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -1916,16 +2072,16 @@ private fun AdvancedOptionsSheet(modifier: Modifier = Modifier, onClose: () -> U
         // Options grid
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ActionOption("Change\nTarget", false, Modifier.weight(1f)) { ScoreTargetIcon(Modifier.size(18.dp), ScoringAccent) }
-                ActionOption("Penalty Runs", false, Modifier.weight(1f)) { ScorePlusIcon(Modifier.size(18.dp), ScoringAccent) }
+                ActionOption("Change\nTarget", false, Modifier.weight(1f), enabled = canChangeTarget, onClick = onChangeTarget) { ScoreTargetIcon(Modifier.size(18.dp), ScoringAccent) }
+                ActionOption("Penalty Runs", false, Modifier.weight(1f), onClick = onPenaltyRuns) { ScorePlusIcon(Modifier.size(18.dp), ScoringAccent) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 ActionOption("D/L Method", false, Modifier.weight(1f)) { ScoreBoltIcon(Modifier.size(18.dp), ScoringAccent) }
-                ActionOption("Match Break", false, Modifier.weight(1f)) { ScoreClockIcon(Modifier.size(18.dp), ScoringAccent) }
+                ActionOption("Match Break", false, Modifier.weight(1f), onClick = onMatchBreak) { ScoreClockIcon(Modifier.size(18.dp), ScoringAccent) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 ActionOption("Change\nScorer", false, Modifier.weight(1f)) { ScorePersonIcon(Modifier.size(18.dp), ScoringAccent) }
-                ActionOption("Abandon\nMatch", true, Modifier.weight(1f)) { ScoreNoIcon(Modifier.size(18.dp), Color(0xFFFF5252)) }
+                ActionOption("Abandon\nMatch", true, Modifier.weight(1f), onClick = onAbandonMatch) { ScoreNoIcon(Modifier.size(18.dp), Color(0xFFFF5252)) }
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -1945,14 +2101,21 @@ private fun AdvancedOptionsSheet(modifier: Modifier = Modifier, onClose: () -> U
 }
 
 @Composable
-private fun ActionOption(label: String, danger: Boolean, modifier: Modifier = Modifier, icon: @Composable () -> Unit) {
+private fun ActionOption(
+    label: String,
+    danger: Boolean,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit = {},
+    icon: @Composable () -> Unit
+) {
     Row(
         modifier = modifier
             .height(56.dp)
             .clip(RoundedCornerShape(9.dp))
-            .background(if (danger) Color(0xFF241320) else Color(0xFF111B2B))
+            .background(if (!enabled) Color(0xFF101723) else if (danger) Color(0xFF241320) else Color(0xFF111B2B))
             .border(1.dp, if (danger) Color(0xFF5A2035) else ScoringStroke, RoundedCornerShape(9.dp))
-            .clickable { }
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1971,6 +2134,134 @@ private fun ActionOption(label: String, danger: Boolean, modifier: Modifier = Mo
             fontWeight = FontWeight.Black,
             modifier = Modifier.padding(start = 10.dp)
         )
+    }
+}
+
+@Composable
+private fun NumberEntryDialog(
+    title: String,
+    subtitle: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    error: String?,
+    onCancel: () -> Unit,
+    confirmLabel: String,
+    onConfirm: () -> Unit
+) {
+    Dialog(onDismissRequest = onCancel) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(OutSheetBackground)
+                .border(1.dp, ScoringStroke, RoundedCornerShape(18.dp)).padding(20.dp)
+        ) {
+            Text(title, color = ScoringAccent, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            Text(subtitle, color = ScoringMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 7.dp, bottom = 16.dp))
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                decorationBox = { inner ->
+                    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(Color(0xFF101A28)).padding(14.dp)) {
+                        if (value.isEmpty()) Text("Enter runs", color = ScoringMuted, fontSize = 15.sp)
+                        inner()
+                    }
+                }
+            )
+            error?.let { Text(it, color = Color(0xFFFF6677), fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp)) }
+            Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DialogActionButton("CANCEL", true, Modifier.weight(1f), onCancel, primary = false)
+                DialogActionButton(confirmLabel, true, Modifier.weight(1f), onConfirm)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PenaltyTeamSelectionDialog(
+    teams: List<MatchTeam>,
+    selectedTeamId: String?,
+    onSelect: (String) -> Unit,
+    onCancel: () -> Unit,
+    onNext: () -> Unit
+) {
+    Dialog(onDismissRequest = onCancel) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(OutSheetBackground)
+            .border(1.dp, ScoringStroke, RoundedCornerShape(18.dp)).padding(18.dp)) {
+            Text("PENALTY RUNS", color = ScoringAccent, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            Text("Choose which team receives the penalty.", color = ScoringMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp, bottom = 16.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                teams.take(2).forEach { team ->
+                    val selected = selectedTeamId == team.teamId
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                            .background(if (selected) ScoringAccent.copy(alpha = .12f) else Color(0xFF101A28))
+                            .border(1.dp, if (selected) ScoringAccent else ScoringStroke, RoundedCornerShape(12.dp))
+                            .clickable { onSelect(team.teamId) }.padding(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(Modifier.size(54.dp).clip(CircleShape).background(Color(0xFF26364A)).border(2.dp, if (selected) ScoringAccent else ScoringStroke, CircleShape), contentAlignment = Alignment.Center) {
+                            val logo = team.logoUrl
+                            if (!logo.isNullOrBlank()) {
+                                AsyncImage(model = logo, contentDescription = "${team.name} logo", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().clip(CircleShape))
+                            } else {
+                                Text(team.shortName.takeIf(String::isNotBlank)?.take(3)?.uppercase() ?: team.name.take(1).uppercase(), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+                        Text(team.name, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, modifier = Modifier.padding(top = 9.dp))
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DialogActionButton("CANCEL", true, Modifier.weight(1f), onCancel, primary = false)
+                DialogActionButton("NEXT", selectedTeamId != null, Modifier.weight(1f), onNext)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfirmCancelDialog(
+    title: String,
+    message: String,
+    confirmLabel: String,
+    destructive: Boolean = false,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    Dialog(onDismissRequest = onCancel) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(OutSheetBackground)
+            .border(1.dp, if (destructive) Color(0xFF713040) else ScoringStroke, RoundedCornerShape(18.dp)).padding(20.dp)) {
+            Text(title, color = if (destructive) Color(0xFFFF6A78) else ScoringAccent, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            Text(message, color = Color.White, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 9.dp, bottom = 18.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DialogActionButton("CANCEL", true, Modifier.weight(1f), onCancel, primary = false)
+                DialogActionButton(confirmLabel, true, Modifier.weight(1f), onConfirm, destructive)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DialogActionButton(
+    label: String,
+    enabled: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit,
+    destructive: Boolean = false,
+    primary: Boolean = true
+) {
+    Box(
+        modifier.height(46.dp).clip(RoundedCornerShape(9.dp))
+            .background(when {
+                !enabled -> Color(0xFF252E3A)
+                destructive -> Color(0xFFB3263D)
+                primary -> ScoringAccent
+                else -> Color(0xFF252E3A)
+            })
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = if (enabled && primary) ScoringBg else if (enabled) Color.White else ScoringMuted, fontSize = 11.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
     }
 }
 
@@ -2286,7 +2577,7 @@ private data class FieldPositionHotspot(
     val y: Float
 )
 
-// Positions are normalized to the labeled markers in cricketgroundforscoring.png.
+// Positions are normalized to the labeled markers in cricketgroundforscoring.webp.
 private val fieldPositionHotspots = listOf(
     FieldPositionHotspot("Third Man", 0.365f, 0.167f),
     FieldPositionHotspot("Deep Fine Leg", 0.632f, 0.165f),

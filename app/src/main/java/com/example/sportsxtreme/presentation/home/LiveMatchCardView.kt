@@ -37,6 +37,7 @@ class LiveMatchCardView @JvmOverloads constructor(
     private val cyan = Color.rgb(0, 210, 255)
 
     private lateinit var leagueText: TextView
+    private lateinit var stageText: TextView
     private lateinit var statusText: TextView
     private lateinit var liveDot: View
     private lateinit var teamAIcon: TextView
@@ -91,13 +92,14 @@ class LiveMatchCardView @JvmOverloads constructor(
                         includeFontPadding = false
                     }
                     addView(leagueText)
-                    addView(TextView(context).apply {
+                    stageText = TextView(context).apply {
                         text = "Friendly Match"
                         setTextColor(Color.rgb(106, 121, 137))
                         textSize = 8.2f
                         typeface = Typeface.DEFAULT_BOLD
                         includeFontPadding = false
-                    }, LinearLayout.LayoutParams(
+                    }
+                    addView(stageText, LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
                     ).apply {
@@ -318,17 +320,30 @@ class LiveMatchCardView @JvmOverloads constructor(
     /** Binds a [LiveMatch] to this card and starts/stops the LIVE pulse. */
     fun bind(match: LiveMatch) {
         leagueText.text = match.tournamentName.ifBlank { "LIVE MATCH" }
+        stageText.text = match.tournamentStage.ifBlank {
+            if (match.tournamentName.isNotBlank() && !match.tournamentName.equals("Friendly Match", ignoreCase = true)) {
+                "Tournament Match"
+            } else {
+                "Friendly Match"
+            }
+        }
         statusText.text = when {
             match.isLive -> "LIVE"
             match.isCompleted -> "Completed"
+            match.isPaused -> "PAUSED"
+            match.isAbandoned -> "ABANDONED"
             else -> "Upcoming"
         }
-        statusText.setTextColor(if (match.isLive) Color.rgb(255, 62, 70) else Color.WHITE)
+        statusText.setTextColor(when {
+            match.isLive || match.isAbandoned -> Color.rgb(255, 62, 70)
+            match.isPaused -> Color.rgb(255, 190, 70)
+            else -> Color.WHITE
+        })
         liveDot.visibility = if (match.isLive) View.VISIBLE else View.GONE
 
         teamAIcon.text = match.teamAShortName.ifBlank { match.teamAName }
         teamBIcon.text = match.teamBShortName.ifBlank { match.teamBName }
-        val showScores = match.isLive || match.isCompleted
+        val showScores = match.isLive || match.isCompleted || match.isPaused || match.isAbandoned
         
         if (match.battingTeamId != null) {
             val isTeamABatting = match.battingTeamId == match.teamAId

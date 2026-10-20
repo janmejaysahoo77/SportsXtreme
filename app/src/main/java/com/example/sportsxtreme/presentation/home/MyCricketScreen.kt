@@ -326,14 +326,22 @@ private fun DocumentSnapshot.toPlayerCricketMatch(teamLogosById: Map<String, Str
         ?: (teamB?.get("teamLogoUrl") as? String)
         ?: teamLogosById[teamBId]
         ?: getString("teamBLogoUrl")
-    val statusValue = (liveScore?.get("status") as? String)
-        ?: getString("status")
-        ?: getString("scheduleStatus")
-        ?: "SCHEDULED"
-    val finished = statusValue.equals("COMPLETED", true) || statusValue.equals("FINISHED", true)
-    val live = statusValue.equals("LIVE", true) ||
-        statusValue.equals("IN_PROGRESS", true) ||
-        statusValue.equals("INNINGS_BREAK", true)
+    // The match document owns lifecycle state. liveScore is a denormalized,
+    // asynchronously updated snapshot and can continue to say LIVE after the
+    // match has been completed or abandoned.
+    val matchStatus = getString("status")?.trim()?.uppercase()
+    val scoreStatus = (liveScore?.get("status") as? String)?.trim()?.uppercase()
+    val scheduleStatus = getString("scheduleStatus")?.trim()?.uppercase()
+    val terminalStatuses = setOf(
+        "COMPLETED", "FINISHED", "FINALIZATION_PENDING", "FINALIZING", "FINALIZED", "ABANDONED"
+    )
+    val activeStatuses = setOf("LIVE", "IN_PROGRESS", "INNINGS_BREAK")
+    val finished = matchStatus in terminalStatuses ||
+        (matchStatus == null && (scoreStatus in terminalStatuses || scheduleStatus in terminalStatuses))
+    val live = !finished && (
+        matchStatus in activeStatuses ||
+            (matchStatus == null && (scoreStatus in activeStatuses || scheduleStatus in activeStatuses))
+        )
     val liveScoreText = liveScore?.let { score ->
         val runs = (score["score"] as? Number)?.toInt() ?: return@let null
         val wickets = (score["wickets"] as? Number)?.toInt() ?: 0

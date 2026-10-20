@@ -95,7 +95,8 @@ class LiveMatchRepositoryImpl @Inject constructor(
         bowlerRuns = bowlerRuns,
         bowlerWickets = bowlerWickets,
         matchStatusNote = matchStatusNote,
-        updatedAtEpochMs = updatedAtEpochMs
+        updatedAtEpochMs = updatedAtEpochMs,
+        tournamentStage = tournamentStage
     )
 
     private fun LiveMatchEntity.toDomain(): LiveMatch = LiveMatch(
@@ -132,6 +133,7 @@ class LiveMatchRepositoryImpl @Inject constructor(
         bowlerRuns = bowlerRuns,
         bowlerWickets = bowlerWickets,
         matchStatusNote = matchStatusNote,
-        updatedAtEpochMs = updatedAtEpochMs
+        updatedAtEpochMs = updatedAtEpochMs,
+        tournamentStage = tournamentStage
     )
 }

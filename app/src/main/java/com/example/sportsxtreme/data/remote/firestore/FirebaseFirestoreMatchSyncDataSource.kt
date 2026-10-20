@@ -119,7 +119,9 @@ class FirebaseFirestoreMatchSyncDataSource @Inject constructor(
         "target" to target,
         "status" to status.name,
         "startedAtEpochMs" to startedAtEpochMs,
-        "completedAtEpochMs" to completedAtEpochMs
+        "completedAtEpochMs" to completedAtEpochMs,
+        "penaltyScoreAdjustment" to penaltyScoreAdjustment,
+        "opponentPenaltyRuns" to opponentPenaltyRuns
     )
 
     private companion object {

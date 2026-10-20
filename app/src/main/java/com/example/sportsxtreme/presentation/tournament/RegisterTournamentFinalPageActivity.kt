@@ -18,6 +18,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -240,8 +241,8 @@ private fun RegisterTournamentFinalPage(
         return
     }
     var selectedTab by remember { mutableIntStateOf(initialTab) }
-    var pointsGroupName by remember { mutableStateOf<String?>(null) }
-    var pointsGroupTeams by remember { mutableStateOf<List<PointsGroupTeam>>(emptyList()) }
+    var pointsGroups by remember { mutableStateOf<List<PointsGroup>>(emptyList()) }
+    var selectedPointsGroup by remember { mutableStateOf<String?>(null) }
     val isOrganizer = tournament != null && tournament.hostUid.isNotBlank() && tournament.hostUid == com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
     DisposableEffect(tournament?.id) {
         val tournamentId = tournament?.id.orEmpty()
@@ -249,22 +250,63 @@ private fun RegisterTournamentFinalPage(
         val registration = FirebaseFirestore.getInstance().collection("tournaments").document(tournamentId)
             .collection("pointsTable").document("current")
             .addSnapshotListener { snapshot, _ ->
-                pointsGroupName = snapshot?.getString("groupName")?.takeIf(String::isNotBlank)
                 @Suppress("UNCHECKED_CAST")
-                val savedTeams = snapshot?.get("teams") as? List<Map<String, String>>
-                pointsGroupTeams = savedTeams.orEmpty().mapNotNull { item ->
-                    val id = item["id"].orEmpty()
-                    if (id.isBlank()) null else PointsGroupTeam(id, item["name"].orEmpty().ifBlank { "Team" })
+                val savedGroups = snapshot?.get("groups") as? List<Map<String, Any?>>
+                val parsedGroups = savedGroups.orEmpty().mapNotNull { item ->
+                    val name = item["name"] as? String ?: return@mapNotNull null
+                    val savedTeams = item["teams"] as? List<Map<String, String>>
+                    val parsedTeams = savedTeams.orEmpty().mapNotNull { team ->
+                        val id = team["id"].orEmpty()
+                        if (id.isBlank()) null else PointsGroupTeam(id, team["name"].orEmpty().ifBlank { "Team" }, team["logoUrl"].orEmpty())
+                    }
+                    PointsGroup(name, parsedTeams)
                 }
+                // Read the previous single-group document format so existing tournaments migrate on save.
+                val loadedGroups = if (parsedGroups.isNotEmpty()) parsedGroups else {
+                    val legacyName = snapshot?.getString("groupName")?.takeIf(String::isNotBlank)
+                    if (legacyName == null) emptyList() else {
+                        val legacyTeams = snapshot?.get("teams") as? List<Map<String, String>>
+                        listOf(PointsGroup(legacyName, legacyTeams.orEmpty().mapNotNull { team ->
+                            val id = team["id"].orEmpty()
+                            if (id.isBlank()) null else PointsGroupTeam(id, team["name"].orEmpty().ifBlank { "Team" }, team["logoUrl"].orEmpty())
+                        }))
+                    }
+                }
+                pointsGroups = loadedGroups
+                selectedPointsGroup = snapshot?.getString("selectedGroup")
+                    ?.takeIf { selected -> loadedGroups.any { it.name == selected } }
+                    ?: loadedGroups.firstOrNull()?.name
             }
         onDispose { registration.remove() }
     }
-    fun savePointsTable(name: String?, teams: List<PointsGroupTeam>) {
+    fun savePointsTable(groups: List<PointsGroup>, selectedGroup: String?) {
         if (!isOrganizer || tournament.id.isBlank()) return
         val reference = FirebaseFirestore.getInstance().collection("tournaments").document(tournament.id)
             .collection("pointsTable").document("current")
-        if (name == null) reference.delete()
-        else reference.set(mapOf("groupName" to name, "teams" to teams.map { mapOf("id" to it.id, "name" to it.name) }))
+        val selected = groups.firstOrNull { it.name == selectedGroup } ?: groups.firstOrNull()
+        if (groups.isEmpty()) reference.delete()
+        else reference.set(mapOf(
+            "groups" to groups.map { group -> mapOf("name" to group.name, "teams" to group.teams.map { mapOf("id" to it.id, "name" to it.name, "logoUrl" to it.logoUrl) }) },
+            "selectedGroup" to selected?.name,
+            // Keep the original fields populated for older app versions.
+            "groupName" to selected?.name,
+            "teams" to selected?.teams.orEmpty().map { mapOf("id" to it.id, "name" to it.name, "logoUrl" to it.logoUrl) }
+        ))
+    }
+    DisposableEffect(tournament.id, pointsGroups) {
+        pointsGroups.flatMap { it.teams }.filter { it.logoUrl.isBlank() }.forEach { team ->
+            FirebaseFirestore.getInstance().collection("teams").document(team.id).get().addOnSuccessListener { details ->
+                val logo = listOf("logoUrl", "teamLogoUrl", "photoUrl").firstNotNullOfOrNull { details.getString(it)?.takeIf(String::isNotBlank) }.orEmpty()
+                if (logo.isNotBlank()) {
+                    val updatedGroups = pointsGroups.map { group ->
+                        group.copy(teams = group.teams.map { if (it.id == team.id) it.copy(logoUrl = logo) else it })
+                    }
+                    pointsGroups = updatedGroups
+                    savePointsTable(updatedGroups, selectedPointsGroup)
+                }
+            }
+        }
+        onDispose { }
     }
     val tabs = listOf("Overview", "Teams", "Matches", "Points", "Leaderboard")
     Column(Modifier.fillMaxSize().background(FinalBg)) {
@@ -310,10 +352,32 @@ private fun RegisterTournamentFinalPage(
                         2 -> MatchesTab(tournament, initialMatchTab)
                         3 -> PointsTab(
                             tournamentId = tournament?.id.orEmpty(),
-                            groupName = pointsGroupName,
-                            teams = pointsGroupTeams,
-                            onGroupNameChange = { pointsGroupName = it; savePointsTable(it, if (it == null) emptyList() else pointsGroupTeams) },
-                            onTeamsChange = { pointsGroupTeams = it; pointsGroupName?.let { name -> savePointsTable(name, it) } },
+                            groups = pointsGroups,
+                            selectedGroupName = selectedPointsGroup,
+                            onSelectGroup = { name ->
+                                selectedPointsGroup = name
+                                savePointsTable(pointsGroups, name)
+                            },
+                            onCreateGroup = { name ->
+                                val existing = pointsGroups.firstOrNull { it.name.equals(name, ignoreCase = true) }
+                                if (existing != null) {
+                                    selectedPointsGroup = existing.name
+                                } else {
+                                    pointsGroups = pointsGroups + PointsGroup(name, emptyList())
+                                    selectedPointsGroup = name
+                                }
+                                savePointsTable(pointsGroups, selectedPointsGroup)
+                            },
+                            onDeleteGroup = { name ->
+                                pointsGroups = pointsGroups.filterNot { it.name == name }
+                                selectedPointsGroup = pointsGroups.firstOrNull()?.name
+                                savePointsTable(pointsGroups, selectedPointsGroup)
+                            },
+                            onTeamsChange = { updatedTeams ->
+                                val activeName = selectedPointsGroup
+                                pointsGroups = pointsGroups.map { group -> if (group.name == activeName) group.copy(teams = updatedTeams) else group }
+                                savePointsTable(pointsGroups, activeName)
+                            },
                             canEdit = isOrganizer
                         )
                         else -> LeaderboardTab()
@@ -912,53 +976,78 @@ private fun MatchesTab(tournament: Tournament?, initialMatchTab: Int) {
     val tournamentName = tournament?.name?.ifBlank { "Tournament" } ?: "Tournament"
     var selectedMatchTab by remember(tournament?.id) { mutableIntStateOf(initialMatchTab.coerceIn(0, 2)) }
     val matchTabs = listOf("Live", "Upcoming", "Completed")
-    var upcomingMatches by remember(tournament?.id) { mutableStateOf(emptyList<ScheduledTournamentMatch>()) }
-    var isLoadingUpcoming by remember(tournament?.id) { mutableStateOf(true) }
-    var upcomingError by remember(tournament?.id) { mutableStateOf<String?>(null) }
+    var tournamentMatches by remember(tournament?.id) { mutableStateOf(emptyList<ScheduledTournamentMatch>()) }
+    var isLoadingMatches by remember(tournament?.id) { mutableStateOf(true) }
+    var matchesError by remember(tournament?.id) { mutableStateOf<String?>(null) }
+    val liveStatuses = setOf("LIVE", "IN_PROGRESS", "PAUSED", "INNINGS_BREAK", "MATCH_BREAK", "BREAK")
+    val completedStatuses = setOf("COMPLETED", "FINISHED", "ABANDONED", "FINALIZATION_PENDING", "FINALIZING", "FINALIZED")
+    val liveMatches = tournamentMatches.filter { it.status in liveStatuses }
+    val upcomingMatches = tournamentMatches.filter { it.status !in liveStatuses && it.status !in completedStatuses && it.scheduleStatus == "SCHEDULED" }
+    val completedMatches = tournamentMatches.filter { it.status in completedStatuses }
     DisposableEffect(tournament?.id) {
         val tournamentId = tournament?.id.orEmpty()
         if (tournamentId.isBlank()) {
-            isLoadingUpcoming = false
+            isLoadingMatches = false
             return@DisposableEffect onDispose { }
         }
         val registration = com.google.firebase.firestore.FirebaseFirestore.getInstance()
             .collection("matches")
             .whereEqualTo("tournamentId", tournamentId)
             .addSnapshotListener { snapshots, error ->
-                isLoadingUpcoming = false
+                isLoadingMatches = false
                 if (error != null) {
-                    upcomingError = error.message ?: "Unable to load upcoming matches"
-                    upcomingMatches = emptyList()
+                    matchesError = error.message ?: "Unable to load tournament matches"
+                    tournamentMatches = emptyList()
                 } else {
-                    upcomingError = null
-                    upcomingMatches = snapshots?.documents.orEmpty()
-                        .filter { document ->
-                            document.getString("scheduleStatus") == "SCHEDULED" &&
-                                document.getString("status") !in setOf("LIVE", "IN_PROGRESS", "COMPLETED", "ABANDONED")
+                    matchesError = null
+                    tournamentMatches = snapshots?.documents.orEmpty().map { document ->
+                        val teamAMap = document.get("teamA") as? Map<*, *>
+                        val teamBMap = document.get("teamB") as? Map<*, *>
+                        val teamA = document.getString("teamAName") ?: teamAMap?.get("name") as? String ?: "Team A"
+                        val teamB = document.getString("teamBName") ?: teamBMap?.get("name") as? String ?: "Team B"
+                        val teamAId = document.getString("teamAId") ?: (teamAMap?.get("teamId") as? String).orEmpty()
+                        val teamBId = document.getString("teamBId") ?: (teamBMap?.get("teamId") as? String).orEmpty()
+                        val liveScore = document.get("liveScore") as? Map<*, *> ?: emptyMap<Any, Any>()
+                        val innings = document.get("innings") as? List<Map<String, Any?>> ?: emptyList()
+                        val inningsScores = innings.mapNotNull { inning ->
+                            val teamId = inning["battingTeamId"] as? String
+                            if (teamId == null) return@mapNotNull null
+                            val score = (inning["score"] as? Number)?.toInt() ?: 0
+                            val wickets = (inning["wickets"] as? Number)?.toInt() ?: 0
+                            val balls = (inning["legalBalls"] as? Number)?.toInt() ?: 0
+                            teamId to ("$score/$wickets" to "${balls / 6}.${balls % 6} OV")
+                        }.toMap()
+                        val latestInnings = innings.lastOrNull()
+                        val liveTeamId = latestInnings?.get("battingTeamId") as? String
+                        val liveScoreText = "${(liveScore["score"] as? Number)?.toInt() ?: (latestInnings?.get("score") as? Number)?.toInt() ?: 0}/${(liveScore["wickets"] as? Number)?.toInt() ?: (latestInnings?.get("wickets") as? Number)?.toInt() ?: 0}"
+                        val liveOvers = liveScore["overs"] as? String ?: run {
+                            val balls = (latestInnings?.get("legalBalls") as? Number)?.toInt() ?: 0
+                            "${balls / 6}.${balls % 6}"
                         }
-                        .map { document ->
-                            val teamA = document.getString("teamAName")
-                                ?: (document.get("teamA") as? Map<*, *>)?.get("name") as? String
-                                ?: "Team A"
-                            val teamB = document.getString("teamBName")
-                                ?: (document.get("teamB") as? Map<*, *>)?.get("name") as? String
-                                ?: "Team B"
-                            val dateMillis = (document.get("matchDateEpochMs") as? Number)?.toLong() ?: 0L
-                            ScheduledTournamentMatch(
-                                id = document.id,
-                                tournamentName = document.getString("tournamentName").orEmpty().ifBlank { tournamentName },
-                                round = document.getString("roundName").orEmpty().ifBlank { tournament?.requirements?.tournamentFormat.orEmpty().ifBlank { "Tournament fixture" } },
-                                teamA = teamA,
-                                teamB = teamB,
-                                date = if (dateMillis > 0L) java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(dateMillis)) else "Date not set",
-                                time = document.getString("matchTime").orEmpty().ifBlank { "Time not set" },
-                                venue = document.getString("venue").orEmpty().ifBlank { "Venue not set" }
-                            )
-                        }
-                        .sortedBy { match ->
-                            snapshots?.documents?.firstOrNull { it.id == match.id }
-                                ?.getLong("matchDateEpochMs") ?: Long.MAX_VALUE
-                        }
+                        val scoreA = inningsScores[teamAId] ?: ("—" to "TEAM A")
+                        val scoreB = inningsScores[teamBId] ?: ("—" to "TEAM B")
+                        val status = (document.getString("status") ?: document.getString("scheduleStatus").orEmpty()).uppercase()
+                        val dateMillis = (document.get("matchDateEpochMs") as? Number)?.toLong() ?: 0L
+                        ScheduledTournamentMatch(
+                            id = document.id,
+                            tournamentName = document.getString("tournamentName").orEmpty().ifBlank { tournamentName },
+                            round = document.getString("roundName").orEmpty().ifBlank { tournament?.requirements?.tournamentFormat.orEmpty().ifBlank { "Tournament fixture" } },
+                            teamA = teamA,
+                            teamB = teamB,
+                            date = if (dateMillis > 0L) java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(dateMillis)) else "Date not set",
+                            time = document.getString("matchTime").orEmpty().ifBlank { "Time not set" },
+                            venue = document.getString("venue").orEmpty().ifBlank { "Venue not set" },
+                            status = status,
+                            scheduleStatus = document.getString("scheduleStatus").orEmpty().uppercase(),
+                            teamAScore = if (liveTeamId == teamAId) liveScoreText else scoreA.first,
+                            teamAOvers = if (liveTeamId == teamAId) "$liveOvers OV" else scoreA.second,
+                            teamBScore = if (liveTeamId == teamBId) liveScoreText else scoreB.first,
+                            teamBOvers = if (liveTeamId == teamBId) "$liveOvers OV" else scoreB.second,
+                            note = liveScore["matchStatusNote"] as? String ?: document.getString("result").orEmpty()
+                        )
+                    }.sortedBy { match ->
+                        snapshots?.documents?.firstOrNull { it.id == match.id }?.getLong("matchDateEpochMs") ?: Long.MAX_VALUE
+                    }
                 }
             }
         onDispose { registration.remove() }
@@ -978,8 +1067,8 @@ private fun MatchesTab(tournament: Tournament?, initialMatchTab: Int) {
             val matchCountColor = if (selectedMatchTab == 1) Color(0xFFFFC107) else FinalAccent
             val matchCountLabel = when (selectedMatchTab) {
                 1 -> "${upcomingMatches.size} UPCOMING"
-                2 -> "COMPLETED"
-                else -> "2 LIVE"
+                2 -> "${completedMatches.size} COMPLETED"
+                else -> "${liveMatches.size} LIVE"
             }
             Box(Modifier.clip(RoundedCornerShape(16.dp)).background(matchCountColor.copy(alpha = .13f)).padding(horizontal = 11.dp, vertical = 7.dp)) {
                 Text(matchCountLabel, color = matchCountColor, fontSize = 10.sp, fontWeight = FontWeight.Black)
@@ -998,9 +1087,11 @@ private fun MatchesTab(tournament: Tournament?, initialMatchTab: Int) {
                 selectedTab = selectedMatchTab,
                 tournamentName = tournamentName,
                 homeCardFactory = homeCardFactory,
+                liveMatches = liveMatches,
                 upcomingMatches = upcomingMatches,
-                isLoadingUpcoming = isLoadingUpcoming,
-                upcomingError = upcomingError
+                completedMatches = completedMatches,
+                isLoadingMatches = isLoadingMatches,
+                matchesError = matchesError
             )
         }
         MatchActions(
@@ -1050,7 +1141,14 @@ private data class ScheduledTournamentMatch(
     val teamB: String,
     val date: String,
     val time: String,
-    val venue: String
+    val venue: String,
+    val status: String,
+    val scheduleStatus: String,
+    val teamAScore: String,
+    val teamAOvers: String,
+    val teamBScore: String,
+    val teamBOvers: String,
+    val note: String
 )
 
 @Composable
@@ -1058,16 +1156,22 @@ private fun MatchStatusContent(
     selectedTab: Int,
     tournamentName: String,
     homeCardFactory: HomeScreenView,
+    liveMatches: List<ScheduledTournamentMatch>,
     upcomingMatches: List<ScheduledTournamentMatch>,
-    isLoadingUpcoming: Boolean,
-    upcomingError: String?
+    completedMatches: List<ScheduledTournamentMatch>,
+    isLoadingMatches: Boolean,
+    matchesError: String?
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (selectedTab == 0) {
-            AndroidView(factory = { homeCardFactory.createHeroScoreCard(it, tournamentName.uppercase(), "Match 01") }, modifier = Modifier.fillMaxWidth().height(272.dp))
-            AndroidView(factory = { homeCardFactory.createHeroScoreCard(it, tournamentName.uppercase(), "Match 02", "BBS", "96/2", "11.3 OV", "KDP", "94/7", "15.0 OV", "148", "7.86", "BBS 68%", "BBS need 52 from 51 balls") }, modifier = Modifier.fillMaxWidth().height(272.dp))
-        } else if (selectedTab == 1 && upcomingMatches.isNotEmpty()) {
-            upcomingMatches.forEach { match ->
+        val visibleMatches = when (selectedTab) {
+            0 -> liveMatches
+            1 -> upcomingMatches
+            else -> completedMatches
+        }
+        if (visibleMatches.isNotEmpty()) {
+            visibleMatches.forEach { match ->
+                val isLive = match.status in setOf("LIVE", "IN_PROGRESS", "PAUSED", "INNINGS_BREAK", "MATCH_BREAK", "BREAK")
+                val isUpcoming = match.scheduleStatus == "SCHEDULED" && !isLive
                 AndroidView(
                     factory = { context ->
                         homeCardFactory.createHeroScoreCard(
@@ -1075,21 +1179,37 @@ private fun MatchStatusContent(
                             league = match.tournamentName.uppercase(),
                             round = match.round,
                             leftName = match.teamA,
-                            leftScore = "—",
-                            leftOvers = "TEAM A",
+                            leftScore = if (isUpcoming) "—" else match.teamAScore,
+                            leftOvers = if (isUpcoming) "TEAM A" else match.teamAOvers,
                             rightName = match.teamB,
-                            rightScore = "—",
-                            rightOvers = "TEAM B",
-                            target = match.date,
+                            rightScore = if (isUpcoming) "—" else match.teamBScore,
+                            rightOvers = if (isUpcoming) "TEAM B" else match.teamBOvers,
+                            target = if (isUpcoming) match.date else "",
                             rrr = match.time,
                             win = match.venue.take(12).uppercase(),
-                            note = "Venue: ${match.venue}",
-                            statusTag = "UPCOMING",
-                            statusColor = android.graphics.Color.rgb(255, 193, 7),
-                            scheduledDate = match.date,
-                            scheduledTime = match.time,
-                            scheduledVenue = match.venue.take(12).uppercase(),
-                            canOpenScorecard = false
+                            note = when {
+                                isUpcoming -> "Venue: ${match.venue}"
+                                match.note.isNotBlank() -> match.note
+                                else -> "Venue: ${match.venue}"
+                            },
+                            statusTag = when {
+                                isUpcoming -> "UPCOMING"
+                                match.status == "PAUSED" -> "PAUSED"
+                                match.status in setOf("INNINGS_BREAK", "MATCH_BREAK", "BREAK") -> "MATCH BREAK"
+                                selectedTab == 2 -> "COMPLETED"
+                                else -> "LIVE"
+                            },
+                            statusColor = when {
+                                isUpcoming -> android.graphics.Color.rgb(255, 193, 7)
+                                match.status == "PAUSED" -> android.graphics.Color.rgb(255, 192, 77)
+                                selectedTab == 2 -> android.graphics.Color.rgb(184, 198, 193)
+                                else -> android.graphics.Color.rgb(255, 38, 54)
+                            },
+                            scheduledDate = match.date.takeIf { isUpcoming },
+                            scheduledTime = match.time.takeIf { isUpcoming },
+                            scheduledVenue = match.venue.take(12).uppercase().takeIf { isUpcoming },
+                            canOpenScorecard = !isUpcoming,
+                            matchId = match.id
                         )
                     },
                     modifier = Modifier.fillMaxWidth().height(272.dp)
@@ -1097,13 +1217,15 @@ private fun MatchStatusContent(
             }
         } else {
             val title = when {
-                selectedTab == 1 && isLoadingUpcoming -> "Loading upcoming matches…"
-                selectedTab == 1 && upcomingError != null -> "Couldn't load upcoming matches"
+                isLoadingMatches -> "Loading tournament matches…"
+                matchesError != null -> "Couldn't load tournament matches"
+                selectedTab == 0 -> "No live matches"
                 selectedTab == 1 -> "No upcoming matches"
                 else -> "No completed matches"
             }
             val message = when {
-                selectedTab == 1 && upcomingError != null -> upcomingError
+                matchesError != null -> matchesError
+                selectedTab == 0 -> "Live, paused, and match break fixtures will appear here."
                 selectedTab == 1 -> "Scheduled tournament fixtures will appear here."
                 else -> "Finished scorecards will appear here."
             }
@@ -1131,6 +1253,7 @@ private fun MatchActions(modifier: Modifier, onSchedule: () -> Unit, onStart: ()
 @Composable
 private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
     val context = LocalContext.current
+    val firestore = remember { com.google.firebase.firestore.FirebaseFirestore.getInstance() }
     var isCreatingInvite by remember { mutableStateOf(false) }
     var isAddingTeamId by remember { mutableStateOf<String?>(null) }
     var showAddTeamsMenu by remember { mutableStateOf(false) }
@@ -1140,16 +1263,24 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
     DisposableEffect(tournament?.id) {
         val tournamentId = tournament?.id.orEmpty()
         if (tournamentId.isBlank()) return@DisposableEffect onDispose { }
-        val registration = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+        val registration = firestore
             .collection("tournaments").document(tournamentId).collection("teams")
             .addSnapshotListener { snapshots, _ ->
-                joinedTeams = snapshots?.documents.orEmpty().map { document ->
+                val loadedTeams = snapshots?.documents.orEmpty().map { document ->
                     TournamentJoinedTeam(
                         id = document.id,
                         name = document.getString("teamName")?.trim().orEmpty().ifBlank { "Team" },
-                        captainUserId = document.getString("captainUserId").orEmpty()
+                        captainUserId = document.getString("captainUserId").orEmpty(),
+                        logoUrl = listOf("logoUrl", "teamLogoUrl", "photoUrl").firstNotNullOfOrNull { document.getString(it)?.takeIf(String::isNotBlank) }.orEmpty()
                     )
                 }.sortedBy { it.name.lowercase() }
+                joinedTeams = loadedTeams
+                loadedTeams.filter { it.logoUrl.isBlank() }.forEach { team ->
+                    firestore.collection("teams").document(team.id).get().addOnSuccessListener { details ->
+                        val logo = listOf("logoUrl", "teamLogoUrl", "photoUrl").firstNotNullOfOrNull { details.getString(it)?.takeIf(String::isNotBlank) }.orEmpty()
+                        if (logo.isNotBlank()) joinedTeams = joinedTeams.map { if (it.id == team.id) it.copy(logoUrl = logo) else it }
+                    }
+                }
             }
         onDispose { registration.remove() }
     }
@@ -1320,7 +1451,7 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
     }
 }
 
-private data class TournamentJoinedTeam(val id: String, val name: String, val captainUserId: String)
+private data class TournamentJoinedTeam(val id: String, val name: String, val captainUserId: String, val logoUrl: String = "")
 
 @Composable
 private fun TournamentTeamCard(team: TournamentJoinedTeam, position: Int) {
@@ -1329,7 +1460,11 @@ private fun TournamentTeamCard(team: TournamentJoinedTeam, position: Int) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(FinalAccent.copy(alpha = .13f)), contentAlignment = Alignment.Center) {
-            Text(position.toString().padStart(2, '0'), color = FinalAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            if (team.logoUrl.isNotBlank()) {
+                AsyncImage(model = team.logoUrl, contentDescription = "${team.name} team logo", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+            } else {
+                Text(position.toString().padStart(2, '0'), color = FinalAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            }
         }
         Column(Modifier.padding(start = 12.dp).weight(1f)) {
             Text(team.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1339,15 +1474,18 @@ private fun TournamentTeamCard(team: TournamentJoinedTeam, position: Int) {
     }
 }
 
-private data class PointsGroupTeam(val id: String, val name: String)
+private data class PointsGroupTeam(val id: String, val name: String, val logoUrl: String = "")
+private data class PointsGroup(val name: String, val teams: List<PointsGroupTeam>)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PointsTab(
     tournamentId: String,
-    groupName: String?,
-    teams: List<PointsGroupTeam>,
-    onGroupNameChange: (String?) -> Unit,
+    groups: List<PointsGroup>,
+    selectedGroupName: String?,
+    onSelectGroup: (String) -> Unit,
+    onCreateGroup: (String) -> Unit,
+    onDeleteGroup: (String) -> Unit,
     onTeamsChange: (List<PointsGroupTeam>) -> Unit,
     canEdit: Boolean
 ) {
@@ -1356,16 +1494,18 @@ private fun PointsTab(
     var showNameSuggestions by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
+    val activeGroup = groups.firstOrNull { it.name == selectedGroupName } ?: groups.firstOrNull()
     val registeredTeamPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val selectedId = result.data?.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_ID).orEmpty()
             val selectedName = result.data?.getStringExtra(SelectPlayingTeamsActivity.EXTRA_SELECTED_TEAM_NAME).orEmpty()
+            val selectedLogo = result.data?.getStringExtra("selected_team_logo_url").orEmpty()
             if (selectedId.isNotBlank()) {
-                val selectedTeams = teams
+                val selectedTeams = activeGroup?.teams.orEmpty()
                 if (selectedTeams.none { it.id == selectedId }) {
-                    onTeamsChange(selectedTeams + PointsGroupTeam(selectedId, selectedName.ifBlank { "Team" }))
+                    onTeamsChange(selectedTeams + PointsGroupTeam(selectedId, selectedName.ifBlank { "Team" }, selectedLogo))
                 }
             }
         }
@@ -1374,26 +1514,51 @@ private fun PointsTab(
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 12.dp)
     ) {
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (groupName != null) {
-                GroupPointsTab(
-                    groupName = groupName.orEmpty(),
-                    teams = teams,
-                    onAddTeam = {
-                        if (canEdit && tournamentId.isNotBlank()) {
-                            registeredTeamPicker.launch(
-                                Intent(context, RegisteredTeamsOfATournament::class.java)
-                                    .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
-                            )
-                        } else if (canEdit) {
-                            Toast.makeText(context, "Tournament is still loading", Toast.LENGTH_SHORT).show()
+        Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            if (groups.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    groups.forEach { group ->
+                        val selected = group.name == activeGroup?.name
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (selected) FinalAccent else FinalBg)
+                                .border(1.dp, if (selected) FinalAccent else FinalDivider, RoundedCornerShape(20.dp))
+                                .clickable { onSelectGroup(group.name) }
+                                .padding(horizontal = 16.dp, vertical = 9.dp)
+                        ) {
+                            Text(group.name, color = if (selected) FinalBg else Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
-                    },
-                    onDeleteGroup = { if (canEdit) { onGroupNameChange(null); onTeamsChange(emptyList()) } },
-                    canEdit = canEdit
-                )
-            } else {
-                NoGroupsPointsTab(canEdit)
+                    }
+                }
+            }
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                if (activeGroup != null) {
+                    GroupPointsTab(
+                        groupName = activeGroup.name,
+                        teams = activeGroup.teams,
+                        onAddTeam = {
+                            if (canEdit && tournamentId.isNotBlank()) {
+                                registeredTeamPicker.launch(
+                                    Intent(context, RegisteredTeamsOfATournament::class.java)
+                                        .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                                )
+                            } else if (canEdit) {
+                                Toast.makeText(context, "Tournament is still loading", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onDeleteGroup = { if (canEdit) onDeleteGroup(activeGroup.name) },
+                        onRemoveTeam = { team ->
+                            if (canEdit) onTeamsChange(activeGroup.teams.filterNot { it.id == team.id })
+                        },
+                        canEdit = canEdit
+                    )
+                } else {
+                    NoGroupsPointsTab(canEdit)
+                }
             }
         }
         if (canEdit) CreateGroupButton {
@@ -1422,63 +1587,72 @@ private fun PointsTab(
             ) {
                 Text("Create new group", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
                 Text("Name the group for its teams and points table.", color = FinalMuted, fontSize = 13.sp)
-                Box(Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = draftGroupName,
-                            onValueChange = { if (it.length <= 30) draftGroupName = it },
-                            modifier = Modifier
-                                .weight(1f)
-                                .onFocusChanged { focusState ->
-                                    if (focusState.isFocused) keyboardController?.show()
-                                },
-                            label = { Text("Group name") },
-                            placeholder = { Text("Enter a name or select GROUP A") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedContainerColor = FinalBg,
-                                unfocusedContainerColor = FinalBg,
-                                disabledContainerColor = FinalBg,
-                                cursorColor = FinalAccent,
-                                focusedBorderColor = FinalAccent,
-                                unfocusedBorderColor = FinalMuted.copy(alpha = 0.75f),
-                                focusedLabelColor = FinalAccent,
-                                unfocusedLabelColor = FinalMuted,
-                                focusedPlaceholderColor = FinalMuted,
-                                unfocusedPlaceholderColor = FinalMuted
-                            )
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { showNameSuggestions = !showNameSuggestions },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(if (showNameSuggestions) "▴" else "▾", color = FinalMuted, fontSize = 18.sp)
+                OutlinedTextField(
+                    value = draftGroupName,
+                    onValueChange = { if (it.length <= 30) draftGroupName = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused) keyboardController?.show()
+                        },
+                    label = { Text("Group name") },
+                    placeholder = { Text("Type a custom name or choose below") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedContainerColor = FinalBg,
+                        unfocusedContainerColor = FinalBg,
+                        disabledContainerColor = FinalBg,
+                        cursorColor = FinalAccent,
+                        focusedBorderColor = FinalAccent,
+                        unfocusedBorderColor = FinalMuted.copy(alpha = 0.75f),
+                        focusedLabelColor = FinalAccent,
+                        unfocusedLabelColor = FinalMuted,
+                        focusedPlaceholderColor = FinalMuted,
+                        unfocusedPlaceholderColor = FinalMuted
+                    )
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(FinalBg)
+                        .border(1.dp, FinalDivider, RoundedCornerShape(10.dp))
+                        .clickable { showNameSuggestions = !showNameSuggestions }
+                        .padding(horizontal = 14.dp, vertical = 13.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Suggested group", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Choose a standard group name", color = FinalMuted, fontSize = 11.sp)
                         }
+                        Text(if (showNameSuggestions) "▴" else "▾", color = FinalAccent, fontSize = 18.sp)
                     }
-                    DropdownMenu(
-                        expanded = showNameSuggestions,
-                        onDismissRequest = { showNameSuggestions = false },
-                        modifier = Modifier.background(FinalPanel)
-                    ) {
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("GROUP A") },
-                            onClick = {
-                                draftGroupName = "GROUP A"
-                                showNameSuggestions = false
-                            },
-                            colors = androidx.compose.material3.MenuDefaults.itemColors(
-                                textColor = Color.White
-                            )
-                        )
+                    if (showNameSuggestions) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("GROUP A", "GROUP B", "GROUP C", "GROUP D", "GROUP E").forEach { name ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (draftGroupName.equals(name, ignoreCase = true)) FinalAccent.copy(alpha = .16f) else FinalPanel)
+                                        .clickable {
+                                            draftGroupName = name
+                                            showNameSuggestions = false
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 11.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(name, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                    if (draftGroupName.equals(name, ignoreCase = true)) {
+                                        Text("✓", color = FinalAccent, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1491,7 +1665,7 @@ private fun PointsTab(
                     Box(
                         Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(9.dp)).background(FinalAccent)
                             .clickable {
-                                onGroupNameChange(draftGroupName.trim().ifBlank { "GROUP A" })
+                                onCreateGroup(draftGroupName.trim().ifBlank { "GROUP A" })
                                 showCreateGroupSheet = false
                             },
                         contentAlignment = Alignment.Center
@@ -1594,8 +1768,10 @@ private fun GroupPointsTab(
     teams: List<PointsGroupTeam>,
     onAddTeam: () -> Unit,
     onDeleteGroup: () -> Unit,
+    onRemoveTeam: (PointsGroupTeam) -> Unit,
     canEdit: Boolean
 ) {
+    var contextTeam by remember { mutableStateOf<PointsGroupTeam?>(null) }
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 3.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1608,8 +1784,8 @@ private fun GroupPointsTab(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(groupName.uppercase(), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
-            if (canEdit) GroupAction("♙", "Add Team", onAddTeam)
-            if (canEdit) GroupAction("▣", "Remove", onDeleteGroup)
+            if (canEdit) GroupAction(R.drawable.whiteuser, "Add Team", onAddTeam)
+            if (canEdit) GroupAction(R.drawable.outline_delete_24, "Remove", onDeleteGroup)
         }
         if (teams.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -1629,7 +1805,11 @@ private fun GroupPointsTab(
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("♙+", color = FinalAccent, fontSize = 17.sp)
+                            Image(
+                                painter = painterResource(R.drawable.whiteuser),
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
                             Spacer(Modifier.width(9.dp))
                             Text("Add Team", color = FinalAccent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         }
@@ -1649,34 +1829,75 @@ private fun GroupPointsTab(
                 }
             }
             LazyColumn(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
-                    .background(FinalBg).border(1.dp, FinalDivider, RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
+                Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
+                    .background(FinalBg)
             ) {
                 items(teams, key = { it.id }) { team ->
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(30.dp).clip(CircleShape).background(FinalAccent.copy(alpha = .18f)), contentAlignment = Alignment.Center) {
-                                Text(team.name.take(1).uppercase(), color = FinalAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    Box {
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .combinedClickable(
+                                    onClick = {},
+                                    onLongClick = { if (canEdit) contextTeam = team }
+                                )
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(30.dp).clip(CircleShape).background(FinalAccent.copy(alpha = .18f)), contentAlignment = Alignment.Center) {
+                                    if (team.logoUrl.isNotBlank()) {
+                                        AsyncImage(model = team.logoUrl, contentDescription = "${team.name} team logo", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                                    } else {
+                                        Text(team.name.take(1).uppercase(), color = FinalAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                                    }
+                                }
+                                Text(team.name.uppercase(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 10.dp))
                             }
-                            Text(team.name.uppercase(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 10.dp))
+                            listOf("0", "0", "0", "0", "0.00").forEachIndexed { index, value ->
+                                Text(value, color = if (index == 3) Color.White else FinalMuted, fontSize = 11.sp, fontWeight = if (index == 3) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.width(if (index == 4) 42.dp else 30.dp), textAlign = TextAlign.Center)
+                            }
                         }
-                        listOf("0", "0", "0", "0", "0.00").forEachIndexed { index, value ->
-                            Text(value, color = if (index == 3) Color.White else FinalMuted, fontSize = 11.sp, fontWeight = if (index == 3) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.width(if (index == 4) 42.dp else 30.dp), textAlign = TextAlign.Center)
+                        DropdownMenu(
+                            expanded = canEdit && contextTeam?.id == team.id,
+                            onDismissRequest = { contextTeam = null },
+                            modifier = Modifier.background(FinalPanel)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Remove from group", color = Color.White) },
+                                onClick = {
+                                    contextTeam = null
+                                    onRemoveTeam(team)
+                                },
+                                colors = androidx.compose.material3.MenuDefaults.itemColors(textColor = Color.White)
+                            )
                         }
                     }
                 }
+            }
+            if (canEdit) {
+                Text(
+                    "Long press to delete team from the group",
+                    color = FinalMuted,
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+                )
             }
         }
     }
 }
 
 @Composable
-private fun GroupAction(icon: String, label: String, onClick: () -> Unit) {
+private fun GroupAction(iconRes: Int, label: String, onClick: () -> Unit) {
     Column(
         Modifier.clip(RoundedCornerShape(7.dp)).clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(icon, color = FinalAccent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Image(
+            painter = painterResource(iconRes),
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+        )
         Text(label, color = Color.White, fontSize = 7.sp, maxLines = 1)
     }
 }

@@ -25,9 +25,9 @@ interface MatchDao {
     @Query("DELETE FROM matches WHERE matchId = :matchId")
     suspend fun deleteMatch(matchId: String)
 
-    @Query("SELECT * FROM matches WHERE status != 'COMPLETED' ORDER BY updatedAtEpochMs DESC LIMIT 1")
+    @Query("SELECT * FROM matches WHERE status NOT IN ('COMPLETED', 'ABANDONED') ORDER BY updatedAtEpochMs DESC LIMIT 1")
     fun observeActiveMatch(): Flow<MatchEntity?>
 
-    @Query("SELECT * FROM matches WHERE status IN ('LIVE', 'IN_PROGRESS', 'INNINGS_BREAK') ORDER BY updatedAtEpochMs DESC LIMIT 1")
+    @Query("SELECT * FROM matches WHERE status IN ('LIVE', 'IN_PROGRESS', 'INNINGS_BREAK', 'PAUSED') ORDER BY updatedAtEpochMs DESC LIMIT 1")
     fun observeLatestScoringMatch(): Flow<MatchEntity?>
 }

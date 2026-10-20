@@ -16,6 +16,7 @@ import com.example.sportsxtreme.data.local.entity.MatchEntity
 import com.example.sportsxtreme.data.local.entity.PlayerEntity
 import com.example.sportsxtreme.data.local.entity.PlayingXIEntity
 import com.example.sportsxtreme.data.local.entity.TeamEntity
+import com.example.sportsxtreme.data.local.entity.MatchSummaryEntity
 import com.example.sportsxtreme.data.local.mapper.toDomain
 import com.example.sportsxtreme.data.local.mapper.toEntities
 import com.example.sportsxtreme.data.local.mapper.toEntity
@@ -41,6 +42,7 @@ import com.example.sportsxtreme.domain.model.TeamType
 import com.example.sportsxtreme.domain.repository.CreateMatchRequest
 import com.example.sportsxtreme.domain.repository.MatchRepository
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.functions.FirebaseFunctions
 import com.google.firebase.functions.FirebaseFunctionsException
 import kotlinx.coroutines.flow.Flow
@@ -439,7 +441,8 @@ class MatchRepositoryImpl @Inject constructor(
                 strikerId = strikerId,
                 nonStrikerId = nonStrikerId,
                 currentBowlerId = bowlerId,
-                target = first.score + 1,
+                target = (first.score + 1 - first.opponentPenaltyRuns).coerceAtLeast(1),
+                opponentPenaltyRuns = first.opponentPenaltyRuns,
                 status = InningsStatus.LIVE.name,
                 startedAtEpochMs = now
             ))
@@ -483,6 +486,148 @@ class MatchRepositoryImpl @Inject constructor(
         Resource.Success(loadMatch(matchId))
     }.getOrElse { Resource.Error(it.message ?: "Unable to finish match") }
 
+    override suspend fun abandonMatch(matchId: String): Resource<Match> = runCatching {
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            val match = requireMatch(matchId)
+            matchDao.updateMatch(match.copy(status = MatchStatus.ABANDONED.name, updatedAtEpochMs = now))
+        }
+        deliverySyncScheduler.enqueue()
+        val abandonedMatch = loadAndSyncMatch(matchId)
+        runCatching { updatePublishedLiveStatus(matchId, MatchStatus.ABANDONED.name) }
+        Resource.Success(abandonedMatch)
+    }.getOrElse { Resource.Error(it.message ?: "Unable to abandon match") }
+
+    override suspend fun updateInningsTarget(matchId: String, target: Int): Resource<MatchState> = runCatching {
+        require(target > 0) { "Target must be greater than zero" }
+        database.withTransaction {
+            val match = requireMatch(matchId)
+            val innings = requireNotNull(inningsDao.getLatestInnings(matchId)) { "Innings not found" }
+            require(innings.number == 2) { "Target can only be changed in the second innings" }
+            require(innings.status == InningsStatus.LIVE.name) { "The second innings is not live" }
+            val updatedAt = System.currentTimeMillis()
+            val updatedInnings = innings.copy(target = target)
+            inningsDao.updateInnings(updatedInnings)
+            database.matchSummaryDao().upsert(
+                MatchSummaryEntity(
+                    matchId = updatedInnings.matchId,
+                    inningsId = updatedInnings.inningsId,
+                    inningsNumber = updatedInnings.number,
+                    totalScore = updatedInnings.score,
+                    wickets = updatedInnings.wickets,
+                    legalBalls = updatedInnings.legalBalls,
+                    target = updatedInnings.target,
+                    strikerId = updatedInnings.strikerId,
+                    nonStrikerId = updatedInnings.nonStrikerId,
+                    bowlerId = updatedInnings.currentBowlerId,
+                    updatedAtEpochMs = updatedAt
+                )
+            )
+            matchDao.updateMatch(match.copy(updatedAtEpochMs = updatedAt))
+        }
+        runCatching { loadAndSyncMatch(matchId) }
+        Resource.Success(matchStateFor(matchId))
+    }.getOrElse { Resource.Error(it.message ?: "Unable to update target") }
+
+    override suspend fun applyPenaltyRuns(matchId: String, teamId: String, runs: Int): Resource<MatchState> = runCatching {
+        require(runs > 0) { "Penalty runs must be greater than zero" }
+        val updatedAt = System.currentTimeMillis()
+        database.withTransaction {
+            val match = requireMatch(matchId)
+            val innings = inningsDao.getInningsForMatch(matchId).sortedBy { it.number }
+            val first = innings.firstOrNull() ?: error("First innings was not found")
+            val second = innings.firstOrNull { it.number == 2 }
+            require(teamId == first.battingTeamId || teamId == first.bowlingTeamId) {
+                "Choose one of the teams playing this match"
+            }
+
+            val adjustedFirst: com.example.sportsxtreme.data.local.entity.InningsEntity = if (teamId == first.battingTeamId) {
+                first.copy(
+                    score = (first.score - runs).coerceAtLeast(0),
+                    penaltyScoreAdjustment = first.penaltyScoreAdjustment - runs
+                ).also { inningsDao.updateInnings(it) }
+            } else if (second == null) {
+                first.copy(opponentPenaltyRuns = first.opponentPenaltyRuns + runs)
+                    .also { inningsDao.updateInnings(it) }
+            } else {
+                first
+            }
+
+            second?.let { currentSecond ->
+                val updatedSecond = if (teamId == first.battingTeamId) {
+                    currentSecond.copy(
+                        target = (adjustedFirst.score + 1 - currentSecond.opponentPenaltyRuns).coerceAtLeast(1)
+                    )
+                } else {
+                    currentSecond.copy(
+                        score = currentSecond.score + runs,
+                        penaltyScoreAdjustment = currentSecond.penaltyScoreAdjustment + runs
+                    )
+                }
+                inningsDao.updateInnings(updatedSecond)
+                database.matchSummaryDao().upsert(
+                    MatchSummaryEntity(
+                        matchId = updatedSecond.matchId,
+                        inningsId = updatedSecond.inningsId,
+                        inningsNumber = updatedSecond.number,
+                        totalScore = updatedSecond.score,
+                        wickets = updatedSecond.wickets,
+                        legalBalls = updatedSecond.legalBalls,
+                        target = updatedSecond.target,
+                        strikerId = updatedSecond.strikerId,
+                        nonStrikerId = updatedSecond.nonStrikerId,
+                        bowlerId = updatedSecond.currentBowlerId,
+                        updatedAtEpochMs = updatedAt
+                    )
+                )
+            }
+            database.matchSummaryDao().upsert(
+                MatchSummaryEntity(
+                    matchId = adjustedFirst.matchId,
+                    inningsId = adjustedFirst.inningsId,
+                    inningsNumber = adjustedFirst.number,
+                    totalScore = adjustedFirst.score,
+                    wickets = adjustedFirst.wickets,
+                    legalBalls = adjustedFirst.legalBalls,
+                    target = adjustedFirst.target,
+                    strikerId = adjustedFirst.strikerId,
+                    nonStrikerId = adjustedFirst.nonStrikerId,
+                    bowlerId = adjustedFirst.currentBowlerId,
+                    updatedAtEpochMs = updatedAt
+                )
+            )
+
+            val latest = inningsDao.getLatestInnings(matchId)
+            val latestScore = latest?.score ?: 0
+            val wicketLimit = playerDao.getPlayingXI(matchId, latest?.battingTeamId.orEmpty()).size.let {
+                if (it > 1) it - 1 else 10
+            }
+            val nowComplete = latest != null && latest.status == InningsStatus.LIVE.name && (
+                (match.overs?.let { latest.legalBalls >= it * 6 } == true) ||
+                    latest.wickets >= wicketLimit ||
+                    (latest.target?.let { latestScore >= it } == true)
+                )
+            if (nowComplete && latest != null) {
+                inningsDao.updateInnings(latest.copy(status = InningsStatus.COMPLETED.name, completedAtEpochMs = updatedAt))
+                matchDao.updateMatch(match.copy(status = MatchStatus.INNINGS_BREAK.name, updatedAtEpochMs = updatedAt))
+            } else {
+                matchDao.updateMatch(match.copy(updatedAtEpochMs = updatedAt))
+            }
+        }
+        runCatching {
+            val synced = loadAndSyncMatch(matchId)
+            synced.innings.forEach { innings ->
+                runCatching { syncPenaltyScorecardSummary(matchId, innings, synced.updatedAtEpochMs) }
+            }
+            synced.innings.lastOrNull()?.let {
+                runCatching {
+                    updatePublishedLiveScore(matchId, it.score, it.target, it.legalBalls, it.wickets, synced.status.name)
+                }
+            }
+        }
+        Resource.Success(matchStateFor(matchId))
+    }.getOrElse { Resource.Error(it.message ?: "Unable to apply penalty runs") }
+
     override fun observeMatch(matchId: String): Flow<Resource<Match>> = combine(matchDao.observeMatch(matchId), firestoreMatchClaimsDataSource.observe(matchId)) { match, claims ->
         if (match == null) Resource.Error("Match not found")
         else runCatching {
@@ -514,29 +659,46 @@ class MatchRepositoryImpl @Inject constructor(
         val pausedAt = System.currentTimeMillis()
         val match = requireMatch(matchId)
         require(match.status in setOf(MatchStatus.LIVE.name, MatchStatus.IN_PROGRESS.name, MatchStatus.INNINGS_BREAK.name))
-        matchDao.updateMatch(match.copy(updatedAtEpochMs = pausedAt))
-        runCatching { loadAndSyncMatch(matchId) }
+        matchDao.updateMatch(match.copy(status = MatchStatus.PAUSED.name, updatedAtEpochMs = pausedAt))
+        runCatching {
+            loadAndSyncMatch(matchId)
+            updatePublishedLiveStatus(matchId, MatchStatus.PAUSED.name)
+        }
         pausedAt
     }.getOrNull()
 
     override suspend fun resumeScoring(matchId: String): Boolean = runCatching {
         val match = requireMatch(matchId)
-        require(match.status in setOf(MatchStatus.LIVE.name, MatchStatus.IN_PROGRESS.name, MatchStatus.INNINGS_BREAK.name))
-        matchDao.updateMatch(match.copy(updatedAtEpochMs = System.currentTimeMillis()))
-        runCatching { loadAndSyncMatch(matchId) }
+        // Matches paused by older app versions retained their scoring status;
+        // Quick Scoring still lists them, so accept those legacy states too.
+        require(match.status in setOf(
+            MatchStatus.PAUSED.name,
+            MatchStatus.LIVE.name,
+            MatchStatus.IN_PROGRESS.name,
+            MatchStatus.INNINGS_BREAK.name
+        ))
+        val latestInnings = inningsDao.getLatestInnings(matchId)
+        val restoredStatus = if (latestInnings?.status == InningsStatus.COMPLETED.name) {
+            MatchStatus.INNINGS_BREAK
+        } else MatchStatus.LIVE
+        matchDao.updateMatch(match.copy(status = restoredStatus.name, updatedAtEpochMs = System.currentTimeMillis()))
+        runCatching {
+            loadAndSyncMatch(matchId)
+            updatePublishedLiveStatus(matchId, restoredStatus.name)
+        }
         true
     }.getOrDefault(false)
 
     override suspend fun expirePausedScoringMatch(matchId: String, pausedAtEpochMs: Long): Boolean = runCatching {
         val match = requireMatch(matchId)
         if (match.updatedAtEpochMs != pausedAtEpochMs ||
-            match.status !in setOf(MatchStatus.LIVE.name, MatchStatus.IN_PROGRESS.name, MatchStatus.INNINGS_BREAK.name)
+            match.status != MatchStatus.PAUSED.name
         ) return@runCatching false
         val abandonedAt = System.currentTimeMillis()
         matchDao.updateMatch(match.copy(status = MatchStatus.ABANDONED.name, updatedAtEpochMs = abandonedAt))
         runCatching {
-            val expiredMatch = loadAndSyncMatch(matchId)
-            firestoreScoringDataSource.syncLiveScore(matchId, expiredMatch.toInitialLiveScore())
+            loadAndSyncMatch(matchId)
+            updatePublishedLiveStatus(matchId, MatchStatus.ABANDONED.name)
         }
         true
     }.getOrDefault(false)
@@ -643,6 +805,67 @@ class MatchRepositoryImpl @Inject constructor(
         val match = loadMatch(matchId)
         firestoreMatchSyncDataSource.sync(match).getOrThrow()
         return match
+    }
+
+    private suspend fun updatePublishedLiveStatus(matchId: String, status: String) {
+        firestore.collection("matches").document(matchId)
+            .update("liveScore.status", status)
+            .await()
+    }
+
+    private suspend fun updatePublishedLiveScore(
+        matchId: String,
+        score: Int,
+        target: Int?,
+        legalBalls: Int,
+        wickets: Int,
+        status: String
+    ) {
+        val match = requireMatch(matchId)
+        val remainingBalls = ((match.overs ?: 0) * 6 - legalBalls).coerceAtLeast(0)
+        val payload = mutableMapOf<String, Any?>(
+            "liveScore.score" to score,
+            "liveScore.target" to target,
+            "liveScore.overs" to "${legalBalls / 6}.${legalBalls % 6}",
+            "liveScore.currentRunRate" to if (legalBalls == 0) 0.0 else score * 6.0 / legalBalls,
+            "liveScore.requiredRunRate" to if (target == null || remainingBalls == 0) null else
+                ((target - score).coerceAtLeast(0) * 6.0 / remainingBalls),
+            "liveScore.wickets" to wickets,
+            "liveScore.status" to status,
+            "liveScore.updatedAtEpochMs" to match.updatedAtEpochMs
+        )
+        firestore.collection("matches").document(matchId).update(payload).await()
+    }
+
+    private suspend fun syncPenaltyScorecardSummary(
+        matchId: String,
+        innings: com.example.sportsxtreme.domain.model.Innings,
+        updatedAtEpochMs: Long
+    ) {
+        val legalBalls = innings.legalBalls
+        val remainingBalls = ((requireMatch(matchId).overs ?: 0) * 6 - legalBalls).coerceAtLeast(0)
+        firestore.collection("matches").document(matchId)
+            .collection("scorecard").document("summary").collection("entries")
+            .document(innings.id)
+            .set(
+                mapOf(
+                    "inningsId" to innings.id,
+                    "innings" to innings.number,
+                    "totalScore" to innings.score,
+                    "wickets" to innings.wickets,
+                    "legalBalls" to legalBalls,
+                    "overs" to "${legalBalls / 6}.${legalBalls % 6}",
+                    "currentRunRate" to if (legalBalls == 0) 0.0 else innings.score * 6.0 / legalBalls,
+                    "requiredRunRate" to if (innings.target == null || remainingBalls == 0) null else
+                        ((innings.target - innings.score).coerceAtLeast(0) * 6.0 / remainingBalls),
+                    "target" to innings.target,
+                    "strikerId" to innings.strikerId,
+                    "nonStrikerId" to innings.nonStrikerId,
+                    "bowlerId" to innings.currentBowlerId,
+                    "updatedAtEpochMs" to updatedAtEpochMs
+                ),
+                SetOptions.merge()
+            ).await()
     }
 
     private suspend fun Match.toInitialLiveScore(): LiveScorePayload {

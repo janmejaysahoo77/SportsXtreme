@@ -138,6 +138,11 @@ class ScorecardActivity : ComponentActivity() {
                 match = match.value,
                 onBack = { finish() },
                 onShare = { shareScorecard(match.value) },
+                onOpenTournament = { tournamentId ->
+                    startActivity(Intent(this, RegisterTournamentFinalPageActivity::class.java).apply {
+                        putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                    })
+                },
                 onOpenPlayer = { playerId, displayName ->
                     val normalizedName = displayName.normalizePlayerProfileName()
                     val userId = resolvablePlayerIds[playerId]
@@ -412,6 +417,8 @@ class ScorecardActivity : ComponentActivity() {
         val isFriendlyMatch = getString("matchType")?.equals("FRIENDLY", ignoreCase = true) == true
 
         return previous.copy(
+            tournamentId = getString("tournamentId").orEmpty(),
+            status = getString("status")?.uppercase(Locale.US) ?: previous.status,
             league = if (isFriendlyMatch) getString("title")?.takeIf(String::isNotBlank) ?: "Friendly Match"
                 else getString("tournamentName")?.takeIf(String::isNotBlank)
                     ?: (liveScore?.get("tournamentName") as? String)?.takeIf(String::isNotBlank)
@@ -492,6 +499,8 @@ class ScorecardActivity : ComponentActivity() {
     private fun readMatch(): MatchDetail {
         return MatchDetail(
             league = intent.getStringExtra(EXTRA_LEAGUE)?.takeIf(String::isNotBlank) ?: "MATCH SCORECARD",
+            tournamentId = intent.getStringExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID).orEmpty(),
+            status = "LIVE",
             matchId = resolveMatchId(intent),
             round = intent.getStringExtra(EXTRA_ROUND)?.takeIf(String::isNotBlank).orEmpty(),
             leftName = intent.getStringExtra(EXTRA_LEFT_NAME)?.takeIf(String::isNotBlank) ?: "TEAM A",
@@ -528,6 +537,8 @@ class ScorecardActivity : ComponentActivity() {
 
 private data class MatchDetail(
     val league: String,
+    val tournamentId: String,
+    val status: String,
     val matchId: String,
     val round: String,
     val leftName: String,
@@ -863,7 +874,13 @@ private enum class DetailIcon { BACK, SEARCH, BELL, MESSAGE, SHIELD, BOLT, DOTS 
 private enum class MetricIcon { SPEED, TARGET, TREND, TROPHY }
 
 @Composable
-private fun ScorecardScreen(match: MatchDetail, onBack: () -> Unit, onShare: () -> Unit, onOpenPlayer: (String, String) -> Unit) {
+private fun ScorecardScreen(
+    match: MatchDetail,
+    onBack: () -> Unit,
+    onShare: () -> Unit,
+    onOpenTournament: (String) -> Unit,
+    onOpenPlayer: (String, String) -> Unit
+) {
     var selectedTab by remember { mutableIntStateOf(1) }
     val tabs = listOf("INFO", "LIVE", "SCORECARD", "SUMMARY", "COMMENTARY")
 
@@ -900,7 +917,7 @@ private fun ScorecardScreen(match: MatchDetail, onBack: () -> Unit, onShare: () 
                     .padding(horizontal = 10.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                MatchDetailsStrip(match)
+                MatchDetailsStrip(match, onOpenTournament)
                 MatchHero(match)
                 ScorecardTabs(
                     tabs = tabs,
@@ -1077,7 +1094,7 @@ private fun TabButton(label: String, selected: Boolean, modifier: Modifier, onCl
 }
 
 @Composable
-private fun MatchDetailsStrip(match: MatchDetail) {
+private fun MatchDetailsStrip(match: MatchDetail, onOpenTournament: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1103,12 +1120,39 @@ private fun MatchDetailsStrip(match: MatchDetail) {
         }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            DetailMeta("League", match.league, Modifier.weight(1f))
+            LeagueTournamentLink(match, Modifier, onOpenTournament)
             if (match.venue.isNotBlank()) {
                 HeaderDot()
                 DetailMeta("Venue", match.venue, Modifier.weight(1.22f))
             }
         }
+    }
+}
+
+@Composable
+private fun LeagueTournamentLink(
+    match: MatchDetail,
+    modifier: Modifier,
+    onOpenTournament: (String) -> Unit
+) {
+    val isTournamentMatch = match.tournamentId.isNotBlank()
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (isTournamentMatch) Accent.copy(alpha = 0.12f) else Color.Transparent)
+            .clickable(enabled = isTournamentMatch) { onOpenTournament(match.tournamentId) }
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("League: ", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+        Text(
+            match.league,
+            color = if (isTournamentMatch) Accent else Color.White.copy(alpha = 0.85f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -1169,7 +1213,13 @@ private fun MatchHero(match: MatchDetail) {
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            LiveBadge()
+            when (match.status) {
+                "LIVE", "IN_PROGRESS" -> LiveBadge()
+                "PAUSED" -> StatusPill("MATCH PAUSED", Color(0xFFFFC04D))
+                "ABANDONED" -> StatusPill("MATCH ABANDONED", Color(0xFFFF5252))
+                "COMPLETED" -> StatusPill("COMPLETED", Color(0xFFB8C6C1))
+                else -> StatusPill(match.status.replace('_', ' '), Color(0xFFB8C6C1))
+            }
             Spacer(Modifier.weight(1f))
             Text(
                 text = match.league,
