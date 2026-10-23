@@ -55,6 +55,8 @@ import androidx.lifecycle.lifecycleScope
 import coil3.compose.AsyncImage
 import com.example.sportsxtreme.data.remote.cloudinary.CloudinaryTournamentImageUploader
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.auth.MainActivity
+import com.example.sportsxtreme.presentation.components.GuestAccessCard
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.AndroidEntryPoint
@@ -67,6 +69,10 @@ class CreateTeamActivity : ComponentActivity() {
     @Inject lateinit var firebaseAuth: FirebaseAuth
     @Inject lateinit var firestore: FirebaseFirestore
     private var isSavingTeam by mutableStateOf(false)
+
+    private fun showGuestSignup() {
+        startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_FORCE_SIGNUP, true))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -153,6 +159,12 @@ class CreateTeamActivity : ComponentActivity() {
 
     @Composable
     private fun CreateTeamScreen(onBack: () -> Unit, isSaving: Boolean, onContinue: (String, String, String, String, Uri?) -> Unit) {
+        var isGuest by remember { mutableStateOf(firebaseAuth.currentUser == null) }
+        DisposableEffect(Unit) {
+            val listener = FirebaseAuth.AuthStateListener { auth -> isGuest = auth.currentUser == null }
+            firebaseAuth.addAuthStateListener(listener)
+            onDispose { firebaseAuth.removeAuthStateListener(listener) }
+        }
         var teamName by rememberSaveable { mutableStateOf("") }; var city by rememberSaveable { mutableStateOf("") }
         var mobile by rememberSaveable { mutableStateOf("") }; var captain by rememberSaveable { mutableStateOf("") }
         var showRequiredErrors by rememberSaveable { mutableStateOf(false) }
@@ -188,19 +200,31 @@ class CreateTeamActivity : ComponentActivity() {
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                 Header(onBack)
                 Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (isGuest) GuestAccessCard(
+                        title = "Create or join a team",
+                        detail = "Login or sign up to create a team or join with an invitation.",
+                        onSignup = ::showGuestSignup,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 14.dp)
+                    )
                     ScreenTitle(); LogoPicker(selectedLogo, isSaving) {
-                        logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        if (isGuest) Toast.makeText(this@CreateTeamActivity, "Login or sign up to add a team logo", Toast.LENGTH_SHORT).show()
+                        else logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     }
                     Text("Team Logo", color = textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
                     Text("Upload your team logo", color = textSecondary, fontSize = 11.sp); Spacer(Modifier.height(14.dp))
-                    TeamTextField("TEAM NAME *", "Enter your team name", teamName, { if (it.length <= 30) teamName = it }, R.drawable.baseline_check_circle_24, counter = "${teamName.length}/30", error = if (showRequiredErrors && teamName.isBlank()) "Team name is required" else null)
-                    TeamTextField("CITY / TOWN *", "Enter city / town", city, { city = it }, R.drawable.baseline_edit_location_24, error = if (showRequiredErrors && city.isBlank()) "City / town is required" else null)
-                    TeamTextField("TEAM CAPTAIN / COORDINATOR *", "+91   Enter mobile number", mobile, { mobile = it }, R.drawable.baseline_local_phone_24, KeyboardType.Phone, error = if (showRequiredErrors && mobile.isBlank()) "Captain / coordinator number is required" else null)
-                    TeamTextField("TEAM CAPTAIN NAME *", "Enter captain name", captain, { captain = it }, R.drawable.baseline_person_outline_24, error = if (showRequiredErrors && captain.isBlank()) "Captain name is required" else null)
+                    val guestInput = { Toast.makeText(this@CreateTeamActivity, "Login or sign up to enter team details", Toast.LENGTH_SHORT).show() }
+                    TeamTextField("TEAM NAME *", "Enter your team name", teamName, { if (it.length <= 30) teamName = it }, R.drawable.baseline_check_circle_24, counter = "${teamName.length}/30", error = if (showRequiredErrors && teamName.isBlank()) "Team name is required" else null, isGuest = isGuest, onGuestTap = guestInput)
+                    TeamTextField("CITY / TOWN *", "Enter city / town", city, { city = it }, R.drawable.baseline_edit_location_24, error = if (showRequiredErrors && city.isBlank()) "City / town is required" else null, isGuest = isGuest, onGuestTap = guestInput)
+                    TeamTextField("TEAM CAPTAIN / COORDINATOR *", "+91   Enter mobile number", mobile, { if (it.length <= 15) mobile = it }, R.drawable.baseline_local_phone_24, KeyboardType.Phone, error = if (showRequiredErrors && mobile.isBlank()) "Captain / coordinator number is required" else null, isGuest = isGuest, onGuestTap = guestInput)
+                    TeamTextField("TEAM CAPTAIN NAME *", "Enter captain name", captain, { captain = it }, R.drawable.baseline_person_outline_24, error = if (showRequiredErrors && captain.isBlank()) "Captain name is required" else null, isGuest = isGuest, onGuestTap = guestInput)
                     CreatorRoleCard()
                     Spacer(Modifier.height(100.dp))
                 }
-                CreateButton(enabled = !isSaving && teamName.isNotBlank() && city.isNotBlank() && captain.isNotBlank() && mobile.isNotBlank(), isSaving = isSaving) {
+                CreateButton(enabled = !isSaving && (isGuest || (teamName.isNotBlank() && city.isNotBlank() && captain.isNotBlank() && mobile.isNotBlank())), isSaving = isSaving) {
+                    if (isGuest) {
+                        Toast.makeText(this@CreateTeamActivity, "Login or sign up to create a team", Toast.LENGTH_SHORT).show()
+                        return@CreateButton
+                    }
                     if (teamName.isBlank() || city.isBlank() || captain.isBlank() || mobile.isBlank()) {
                         showRequiredErrors = true
                     } else {
@@ -240,7 +264,7 @@ class CreateTeamActivity : ComponentActivity() {
         }
     }
     @Composable
-    private fun TeamTextField(label: String, placeholder: String, value: String, onValueChange: (String) -> Unit, icon: Int, keyboardType: KeyboardType = KeyboardType.Text, counter: String? = null, error: String? = null) {
+    private fun TeamTextField(label: String, placeholder: String, value: String, onValueChange: (String) -> Unit, icon: Int, keyboardType: KeyboardType = KeyboardType.Text, counter: String? = null, error: String? = null, isGuest: Boolean = false, onGuestTap: () -> Unit = {}) {
         val focusManager = LocalFocusManager.current
         val focusRequester = remember { FocusRequester() }
         val interactionSource = remember { MutableInteractionSource() }
@@ -253,15 +277,17 @@ class CreateTeamActivity : ComponentActivity() {
             Row(
                 Modifier.fillMaxWidth().height(64.dp).align(Alignment.BottomCenter)
                     .background(surface, RoundedCornerShape(10.dp)).border(1.dp, fieldBorder, RoundedCornerShape(10.dp))
-                    .clickable { focusRequester.requestFocus() }.padding(horizontal = 13.dp, vertical = 8.dp),
+                    .clickable { if (isGuest) onGuestTap() else focusRequester.requestFocus() }.padding(horizontal = 13.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(painterResource(icon), null, tint = accent, modifier = Modifier.size(20.dp))
                 Box(Modifier.padding(start = 12.dp).weight(1f).height(46.dp)) {
                 BasicTextField(
                     value = value,
-                    onValueChange = onValueChange,
-                    modifier = Modifier.fillMaxWidth().align(Alignment.CenterStart).focusRequester(focusRequester),
+                    onValueChange = { if (isGuest) onGuestTap() else onValueChange(it) },
+                    modifier = Modifier.fillMaxWidth().align(Alignment.CenterStart).focusRequester(focusRequester)
+                        .clickable { if (isGuest) onGuestTap() else focusRequester.requestFocus() },
+                    readOnly = isGuest,
                     singleLine = true,
                     textStyle = TextStyle(color = textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Normal),
                     cursorBrush = SolidColor(accent),

@@ -38,6 +38,8 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.Editable
+import android.text.TextWatcher
 import android.text.style.ForegroundColorSpan
 import android.util.AttributeSet
 import android.util.Log
@@ -133,6 +135,11 @@ class HomeScreenView @JvmOverloads constructor(
     private var drawerProfilePhotoView: ImageView? = null
     private var drawerProfilePhotoListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var drawerProfilePhotoUserId: String? = null
+    private var drawerProfileCompletionText: TextView? = null
+    private var drawerProfileCompletionFill: View? = null
+    private var locationLabelView: TextView? = null
+    private var homeMatchSearchQuery = ""
+    private var liveMatchesSectionView: LiveMatchesSectionView? = null
 
     init {
         clipChildren = false
@@ -169,6 +176,53 @@ class HomeScreenView @JvmOverloads constructor(
         drawerLayout.openDrawer(GravityCompat.START)
     }
 
+    private fun updateHomeMatchSearch(query: String) {
+        homeMatchSearchQuery = query
+        liveMatchesSectionView?.setSearchQuery(query)
+    }
+
+    private fun requireSignIn(context: Context, detail: String, action: () -> Unit) {
+        if (FirebaseAuth.getInstance().currentUser != null) {
+            action()
+            return
+        }
+        val content = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(12), dp(24), dp(8))
+            addView(ImageView(context).apply {
+                setImageResource(R.drawable.whiteuser)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }, LinearLayout.LayoutParams(dp(76), dp(76)))
+            addView(TextView(context).apply {
+                text = detail
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, dp(12), 0, 0)
+            })
+        }
+        val dialog = AlertDialog.Builder(context)
+            .setTitle("Account required")
+            .setView(content)
+            .setPositiveButton("Sign up", null)
+            .setNeutralButton("Login", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+                dialog.dismiss()
+                (context as? MainActivity)?.showSignupScreen()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
+                dialog.dismiss()
+                (context as? MainActivity)?.showLoginScreen()
+            }
+        }
+        dialog.show()
+    }
+
     private fun refreshDrawerProfilePhoto() {
         val user = FirebaseAuth.getInstance().currentUser ?: return
         val photoView = drawerProfilePhotoView ?: return
@@ -182,10 +236,12 @@ class HomeScreenView @JvmOverloads constructor(
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     showDrawerProfilePhoto(photoView, authPhotoUrl)
+                    updateDrawerProfileCompletion(null, user)
                     return@addSnapshotListener
                 }
                 if (snapshot?.exists() == true) {
                     val firestoreUrl = snapshot.getString("profilePhotoUrl")
+                    updateDrawerProfileCompletion(snapshot.data, user)
                     showDrawerProfilePhoto(
                         photoView,
                         firestoreUrl?.takeIf { it.isNotBlank() } ?: authPhotoUrl
@@ -198,15 +254,50 @@ class HomeScreenView @JvmOverloads constructor(
                         .limit(1)
                         .get()
                         .addOnSuccessListener { profiles ->
-                            val legacyUrl = profiles.documents.firstOrNull()
-                                ?.getString("profilePhotoUrl")
+                            val legacyProfile = profiles.documents.firstOrNull()
+                            val legacyUrl = legacyProfile?.getString("profilePhotoUrl")
+                            updateDrawerProfileCompletion(legacyProfile?.data, user)
                             showDrawerProfilePhoto(photoView, legacyUrl?.takeIf { it.isNotBlank() } ?: authPhotoUrl)
                         }
                         .addOnFailureListener {
+                            updateDrawerProfileCompletion(null, user)
                             showDrawerProfilePhoto(photoView, authPhotoUrl)
                         }
                 }
             }
+    }
+
+    private fun updateDrawerProfileCompletion(profile: Map<String, Any?>?, user: com.google.firebase.auth.FirebaseUser) {
+        val values = listOf(
+            !((profile?.get("name") as? String).orEmpty().ifBlank { user.displayName.orEmpty() }).isBlank(),
+            !((profile?.get("profilePhotoUrl") as? String).orEmpty().ifBlank { user.photoUrl?.toString().orEmpty() }).isBlank(),
+            !((profile?.get("phoneNumber") as? String).orEmpty().ifBlank { user.phoneNumber.orEmpty() }).isBlank(),
+            !((profile?.get("email") as? String).orEmpty().ifBlank { user.email.orEmpty() }).isBlank(),
+            !(profile?.get("location") as? String).orEmpty().isBlank(),
+            !(profile?.get("gender") as? String).orEmpty().isBlank(),
+            !(profile?.get("role") as? String).orEmpty().isBlank(),
+            !(profile?.get("battingStyle") as? String).orEmpty().isBlank()
+        ).toMutableList()
+        val role = (profile?.get("role") as? String).orEmpty()
+        if (role.contains("bowl", ignoreCase = true) || role.contains("all round", ignoreCase = true)) {
+            values += !(profile?.get("bowlingStyle") as? String).orEmpty().isBlank()
+        }
+        val completion = (values.count { it } * 100 / values.size).coerceIn(0, 100)
+        val color = when {
+            completion < 30 -> Color.rgb(255, 77, 79)
+            completion < 70 -> Color.rgb(255, 194, 71)
+            else -> Color.rgb(66, 217, 121)
+        }
+        post {
+            drawerProfileCompletionText?.apply {
+                text = "Profile completed • $completion%"
+                setTextColor(color)
+            }
+            drawerProfileCompletionFill?.apply {
+                (background as? GradientDrawable)?.setColor(color)
+                scaleX = completion / 100f
+            }
+        }
     }
 
     private fun showDrawerProfilePhoto(photoView: ImageView, storedUrl: String?) {
@@ -258,6 +349,10 @@ class HomeScreenView @JvmOverloads constructor(
         refreshDrawerProfilePhoto()
     }
 
+    fun updateLocationLabel(label: String) {
+        post { locationLabelView?.text = label }
+    }
+
     private fun createDrawerContent(context: Context): View {
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -269,6 +364,7 @@ class HomeScreenView @JvmOverloads constructor(
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(20), dp(40), dp(20), dp(20))
+                val firebaseUser = FirebaseAuth.getInstance().currentUser
                 
                 // Profile row
                 addView(LinearLayout(context).apply {
@@ -292,6 +388,7 @@ class HomeScreenView @JvmOverloads constructor(
                         
                         drawerProfilePhotoView = ImageView(context).apply {
                             scaleType = ImageView.ScaleType.CENTER_CROP
+                            if (firebaseUser == null) setImageResource(R.drawable.whiteuser)
                             outlineProvider = object : android.view.ViewOutlineProvider() {
                                 override fun getOutline(view: View, outline: android.graphics.Outline) {
                                     outline.setOval(0, 0, view.width, view.height)
@@ -302,6 +399,31 @@ class HomeScreenView @JvmOverloads constructor(
                         addView(drawerProfilePhotoView, FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER))
                         refreshDrawerProfilePhoto()
                     }, LinearLayout.LayoutParams(dp(50), dp(50)))
+
+                    if (firebaseUser == null) {
+                        addView(
+                            TextView(context).apply {
+                                text = "Login / Sign up"
+                                gravity = Gravity.CENTER
+                                setTextColor(Color.rgb(20, 28, 0))
+                                textSize = 12f
+                                typeface = Typeface.DEFAULT_BOLD
+                                background = GradientDrawable().apply {
+                                    cornerRadius = dp(8).toFloat()
+                                    setColor(primary)
+                                }
+                                setPadding(dp(10), 0, dp(10), 0)
+                                setOnClickListener {
+                                    drawerLayout.closeDrawer(GravityCompat.START)
+                                    (context as? MainActivity)?.showSignupScreen()
+                                        ?: Toast.makeText(context, "Open sign up to create an account", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, dp(36)).apply {
+                                leftMargin = dp(12)
+                            }
+                        )
+                    }
 
                     addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
                     
@@ -315,9 +437,8 @@ class HomeScreenView @JvmOverloads constructor(
                 })
                 
                 // Name (dynamic from Firebase Auth)
-                val firebaseUser = FirebaseAuth.getInstance().currentUser
                 addView(TextView(context).apply {
-                    text = firebaseUser?.displayName?.ifBlank { "User" } ?: "User"
+                    text = firebaseUser?.displayName?.ifBlank { "User" } ?: "Guest"
                     setTextColor(Color.WHITE)
                     textSize = 20f
                     typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
@@ -327,43 +448,46 @@ class HomeScreenView @JvmOverloads constructor(
                 })
 
                 // UID (dynamic from Firebase Auth)
-                addView(TextView(context).apply {
-                    text = firebaseUser?.uid?.takeLast(7)?.ifBlank { "" } ?: ""
-                    setTextColor(Color.GRAY)
-                    textSize = 12f
-                    includeFontPadding = false
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(4)
-                })
+                if (firebaseUser != null) {
+                    addView(TextView(context).apply {
+                        text = firebaseUser.uid.takeLast(7)
+                        setTextColor(Color.GRAY)
+                        textSize = 12f
+                        includeFontPadding = false
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        topMargin = dp(4)
+                    })
 
-                addView(TextView(context).apply {
-                    text = "Profile completed • 58%"
-                    setTextColor(primary)
-                    textSize = 11f
-                    typeface = Typeface.DEFAULT_BOLD
-                    includeFontPadding = false
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(16)
-                })
-
-                // Progress Bar
-                addView(FrameLayout(context).apply {
-                    background = GradientDrawable().apply {
-                        cornerRadius = dp(2).toFloat()
-                        setColor(Color.rgb(60, 65, 70))
+                    drawerProfileCompletionText = TextView(context).apply {
+                        text = "Profile completed • 0%"
+                        setTextColor(Color.rgb(255, 77, 79))
+                        textSize = 11f
+                        typeface = Typeface.DEFAULT_BOLD
+                        includeFontPadding = false
                     }
-                    addView(View(context).apply {
+                    addView(drawerProfileCompletionText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        topMargin = dp(16)
+                    })
+
+                    addView(FrameLayout(context).apply {
                         background = GradientDrawable().apply {
                             cornerRadius = dp(2).toFloat()
-                            setColor(primary)
+                            setColor(Color.rgb(60, 65, 70))
                         }
-                    }, FrameLayout.LayoutParams(0, dp(4)).apply {
-                        width = dp(150) // Simulating 58%
+                        drawerProfileCompletionFill = View(context).apply {
+                            background = GradientDrawable().apply {
+                                cornerRadius = dp(2).toFloat()
+                                setColor(Color.rgb(255, 77, 79))
+                            }
+                            pivotX = 0f
+                            scaleX = 0f
+                        }
+                        addView(drawerProfileCompletionFill, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, dp(4)))
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(4)).apply {
+                        topMargin = dp(10)
                     })
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(4)).apply {
-                    topMargin = dp(10)
-                })
-                
+                }
+
                 // Divider
                 addView(View(context).apply {
                     setBackgroundColor(Color.argb(50, 255, 255, 255))
@@ -483,10 +607,16 @@ class HomeScreenView @JvmOverloads constructor(
                 setOnClickListener {
                     drawerLayout.closeDrawer(GravityCompat.START)
                     when (action) {
-                        DrawerAction.GO_TO_CLUB -> context.startActivity(Intent(context, ClubLandingActivity::class.java))
-                        DrawerAction.ADD_TOURNAMENT -> context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
-                        DrawerAction.START_MATCH -> context.startActivity(Intent(context, StartMatchActivity::class.java))
-                        DrawerAction.CREATE_TEAM -> context.startActivity(Intent(context, CreateTeamActivity::class.java))
+                        DrawerAction.GO_TO_CLUB -> Toast.makeText(context, "Coming soon", Toast.LENGTH_SHORT).show()
+                        DrawerAction.ADD_TOURNAMENT -> requireSignIn(context, "Login or sign up to register a tournament or series") {
+                            context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
+                        }
+                        DrawerAction.START_MATCH -> requireSignIn(context, "Login or sign up to start a match") {
+                            context.startActivity(Intent(context, StartMatchActivity::class.java))
+                        }
+                        DrawerAction.CREATE_TEAM -> {
+                            context.startActivity(Intent(context, CreateTeamActivity::class.java))
+                        }
                         DrawerAction.MY_CRICKET -> showTab(1)
                     }
                 }
@@ -708,7 +838,11 @@ class HomeScreenView @JvmOverloads constructor(
             setContent {
                 MyCricketScreen(
                     onMenuClick = { openDrawer() },
-                    onStartMatch = { context.startActivity(Intent(context, StartMatchActivity::class.java)) },
+                    onStartMatch = {
+                        requireSignIn(context, "Login or sign up to see matches and start a match") {
+                            context.startActivity(Intent(context, StartMatchActivity::class.java))
+                        }
+                    },
                     initialTab = if (startInMyCricketTeams) 2 else 0,
                     hostTournamentsViewModel = hostTournamentsViewModel
                 )
@@ -1006,7 +1140,9 @@ class HomeScreenView @JvmOverloads constructor(
                                 features = listOf("TEAM PORTAL", "FIXTURES AI", "LIVE TABLES", "ADVANCED STATS"),
                                 buttonLabel = "REGISTER TOURNAMENT / SERIES",
                                 onClick = {
-                                    context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
+                                    requireSignIn(context, "Login or sign up to register a tournament or series") {
+                                        context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
+                                    }
                                 }
                             ), blockParams(top = 18))
                             addView(hostArenaCard(
@@ -1017,7 +1153,9 @@ class HomeScreenView @JvmOverloads constructor(
                                 features = listOf("LIVE SCORING", "MVPS TRACK", "AUTO-SYNC", "SHARE CARDS"),
                                 buttonLabel = "START A MATCH",
                                 onClick = {
-                                    context.startActivity(Intent(context, StartMatchActivity::class.java))
+                                    requireSignIn(context, "Login or sign up to start a match") {
+                                        context.startActivity(Intent(context, StartMatchActivity::class.java))
+                                    }
                                 }
                             ), blockParams(top = 14))
                             addView(hostSecurityNote(context), blockParams(top = 18))
@@ -1026,7 +1164,17 @@ class HomeScreenView @JvmOverloads constructor(
 
                         // Your Tournament content stays in its original layout so Firestore
                         // updates render exactly as they do in the existing Host list.
-                        val yourTournamentContent = yourTournamentCard(context)
+                        val yourTournamentContent = if (FirebaseAuth.getInstance().currentUser == null) {
+                            ComposeView(context).apply {
+                                setContent {
+                                    GuestAccessCard(
+                                        title = "Your tournaments",
+                                        detail = "Login or sign up to see all your tournaments.",
+                                        onSignup = { (context as? MainActivity)?.showSignupScreen() }
+                                    )
+                                }
+                            }
+                        } else yourTournamentCard(context)
                         addView(yourTournamentContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                             leftMargin = dp(12)
                             rightMargin = dp(12)
@@ -1045,9 +1193,22 @@ class HomeScreenView @JvmOverloads constructor(
                                 features = listOf("BALL-BY-BALL", "LIVE UPDATES", "AUTO-SYNC", "MATCH STATS"),
                                 buttonLabel = "START QUICK SCORING",
                                 onClick = {
-                                    context.startActivity(Intent(context, com.example.sportsxtreme.presentation.scoring.QuickScoringActivity::class.java))
+                                    requireSignIn(context, "Login or sign up to continue to Quick Scoring") {
+                                        context.startActivity(Intent(context, com.example.sportsxtreme.presentation.scoring.QuickScoringActivity::class.java))
+                                    }
                                 }
                             ), blockParams(top = 18))
+                            if (FirebaseAuth.getInstance().currentUser == null) {
+                                addView(ComposeView(context).apply {
+                                    setContent {
+                                        GuestAccessCard(
+                                            title = "Quick Scoring",
+                                            detail = "Login or sign up to start quick scoring.",
+                                            onSignup = { (context as? MainActivity)?.showSignupScreen() }
+                                        )
+                                    }
+                                }, blockParams(top = 18))
+                            }
                         }
                         addView(quickScoringContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
                         quickScoringContent.visibility = View.GONE
@@ -1195,7 +1356,9 @@ class HomeScreenView @JvmOverloads constructor(
             }, LinearLayout.LayoutParams(0, dp(32), 1f))
             addView(tournamentPill(context, "REGISTER", true).apply {
                 setOnClickListener {
-                    context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
+                    requireSignIn(context, "Login or sign up to register a tournament or series") {
+                        context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
+                    }
                 }
             }, LinearLayout.LayoutParams(dp(82), dp(30)))
         }, blockParams())
@@ -1483,7 +1646,7 @@ class HomeScreenView @JvmOverloads constructor(
                     features = listOf("Easy Management", "Auto Fixtures", "Team Portal", "Live Points Table"),
                     cta = "Register Tournament",
                     accent = primary,
-                    onClick = { it.startActivity(Intent(it, TournamentRegistrationActivity::class.java)) }
+                    onClick = { requireSignIn(it, "Login or sign up to register a tournament or series") { it.startActivity(Intent(it, TournamentRegistrationActivity::class.java)) } }
                 ),
                 HostSlide(
                     imageRes = R.drawable.cloudsync_sliderimage,
@@ -1492,7 +1655,7 @@ class HomeScreenView @JvmOverloads constructor(
                     features = listOf("Real-time Sync", "Secure Cloud Storage", "Multi-device Access", "Automatic Backup"),
                     cta = "Start A Match",
                     accent = cyan,
-                    onClick = { it.startActivity(Intent(it, StartMatchActivity::class.java)) }
+                    onClick = { requireSignIn(it, "Login or sign up to start a match") { it.startActivity(Intent(it, StartMatchActivity::class.java)) } }
                 ),
                 HostSlide(
                     imageRes = R.drawable.superfastscoring_slider,
@@ -1961,21 +2124,99 @@ class HomeScreenView @JvmOverloads constructor(
                     setTint(Color.WHITE)
                     setOnClickListener { openDrawer() }
                 }, LinearLayout.LayoutParams(dp(22), dp(22)))
-                addView(sxLogo(context), LinearLayout.LayoutParams(dp(64), dp(36)).apply {
+                val logo = sxLogo(context).also { it.layoutParams = LinearLayout.LayoutParams(dp(64), dp(36)).apply {
                     leftMargin = dp(12)
-                })
-                addView(topBarBrandTitle(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                } }
+                addView(logo)
+                val brandTitle = topBarBrandTitle(context).also { it.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                     leftMargin = dp(7)
-                })
-                addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
-                addView(TopIconView(context, TopIconView.Icon.SEARCH).apply {
+                } }
+                addView(brandTitle)
+                val spacer = View(context)
+                addView(spacer, LinearLayout.LayoutParams(0, 1, 1f))
+                val signupButton = TextView(context).apply {
+                    text = "Sign up / Login"
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.rgb(20, 28, 0))
+                    textSize = 10f
+                    typeface = Typeface.DEFAULT_BOLD
+                    background = roundedBackground(primary, dp(8), primary)
+                    visibility = if (FirebaseAuth.getInstance().currentUser == null) View.VISIBLE else View.GONE
+                    setPadding(dp(8), 0, dp(8), 0)
+                    setOnClickListener { requireSignIn(context, "Login or sign up to access your account") { } }
+                }
+                addView(signupButton, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, dp(34)).apply { rightMargin = dp(8) })
+                val searchInput = EditText(context).apply {
+                    hint = "Tournament or team name"
+                    setTextColor(Color.WHITE)
+                    setHintTextColor(Color.rgb(145, 161, 184))
+                    textSize = 13f
+                    setSingleLine(true)
+                    setPadding(dp(12), 0, dp(8), 0)
+                    background = roundedBackground(Color.rgb(18, 29, 46), dp(12), Color.rgb(57, 86, 72))
+                    visibility = View.GONE
+                    addTextChangedListener(object : TextWatcher {
+                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                            updateHomeMatchSearch(s?.toString().orEmpty())
+                        }
+                        override fun afterTextChanged(s: Editable?) = Unit
+                    })
+                }
+                addView(searchInput, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(10) })
+                val searchButton = TopIconView(context, TopIconView.Icon.SEARCH).apply {
                     setTint(Color.WHITE)
-                }, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
-                addView(ImageView(context).apply {
+                }
+                addView(searchButton, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
+                lateinit var closeSearch: TextView
+                lateinit var notification: ImageView
+                closeSearch = TextView(context).apply {
+                    text = "×"
+                    textSize = 28f
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.WHITE)
+                    visibility = View.GONE
+                    setOnClickListener {
+                        searchInput.setText("")
+                        searchInput.clearFocus()
+                        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+                            ?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+                        searchInput.visibility = View.GONE
+                        closeSearch.visibility = View.GONE
+                        logo.visibility = View.VISIBLE
+                        brandTitle.visibility = View.VISIBLE
+                        spacer.visibility = View.VISIBLE
+                        signupButton.visibility = if (FirebaseAuth.getInstance().currentUser == null) View.VISIBLE else View.GONE
+                        searchButton.visibility = View.VISIBLE
+                        notification.visibility = View.VISIBLE
+                    }
+                }
+                addView(closeSearch, LinearLayout.LayoutParams(dp(32), dp(40)).apply { leftMargin = dp(6) })
+                notification = ImageView(context).apply {
                     setImageResource(R.drawable.notification)
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     contentDescription = "Notifications"
-                }, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
+                    setOnClickListener {
+                        context.startActivity(android.content.Intent(context, com.example.sportsxtreme.presentation.notifications.NotificationActivity::class.java))
+                    }
+                }
+                addView(notification, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
+                searchButton.setOnClickListener {
+                    if (topMode != TopMode.SPORTS) return@setOnClickListener
+                    logo.visibility = View.GONE
+                    brandTitle.visibility = View.GONE
+                    spacer.visibility = View.GONE
+                    signupButton.visibility = View.GONE
+                    searchButton.visibility = View.GONE
+                    notification.visibility = View.GONE
+                    searchInput.visibility = View.VISIBLE
+                    closeSearch.visibility = View.VISIBLE
+                    searchInput.requestFocus()
+                    searchInput.post {
+                        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+                            ?.showSoftInput(searchInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)).apply {
                 topMargin = dp(20)
             })
@@ -2068,11 +2309,13 @@ class HomeScreenView @JvmOverloads constructor(
                 setTint(primary)
             }, LinearLayout.LayoutParams(dp(17), dp(17)))
             addView(TextView(context).apply {
-                text = context.getString(R.string.str_madanpurbhubaneswar)
+                locationLabelView = this
+                text = "Finding your location…"
                 setTextColor(Color.rgb(210, 224, 220))
                 textSize = 10f
                 typeface = Typeface.DEFAULT_BOLD
                 includeFontPadding = false
+                maxLines = 1
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 leftMargin = dp(7)
             })
@@ -2268,6 +2511,8 @@ class HomeScreenView @JvmOverloads constructor(
      */
     private fun liveMatchesSection(): View {
         return LiveMatchesSectionView(context).apply {
+            liveMatchesSectionView = this
+            setSearchQuery(homeMatchSearchQuery)
             liveMatchViewModel?.let { bind(it) }
         }
     }
@@ -2294,7 +2539,12 @@ class HomeScreenView @JvmOverloads constructor(
                     isFocusable = true
                     setPadding(dp(10), dp(6), 0, dp(6))
                     setOnClickListener {
-                        context.startActivity(Intent(context, ViewAllScoreCardActivity::class.java))
+                        context.startActivity(
+                            Intent(context, ViewAllScoreCardActivity::class.java).putExtra(
+                                ViewAllScoreCardActivity.EXTRA_CURRENT_LOCATION,
+                                locationLabelView?.text?.toString().orEmpty()
+                            )
+                        )
                     }
                 })
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {

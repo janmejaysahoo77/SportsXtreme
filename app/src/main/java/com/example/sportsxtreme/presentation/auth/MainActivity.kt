@@ -22,6 +22,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.core.animation.doOnEnd
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
@@ -60,6 +61,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import com.google.android.gms.common.api.ResolvableApiException
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.LocationSettingsRequest
+import com.google.android.gms.location.Priority
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
@@ -106,6 +112,7 @@ class MainActivity : ComponentActivity() {
     private var emailVerificationScreenView: EmailVerificationScreenView? = null
     private var pendingOtpContact = ""
     private var pendingPhoneSignupNumber: String? = null
+    private var signupPhoneVerificationPending = false
     private var openMyCricketTeamsAfterInvite by mutableStateOf(false)
     private var openHostQuickScoringAfterReturn by mutableStateOf(false)
     private var teamWelcomeName by mutableStateOf<String?>(null)
@@ -116,6 +123,9 @@ class MainActivity : ComponentActivity() {
     private val hostTournamentsViewModel: HostTournamentsViewModel by viewModels()
     private val locationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var locationPermissionPromptedThisSession = false
+    private var locationSettingsCheckInProgress = false
+    private var homeLocationLabel by mutableStateOf("Finding your location…")
+    private var returnToHomeAfterAuthCancel = false
     private var currentScreen by mutableStateOf(Screen.Splash)
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -123,7 +133,19 @@ class MainActivity : ComponentActivity() {
         val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (granted) {
+            checkLocationSettingsAndUpdate()
+        } else if (currentScreen == Screen.Home) {
+            publishHomeLocationLabel("Location unavailable")
+        }
+    }
+    private val locationSettingsLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        locationSettingsCheckInProgress = false
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
             updateCurrentUserLocation()
+        } else if (currentScreen == Screen.Home) {
+            publishHomeLocationLabel("Location unavailable")
         }
     }
 
@@ -139,6 +161,7 @@ class MainActivity : ComponentActivity() {
         receiveIncomingInviteToken(intent)
         val hasIncomingAuthLink = handleIncomingAuthLink(intent)
         val forceLogin = intent.getBooleanExtra(EXTRA_FORCE_LOGIN, false)
+        val forceSignup = intent.getBooleanExtra(EXTRA_FORCE_SIGNUP, false)
         val startSportSelection = intent.getStringExtra(EXTRA_START_DESTINATION) == DESTINATION_SPORT_SELECTION
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -156,7 +179,7 @@ class MainActivity : ComponentActivity() {
                     Screen.PhoneAuth,
                     Screen.OtpVerification,
                     Screen.SportSelection,
-                    Screen.Members -> showMainScreen()
+                    Screen.Members -> returnFromAuthFlow()
 
                     Screen.Onboarding,
                     Screen.Splash -> finish()
@@ -164,7 +187,10 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        if (forceLogin) {
+        if (forceSignup) {
+            currentScreen = Screen.Signup
+            initComposeContent()
+        } else if (forceLogin) {
             currentScreen = Screen.Login
             initComposeContent()
         } else if (startSportSelection) {
@@ -372,6 +398,7 @@ class MainActivity : ComponentActivity() {
                             startInMyCricketTeams = openMyCricketTeamsAfterInvite,
                             startInQuickScoringTab = openHostQuickScoringAfterReturn
                         ).also {
+                            it.updateLocationLabel(homeLocationLabel)
                             homeScreenView = it
                         }
                     }
@@ -397,19 +424,30 @@ class MainActivity : ComponentActivity() {
     private fun routeAfterSplash() {
         if (authViewModel.state.value.authenticatedUser != null) {
             showHomeScreen()
+        } else if (GuestExperiencePreferences.selectedSport(this) != null) {
+            showHomeScreen()
+        } else if (GuestExperiencePreferences.hasCompletedOnboarding(this)) {
+            showSportSelectionScreen()
         } else {
             showMainScreen()
         }
     }
 
+    private fun returnFromAuthFlow() {
+        if (returnToHomeAfterAuthCancel) showHomeScreen() else showMainScreen()
+    }
+
     fun showSignupScreen(verifiedPhoneNumber: String? = null) {
+        returnToHomeAfterAuthCancel = currentScreen == Screen.Home || returnToHomeAfterAuthCancel
         homeScreenView = null
+        signupPhoneVerificationPending = false
         pendingPhoneSignupNumber = verifiedPhoneNumber
         currentScreen = Screen.Signup
         ensureComposeInitialized()
     }
 
     fun showLoginScreen() {
+        returnToHomeAfterAuthCancel = currentScreen == Screen.Home || returnToHomeAfterAuthCancel
         homeScreenView = null
         currentScreen = Screen.Login
         ensureComposeInitialized()
@@ -422,12 +460,15 @@ class MainActivity : ComponentActivity() {
         ensureComposeInitialized()
     }
 
-    fun showPhoneAuthScreen() {
+    fun showPhoneAuthScreen(forSignupCompletion: Boolean = false) {
         homeScreenView = null
         pendingPhoneSignupNumber = null
+        signupPhoneVerificationPending = forSignupCompletion
         currentScreen = Screen.PhoneAuth
         ensureComposeInitialized()
     }
+
+    fun isSignupPhoneVerificationPending(): Boolean = signupPhoneVerificationPending
 
     fun showOtpVerificationScreen(contact: String) {
         homeScreenView = null
@@ -445,6 +486,7 @@ class MainActivity : ComponentActivity() {
 
     fun showSportSelectionScreen() {
         homeScreenView = null
+        signupPhoneVerificationPending = false
         currentScreen = Screen.SportSelection
         ensureComposeInitialized()
     }
@@ -452,6 +494,8 @@ class MainActivity : ComponentActivity() {
     fun showHomeScreen() {
         homeScreenView = null
         emailVerificationScreenView = null
+        returnToHomeAfterAuthCancel = false
+        signupPhoneVerificationPending = false
         openHostQuickScoringAfterReturn = false
         currentScreen = Screen.Home
         ensureComposeInitialized()
@@ -507,6 +551,10 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra(EXTRA_FORCE_LOGIN, false)) {
             homeScreenView = null
             currentScreen = Screen.Login
+            return
+        }
+        if (intent.getBooleanExtra(EXTRA_FORCE_SIGNUP, false)) {
+            showSignupScreen()
             return
         }
         receiveIncomingInviteToken(intent)
@@ -568,7 +616,7 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (hasFineLocation || hasCoarseLocation) {
-            updateCurrentUserLocation()
+            checkLocationSettingsAndUpdate()
         } else if (!locationPermissionPromptedThisSession) {
             locationPermissionPromptedThisSession = true
             locationPermissionLauncher.launch(
@@ -580,13 +628,58 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun checkLocationSettingsAndUpdate() {
+        if (locationSettingsCheckInProgress) return
+        locationSettingsCheckInProgress = true
+        val locationRequest = LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            LOCATION_REQUEST_INTERVAL_MS
+        ).build()
+        val settingsRequest = LocationSettingsRequest.Builder()
+            .addLocationRequest(locationRequest)
+            .setAlwaysShow(true)
+            .build()
+
+        LocationServices.getSettingsClient(this)
+            .checkLocationSettings(settingsRequest)
+            .addOnSuccessListener {
+                locationSettingsCheckInProgress = false
+                updateCurrentUserLocation()
+            }
+            .addOnFailureListener { error ->
+                if (error is ResolvableApiException) {
+                    runCatching {
+                        locationSettingsLauncher.launch(
+                            IntentSenderRequest.Builder(error.resolution).build()
+                        )
+                    }.onFailure {
+                        locationSettingsCheckInProgress = false
+                        publishHomeLocationLabel("Location unavailable")
+                    }
+                } else {
+                    locationSettingsCheckInProgress = false
+                    publishHomeLocationLabel("Location unavailable")
+                }
+            }
+    }
+
     private fun updateCurrentUserLocation() {
-        val user = authViewModel.state.value.authenticatedUser ?: AuthDependencies.authUseCases()
-            .getCurrentUser() ?: return
         locationScope.launch {
-            val location = findCurrentLocation() ?: return@launch
+            publishHomeLocationLabel("Finding your location…")
+            val location = findCurrentLocation()
+            if (location == null) {
+                publishHomeLocationLabel("Location unavailable")
+                return@launch
+            }
             val locationLabel = formatLocation(location)
-            if (locationLabel.isBlank()) return@launch
+            if (locationLabel.isBlank()) {
+                publishHomeLocationLabel("Location unavailable")
+                return@launch
+            }
+            publishHomeLocationLabel(locationLabel)
+
+            val user = authViewModel.state.value.authenticatedUser ?: AuthDependencies.authUseCases()
+                .getCurrentUser() ?: return@launch
 
             val useCases = AuthDependencies.authUseCases()
             val profile = when (val profileResult = useCases.getUserProfile(user.id)) {
@@ -597,6 +690,13 @@ class MainActivity : ComponentActivity() {
             useCases.updateUserProfile(profile.copy(location = locationLabel))
         }
     }
+
+    private fun publishHomeLocationLabel(label: String) {
+        homeLocationLabel = label
+        homeScreenView?.updateLocationLabel(label)
+    }
+
+    fun readHomeLocationLabel(): String = homeLocationLabel
 
     @SuppressLint("MissingPermission")
     private suspend fun findCurrentLocation(): Location? {
@@ -614,8 +714,12 @@ class MainActivity : ComponentActivity() {
                 .sortedWith(compareByDescending<Location> { it.time }.thenBy { it.accuracy })
                 .firstOrNull()
 
-            if (lastLocation != null) {
-                return@withContext lastLocation
+            val recentAccurateLocation = lastLocation?.takeIf {
+                System.currentTimeMillis() - it.time <= LOCATION_MAX_CACHE_AGE_MS &&
+                        it.accuracy <= LOCATION_MAX_CACHE_ACCURACY_METERS
+            }
+            if (recentAccurateLocation != null) {
+                return@withContext recentAccurateLocation
             }
 
             val enabledProviders = runCatching { locationManager.getProviders(true) }
@@ -691,6 +795,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_START_DESTINATION = "extra_start_destination"
         const val EXTRA_FORCE_LOGIN = "extra_force_login"
+        const val EXTRA_FORCE_SIGNUP = "extra_force_signup"
         const val EXTRA_OPEN_HOST_QUICK_SCORING = "open_host_quick_scoring"
         const val DESTINATION_SPORT_SELECTION = "sport_selection"
         private const val INVITE_SCHEME = "https"
@@ -702,6 +807,9 @@ class MainActivity : ComponentActivity() {
         private const val TEAM_INVITE_QUERY_PARAMETER = "token"
         private val TEAM_INVITE_TOKEN_PATTERN = Regex("^[A-Za-z0-9_-]{43}$")
         private const val LOCATION_FETCH_TIMEOUT_MS = 12000L
+        private const val LOCATION_REQUEST_INTERVAL_MS = 10000L
+        private const val LOCATION_MAX_CACHE_AGE_MS = 2 * 60 * 1000L
+        private const val LOCATION_MAX_CACHE_ACCURACY_METERS = 5_000f
     }
 }
 

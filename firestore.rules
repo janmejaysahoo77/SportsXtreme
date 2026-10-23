@@ -26,13 +26,11 @@ service cloud.firestore {
         && claim.claimedAt == request.time;
     }
 
-    // ---------- Matches: authenticated read, owner write ----------
-    // The Home screen listens to the whole collection with a SnapshotListener.
-    // That requires collection-level read access for every authenticated user,
-    // otherwise the friend's phone gets a permission-denied error and the
-    // live scorecard never appears.
+    // ---------- Matches: public scorecard read, owner write ----------
+    // Public Home scorecards use a collection listener, so match score data is
+    // readable without an account. Writes remain owner-authorized.
     match /matches/{matchId} {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.get('status', '') != 'COMPLETED'
         && request.resource.data.get('status', '') != 'FINALIZATION_PENDING'
@@ -84,7 +82,7 @@ service cloud.firestore {
 
     // Subcollections under a match (deliveries, scorecard, entries, …)
     match /matches/{matchId}/{document=**} {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow create, update, delete: if request.auth != null
         && get(/databases/$(database)/documents/matches/$(matchId)).data.ownerId == request.auth.uid
         && get(/databases/$(database)/documents/matches/$(matchId)).data.get('status', '') != 'COMPLETED'
@@ -139,7 +137,9 @@ service cloud.firestore {
 
     // ---------- Tournaments: organisers manage tournament details; team entries are callable-only ----------
     match /tournaments/{tournamentId} {
-      allow read: if request.auth != null;
+      // Public tournament banners/details appear on Home. Private tournament
+      // subcollections remain restricted below.
+      allow read: if true;
       allow create: if isSignedIn() && request.resource.data.hostUid == request.auth.uid;
       allow update, delete: if isSignedIn()
         && resource.data.hostUid == request.auth.uid
@@ -183,9 +183,9 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // ---------- Community profiles: visible to signed-in community members ----------
+    // ---------- Community profiles: public posts; contact details stay private ----------
     match /communityProfiles/{profileId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow create: if isSignedIn() && (
         (request.resource.data.postType == 'request'
           && request.resource.data.keys().hasOnly([

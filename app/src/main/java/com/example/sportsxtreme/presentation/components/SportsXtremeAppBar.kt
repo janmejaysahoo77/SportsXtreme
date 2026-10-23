@@ -18,11 +18,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.notifications.NotificationActivity
 
 @Composable
 fun SportsXtremeAppBar(
@@ -30,6 +32,7 @@ fun SportsXtremeAppBar(
     showSearch: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -90,7 +93,11 @@ fun SportsXtremeAppBar(
             Image(
                 painter = painterResource(R.drawable.notification),
                 contentDescription = "Notifications",
-                modifier = Modifier.size(25.dp)
+                modifier = Modifier
+                    .size(25.dp)
+                    .clickable {
+                        context.startActivity(android.content.Intent(context, NotificationActivity::class.java))
+                    }
             )
         }
     }

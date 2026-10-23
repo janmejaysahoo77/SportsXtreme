@@ -120,7 +120,7 @@ async function teamInTransaction(transaction, teamId) {
 /**
  * Returns the public display data needed by a scorecard or team roster.
  * The callable only exposes a member's user ID, display name, profile photo URL,
- * and playing role.
+ * playing role, and cricket styles used on the public team roster.
  */
 exports.getTeamMemberProfiles = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before viewing team members.");
@@ -180,7 +180,9 @@ exports.getTeamMemberProfiles = onCall(async (request) => {
         displayName: displayName || "",
         // A Google identity image is not a manually selected SportsXtreme photo.
         profilePhotoUrl: isGoogleAccountPhotoUrl(storedPhotoUrl) ? "" : storedPhotoUrl,
-        playingRole: member.playingRole || profilePlayingRole || "Player"
+        playingRole: member.playingRole || profilePlayingRole || "Player",
+        battingStyle: profile.exists && typeof profile.get("battingStyle") === "string" ? profile.get("battingStyle").trim() : "",
+        bowlingStyle: profile.exists && typeof profile.get("bowlingStyle") === "string" ? profile.get("bowlingStyle").trim() : ""
       };
     })
   };
@@ -419,6 +421,76 @@ exports.deleteMatch = onCall(async (request) => {
   return { matchId };
 });
 
+/** Deletes the caller's account data with Admin privileges, then removes Auth. */
+exports.deleteAccount = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in to delete your account.");
+
+  const authTimeSeconds = Number(request.auth.token.auth_time || 0);
+  if (!authTimeSeconds || Date.now() / 1000 - authTimeSeconds > 5 * 60) {
+    throw new HttpsError("failed-precondition", "Please sign in again before deleting your account.");
+  }
+
+  const ownedQueries = [
+    ["users", "id"],
+    ["teams", "ownerUserId"],
+    ["tournaments", "hostUid"],
+    ["matches", "ownerId"],
+    ["matches", "organizerId"],
+    ["matches", "createdBy"],
+    ["grounds", "ownerId"],
+    ["grounds", "ownerUserId"],
+    ["communityProfiles", "ownerId"],
+    ["communityProfiles", "userId"],
+    ["matchInvites", "createdByUserId"],
+    ["teamInvites", "createdByUserId"],
+    ["tournamentInvites", "createdByUserId"],
+  ];
+  const references = new Map();
+  for (const [collection, field] of ownedQueries) {
+    const snapshot = await db.collection(collection).where(field, "==", uid).get();
+    for (const document of snapshot.docs) references.set(document.ref.path, document.ref);
+  }
+  const profileRef = db.collection("users").doc(uid);
+  references.set(profileRef.path, profileRef);
+
+  for (const reference of references.values()) {
+    await db.recursiveDelete(reference);
+  }
+
+  // Leaderboards are materialized separately from user profiles. Remove this
+  // account from each source contribution and recalculate player aggregates so
+  // future match rebuilds cannot make the deleted account reappear.
+  const contributionSnapshots = await db.collection("leaderboards")
+    .doc("matchContributions").collection("entries").get();
+  for (const contributionSnapshot of contributionSnapshots.docs) {
+    const contribution = contributionSnapshot.data();
+    if (!contribution.active || !Array.isArray(contribution.rows)) continue;
+    let changed = false;
+    const replacement = {
+      ...contribution,
+      rows: contribution.rows.map((row) => {
+        const players = { ...(row.players || {}) };
+        for (const [playerKey, player] of Object.entries(players)) {
+          const playerId = safeName(player.playerId) || playerKey;
+          if (player.canonicalPlayerId === uid || playerId === uid || playerId.endsWith(`::${uid}`)) {
+            delete players[playerKey];
+            changed = true;
+          }
+        }
+        return { ...row, players };
+      }),
+    };
+    if (changed) {
+      await db.runTransaction((transaction) =>
+        replaceLeaderboardContribution(transaction, contributionSnapshot.ref, replacement));
+    }
+  }
+
+  await getAuth().deleteUser(uid);
+  return { deleted: true };
+});
+
 function failFinalization(code, message) { throw new HttpsError(code, message); }
 function safeName(value) { return typeof value === "string" ? value.trim() : ""; }
 function asNumber(value) { return typeof value === "number" && Number.isFinite(value) ? value : 0; }
@@ -653,6 +725,9 @@ function buildLeaderboardContribution(match, validated, revision) {
   for (const player of Object.values(players)) {
     player.matches = 1;
     player.allRounderPoints = player.battingPoints + player.bowlingPoints;
+    // Team-scoped player IDs use `${teamId}::${userId}`. Persist the linked
+    // account ID separately so the client can collapse one person across teams.
+    player.canonicalPlayerId = player.linkedUserId || player.playerId;
     delete player.linkedUserId;
   }
   const result = match.finalization?.result;
@@ -1048,7 +1123,7 @@ exports.leaveTeam = onCall(async (request) => {
 exports.updateTeamProfile = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before editing a team.");
   const teamId = requireTeamId(request.data?.teamId);
-  const allowedFields = new Set(["description", "founded", "homeGround", "captainName", "captainMobile", "coachManager", "teamMotto"]);
+  const allowedFields = new Set(["description", "founded", "homeGround", "captainName", "captainMobile", "coachManager", "teamMotto", "logoUrl"]);
   const changes = request.data?.changes;
   if (!changes || typeof changes !== "object" || Array.isArray(changes)) throw new HttpsError("invalid-argument", "Invalid team details.");
   const keys = Object.keys(changes);
@@ -1057,6 +1132,17 @@ exports.updateTeamProfile = onCall(async (request) => {
   }
   const value = changes[keys[0]].trim();
   if (value.length > 500) throw new HttpsError("invalid-argument", "Team detail is too long.");
+  if (keys[0] === "logoUrl") {
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(value);
+    } catch {
+      throw new HttpsError("invalid-argument", "Select a valid team photo.");
+    }
+    if (parsedUrl.protocol !== "https:" || !(parsedUrl.hostname === "cloudinary.com" || parsedUrl.hostname.endsWith(".cloudinary.com"))) {
+      throw new HttpsError("invalid-argument", "Team photos must use a secure Cloudinary image URL.");
+    }
+  }
   return db.runTransaction(async (transaction) => {
     const { ref, members } = await teamInTransaction(transaction, teamId);
     if (!isManager(findMember(members, request.auth.uid))) throw new HttpsError("permission-denied", "Only a team admin or captain can edit team details.");

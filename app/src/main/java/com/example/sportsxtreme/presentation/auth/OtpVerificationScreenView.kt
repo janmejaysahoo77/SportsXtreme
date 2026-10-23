@@ -6,7 +6,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.graphics.*
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.text.Editable
@@ -17,8 +25,12 @@ import android.util.AttributeSet
 import android.util.Base64
 import android.util.Log
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputConnectionWrapper
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import androidx.core.content.ContextCompat
@@ -27,6 +39,7 @@ import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.common.WindowInsetsUtils
 import com.example.sportsxtreme.data.di.AuthDependencies
 import com.example.sportsxtreme.presentation.components.AuthBackgroundView
+import com.example.sportsxtreme.presentation.phoneAuth.Country
 import com.google.android.gms.auth.api.phone.SmsRetriever
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.api.Status
@@ -226,16 +239,16 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         }, fullWidthParams())
         content.addView(TextView(context).apply {
             text = if (contact.isBlank()) {
-                "ENTER THE 6 DIGIT ACCESS CODE"
+                "Enter a 6-digit verification code sent to your mobile number."
             } else {
-                "CODE SENT TO ${contact.uppercase()}"
+                "We sent a 6-digit verification code to\n${maskedPhoneNumber(contact)}"
             }
             gravity = Gravity.CENTER
             setTextColor(muted)
-            textSize = 11f
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+            textSize = 14f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
             includeFontPadding = false
-        }, fullWidthParams(top = dp(10), bottom = dp(24)))
+        }, fullWidthParams(top = dp(8), bottom = dp(20)))
         content.addView(statusStrip(context), fullWidthParams(bottom = dp(20), height = dp(34)))
         content.addView(otpRow(context), fullWidthParams(bottom = dp(16), height = dp(58)))
 
@@ -259,6 +272,17 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         return scrollView
     }
 
+    private fun maskedPhoneNumber(phoneNumber: String): String {
+        val digits = phoneNumber.filter(Char::isDigit)
+        val country = Country.ALL
+            .sortedByDescending { it.dialCode.length }
+            .firstOrNull { digits.startsWith(it.dialCode.removePrefix("+")) }
+        val dialCode = country?.dialCode ?: "+${digits.take(2)}"
+        val localNumber = digits.drop(dialCode.count(Char::isDigit))
+        val maskLength = (localNumber.length - 4).coerceAtLeast(4)
+        return "$dialCode ${"*".repeat(maskLength)}${localNumber.takeLast(4)}"
+    }
+
     private fun topRail(context: Context): View {
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -266,8 +290,15 @@ class OtpVerificationScreenView @JvmOverloads constructor(
             background = panelBackground(Color.argb(154, 4, 9, 12), Color.argb(76, 0, 127, 255), dp(10))
 
             addView(TextView(context).apply {
-                text = "SPORTSXTREME"
-                setTextColor(Color.WHITE)
+                text = "SPORTS"
+                setTextColor(Color.rgb(236, 243, 238))
+                textSize = 13f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                includeFontPadding = false
+            })
+            addView(TextView(context).apply {
+                text = "XTREME"
+                setTextColor(electricBlue)
                 textSize = 13f
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
                 includeFontPadding = false
@@ -292,10 +323,10 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                 rightMargin = dp(8)
             })
             addView(TextView(context).apply {
-                text = "SECURE SESSION ACTIVE"
+                text = "Enter Verification Code"
                 setTextColor(Color.rgb(226, 238, 229))
-                textSize = 9f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                textSize = 13f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
                 includeFontPadding = false
             })
         }
@@ -316,7 +347,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
     }
 
     private fun otpInput(context: Context, index: Int): EditText {
-        return EditText(context).apply {
+        return OtpCodeEditText(context, index).apply {
             gravity = Gravity.CENTER
             inputType = InputType.TYPE_CLASS_NUMBER
             filters = arrayOf(InputFilter.LengthFilter(1))
@@ -331,6 +362,10 @@ class OtpVerificationScreenView @JvmOverloads constructor(
             setOnFocusChangeListener { view, hasFocus ->
                 view.background = otpBackground(hasFocus)
             }
+            setOnKeyListener { _, keyCode, event ->
+                keyCode == KeyEvent.KEYCODE_DEL && event.action == KeyEvent.ACTION_DOWN &&
+                    moveFocusBackOnBackspace(index)
+            }
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -342,6 +377,43 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                     refreshVerifyState()
                 }
             })
+        }
+    }
+
+    private fun moveFocusBackOnBackspace(index: Int): Boolean {
+        val currentInput = otpInputs.getOrNull(index) ?: return false
+        if (index == 0 || !currentInput.text.isNullOrEmpty()) return false
+
+        val previousInput = otpInputs[index - 1]
+        previousInput.text.clear()
+        previousInput.requestFocus()
+        previousInput.setSelection(previousInput.text.length)
+        clearError()
+        refreshVerifyState()
+        return true
+    }
+
+    private inner class OtpCodeEditText(context: Context, private val index: Int) : EditText(context) {
+        override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+            val inputConnection = super.onCreateInputConnection(outAttrs) ?: return null
+            return object : InputConnectionWrapper(inputConnection, false) {
+                override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+                    if (beforeLength > 0 && afterLength == 0 && moveFocusBackOnBackspace(index)) return true
+                    return super.deleteSurroundingText(beforeLength, afterLength)
+                }
+
+                override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
+                    if (beforeLength > 0 && afterLength == 0 && moveFocusBackOnBackspace(index)) return true
+                    return super.deleteSurroundingTextInCodePoints(beforeLength, afterLength)
+                }
+
+                override fun sendKeyEvent(event: KeyEvent): Boolean {
+                    if (event.keyCode == KeyEvent.KEYCODE_DEL && event.action == KeyEvent.ACTION_DOWN &&
+                        moveFocusBackOnBackspace(index)
+                    ) return true
+                    return super.sendKeyEvent(event)
+                }
+            }
         }
     }
 
@@ -371,7 +443,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
             gravity = Gravity.CENTER
             orientation = LinearLayout.HORIZONTAL
             addView(TextView(context).apply {
-                text = "DIDN'T GET IT? "
+                text = "Didn't receive the code? "
                 setTextColor(Color.rgb(155, 166, 157))
                 textSize = 10.5f
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
@@ -393,7 +465,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
 
     private fun backButton(context: Context): TextView {
         return TextView(context).apply {
-            text = "BACK TO PHONE AUTH"
+            text = "← Change mobile number"
             gravity = Gravity.CENTER
             setTextColor(electricBlue)
             textSize = 10.5f
@@ -403,7 +475,9 @@ class OtpVerificationScreenView @JvmOverloads constructor(
             setOnClickListener {
                 val mainActivity = context as? MainActivity
                 if (mainActivity != null) {
-                    mainActivity.showPhoneAuthScreen()
+                    mainActivity.showPhoneAuthScreen(
+                        forSignupCompletion = mainActivity.isSignupPhoneVerificationPending()
+                    )
                 } else {
                     (context as? Activity)?.finish()
                 }
@@ -423,7 +497,10 @@ class OtpVerificationScreenView @JvmOverloads constructor(
             when (val result = authViewModel.verifyPhoneOtp(code)) {
                 is Resource.Success -> {
                     showMessage("Verification complete.")
-                    if (result.data == true) {
+                    val mainActivity = context as? MainActivity
+                    if (mainActivity?.isSignupPhoneVerificationPending() == true) {
+                        mainActivity.showHomeScreen()
+                    } else if (result.data == true) {
                         (context as? MainActivity)?.showSignupScreen(contact)
                     } else {
                         navigateAfterVerification(context)
@@ -446,7 +523,10 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         otpScope.launch {
             when (val result = authViewModel.verifyPhoneOtp("")) {
                 is Resource.Success -> {
-                    if (result.data == true) {
+                    val mainActivity = context as? MainActivity
+                    if (mainActivity?.isSignupPhoneVerificationPending() == true) {
+                        mainActivity.showHomeScreen()
+                    } else if (result.data == true) {
                         (context as? MainActivity)?.showSignupScreen(contact)
                     } else {
                         navigateAfterVerification(context)
@@ -582,95 +662,65 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         return (value * resources.displayMetrics.density + 0.5f).toInt()
     }
 
-    private companion object {
-    }
-
     private class AppLogoCoreView(context: Context) : View(context) {
-        private val appIcon: Bitmap? = BitmapFactory.decodeResource(resources, R.drawable.appicon)
+        private val appIcon = BitmapFactory.decodeResource(resources, R.drawable.appicon)
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        private val rect = RectF()
-        private var startTimeMs = android.os.SystemClock.uptimeMillis()
+        private val bounds = RectF()
+        private var startedAt = android.os.SystemClock.uptimeMillis()
 
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()
-            startTimeMs = android.os.SystemClock.uptimeMillis()
+            startedAt = android.os.SystemClock.uptimeMillis()
             postInvalidateOnAnimation()
         }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val density = resources.displayMetrics.density
-            val w = width.toFloat()
-            val h = height.toFloat()
-            val cx = w / 2f
-            val cy = h / 2f
-            val elapsed = android.os.SystemClock.uptimeMillis() - startTimeMs
-            val pulse = (sin(elapsed / 360f) + 1f) / 2f
-            val scannerPhase = (elapsed % 1800L) / 1800f
-            val scannerProgress = if (scannerPhase < 0.5f) scannerPhase * 2f else (1f - scannerPhase) * 2f
+            val cx = width / 2f
+            val cy = height / 2f
+            val pulse = (sin((android.os.SystemClock.uptimeMillis() - startedAt) / 360f) + 1f) / 2f
+            val logoSize = min(width, height) * 0.52f
+            val left = cx - logoSize / 2f
+            val top = cy - logoSize / 2f
+            val right = cx + logoSize / 2f
+            val bottom = cy + logoSize / 2f
+            val phase = ((android.os.SystemClock.uptimeMillis() - startedAt) % 1800L) / 1800f
+            val scanProgress = if (phase < 0.5f) phase * 2f else (1f - phase) * 2f
 
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 1.4f * density
             paint.color = Color.argb((80 + pulse * 82).toInt(), 0, 127, 255)
-            rect.set(cx - 60f * density, cy - 60f * density, cx + 60f * density, cy + 60f * density)
-            canvas.drawRoundRect(rect, 28f * density, 28f * density, paint)
-
+            bounds.set(cx - 60f * density, cy - 60f * density, cx + 60f * density, cy + 60f * density)
+            canvas.drawRoundRect(bounds, 28f * density, 28f * density, paint)
             paint.strokeWidth = 0.9f * density
             paint.color = Color.argb((110 + pulse * 96).toInt(), 193, 255, 0)
-            rect.set(cx - 52f * density, cy - 52f * density, cx + 52f * density, cy + 52f * density)
-            canvas.drawRoundRect(rect, 23f * density, 23f * density, paint)
-
+            bounds.set(cx - 52f * density, cy - 52f * density, cx + 52f * density, cy + 52f * density)
+            canvas.drawRoundRect(bounds, 23f * density, 23f * density, paint)
             paint.color = Color.argb((120 + pulse * 76).toInt(), 193, 255, 0)
-            rect.set(cx - 42f * density, cy - 42f * density, cx + 42f * density, cy + 42f * density)
-            canvas.drawOval(rect, paint)
+            bounds.set(cx - 42f * density, cy - 42f * density, cx + 42f * density, cy + 42f * density)
+            canvas.drawOval(bounds, paint)
 
-            val logoSize = min(w, h) * 0.52f
-            val logoLeft = cx - logoSize / 2f
-            val logoTop = cy - logoSize / 2f
-            val logoRight = cx + logoSize / 2f
-            val logoBottom = cy + logoSize / 2f
-            appIcon?.let { bitmap ->
-                rect.set(logoLeft, logoTop, logoRight, logoBottom)
-                canvas.drawBitmap(bitmap, null, rect, bitmapPaint)
-            }
+            bounds.set(left, top, right, bottom)
+            appIcon?.let { canvas.drawBitmap(it, null, bounds, bitmapPaint) }
 
-            val scanY = logoTop + logoSize * scannerProgress
+            val scanY = top + logoSize * scanProgress
             paint.style = Paint.Style.FILL
             paint.shader = LinearGradient(
-                logoLeft,
-                scanY - 10f * density,
-                logoLeft,
-                scanY + 10f * density,
+                left, scanY - 10f * density, left, scanY + 10f * density,
                 intArrayOf(Color.TRANSPARENT, Color.argb(74, 0, 127, 255), Color.argb(132, 193, 255, 0), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.36f, 0.5f, 1f),
-                Shader.TileMode.CLAMP
+                floatArrayOf(0f, 0.36f, 0.5f, 1f), Shader.TileMode.CLAMP
             )
-            rect.set(logoLeft - 8f * density, scanY - 10f * density, logoRight + 8f * density, scanY + 10f * density)
-            canvas.drawRoundRect(rect, 10f * density, 10f * density, paint)
+            bounds.set(left - 8f * density, scanY - 10f * density, right + 8f * density, scanY + 10f * density)
+            canvas.drawRoundRect(bounds, 10f * density, 10f * density, paint)
             paint.shader = null
-
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 2f * density
             paint.color = Color.argb(230, 193, 255, 0)
-            canvas.drawLine(logoLeft - 10f * density, scanY, logoRight + 10f * density, scanY, paint)
-            paint.strokeWidth = 0.8f * density
-            paint.color = Color.argb(210, 112, 236, 255)
-            canvas.drawLine(logoLeft - 5f * density, scanY - 4f * density, logoRight + 5f * density, scanY - 4f * density, paint)
-
-            paint.strokeWidth = 1.5f * density
-            paint.color = Color.argb(190, 0, 127, 255)
-            rect.set(logoLeft - 8f * density, logoTop - 8f * density, logoRight + 8f * density, logoBottom + 8f * density)
-            canvas.drawRoundRect(rect, 14f * density, 14f * density, paint)
-
-            paint.strokeWidth = 1f * density
-            paint.color = Color.argb(96, 255, 255, 255)
-            canvas.drawLine(cx - 76f * density, cy, cx - 54f * density, cy, paint)
-            canvas.drawLine(cx + 54f * density, cy, cx + 76f * density, cy, paint)
-            canvas.drawLine(cx, cy - 76f * density, cx, cy - 54f * density, paint)
-            canvas.drawLine(cx, cy + 54f * density, cx, cy + 76f * density, paint)
-
+            canvas.drawLine(left - 10f * density, scanY, right + 10f * density, scanY, paint)
             postInvalidateOnAnimation()
         }
     }
+
 }

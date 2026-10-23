@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.Tournament
+import com.example.sportsxtreme.domain.model.matchFormatDisplayName
 import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
 import com.example.sportsxtreme.presentation.tournament.RegisterTournamentFinalPageActivity
 import com.example.sportsxtreme.presentation.tournament.TournamentRegistrationActivity
@@ -88,6 +89,9 @@ import com.example.sportsxtreme.presentation.team.TeamProfileActivity
 import com.example.sportsxtreme.presentation.scoring.ScorecardActivity
 import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.presentation.components.SportsXtremeAppBar
+import com.example.sportsxtreme.presentation.components.GuestAccessCard
+import com.example.sportsxtreme.presentation.components.GuestAuthDialog
+import com.example.sportsxtreme.presentation.auth.MainActivity
 import coil3.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
@@ -381,7 +385,7 @@ private fun DocumentSnapshot.toPlayerCricketMatch(teamLogosById: Map<String, Str
         type = when {
             tournamentName.isNotBlank() || getString("tournamentId") != null ->
                 tournamentName.ifBlank { "TOURNAMENT MATCH" }.uppercase()
-            matchFormat.isNotBlank() -> matchFormat.replace('_', ' ').uppercase()
+            matchFormat.isNotBlank() -> matchFormatDisplayName(matchFormat).uppercase()
             else -> "CRICKET MATCH"
         },
         title = getString("title")?.takeIf { it.isNotBlank() } ?: "$teamAName vs $teamBName",
@@ -515,9 +519,14 @@ fun MyCricketScreen(
     var selectedMatchesTab by remember { mutableIntStateOf(0) }
     var selectedTournamentSegment by remember { mutableIntStateOf(0) }
     var tournamentPendingDeletion by remember { mutableStateOf<Tournament?>(null) }
+    var guestPromptDetail by remember { mutableStateOf<String?>(null) }
     val joinedTeams = rememberJoinedTeams()
     val context = LocalContext.current
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
+    val isGuest = currentUserId == null
+    fun runProtectedAction(detail: String, action: () -> Unit) {
+        if (isGuest) guestPromptDetail = detail else action()
+    }
     val participatedTournamentsState = rememberParticipatedTournaments(currentUserId)
     val playerMatchesState = rememberPlayerMatches(
         currentUserId,
@@ -555,7 +564,7 @@ fun MyCricketScreen(
             ) {
             when (page) {
                 0 -> {
-                    item { StartMatchPrompt(onStartMatch) }
+                    item { StartMatchPrompt { runProtectedAction("Login or sign up to see your matches and start a match", onStartMatch) } }
                     item {
                         SegmentPills(
                             listOf("Player", "Host"),
@@ -579,6 +588,13 @@ fun MyCricketScreen(
                         "Matches you host will appear here."
                     }
                     when {
+                        isGuest -> item {
+                            GuestAccessCard(
+                                title = "Your matches",
+                                detail = "Login or sign up to see all your player and hosted matches.",
+                                onSignup = { guestPromptDetail = "Login or sign up to see your matches" }
+                            )
+                        }
                         playerMatchesState.loading -> item { CricketLoadingIndicator(Modifier.fillMaxWidth().height(180.dp)) }
                         playerMatchesState.error != null -> item {
                             TournamentFeedbackCard(
@@ -596,9 +612,9 @@ fun MyCricketScreen(
                 1 -> {
                     item {
                         HostTournamentPrompt(
-                            onRegisterClick = {
+                            onRegisterClick = { runProtectedAction("Login or sign up to register a tournament or series") {
                                 context.startActivity(Intent(context, TournamentRegistrationActivity::class.java))
-                            }
+                            } }
                         )
                     }
                     item {
@@ -609,7 +625,15 @@ fun MyCricketScreen(
                             onTabClick = { selectedTournamentSegment = it }
                         )
                     }
-                    when (selectedTournamentSegment) {
+                    if (isGuest) {
+                        item {
+                            GuestAccessCard(
+                                title = if (selectedTournamentSegment == 0) "Hosted tournaments" else "Participated tournaments",
+                                detail = "Login or sign up to see all your tournaments.",
+                                onSignup = { guestPromptDetail = "Login or sign up to see your tournaments" }
+                            )
+                        }
+                    } else when (selectedTournamentSegment) {
                         0 -> hostedTournamentsContent(
                             state = hostedTournamentsState,
                             onTournamentClick = { tournamentId ->
@@ -643,7 +667,13 @@ fun MyCricketScreen(
                     item { QuickSearchBar() }
                     item { ActiveTeamsHeader(joinedTeams.size) }
                     if (joinedTeams.isEmpty()) {
-                        item { NoJoinedTeamsCard() }
+                        if (isGuest) item {
+                            GuestAccessCard(
+                                title = "Your teams",
+                                detail = "Login or sign up to create or join a team and see your teams.",
+                                onSignup = { guestPromptDetail = "Login or sign up to create or join a team" }
+                            )
+                        } else item { NoJoinedTeamsCard() }
                     } else {
                         items(joinedTeams) { team -> TeamCard(team) }
                     }
@@ -651,8 +681,13 @@ fun MyCricketScreen(
 
                 3 -> {
                     item {
-                        StatsContent(
-                            userId = FirebaseAuth.getInstance().currentUser?.uid,
+                        if (isGuest) GuestAccessCard(
+                            title = "Your stats",
+                            detail = "Login or sign up to see your player statistics.",
+                            onSignup = { guestPromptDetail = "Login or sign up to see your stats" },
+                            modifier = Modifier.padding(10.dp)
+                        ) else StatsContent(
+                            userId = currentUserId,
                             teamIds = joinedTeams.mapTo(linkedSetOf()) { it.id }
                         )
                     }
@@ -697,6 +732,15 @@ fun MyCricketScreen(
                 dismissButton = {
                     TextButton(onClick = { tournamentPendingDeletion = null }) { Text("Cancel") }
                 }
+            )
+        }
+
+        guestPromptDetail?.let { detail ->
+            GuestAuthDialog(
+                detail = detail,
+                onDismiss = { guestPromptDetail = null },
+                onSignup = { guestPromptDetail = null; (context as? MainActivity)?.showSignupScreen() },
+                onLogin = { guestPromptDetail = null; (context as? MainActivity)?.showLoginScreen() }
             )
         }
 

@@ -101,10 +101,23 @@ class ScoringViewModel @Inject constructor(
             metadata = if (shotDirection != null) metadata + ("shotDirection" to shotDirection) else metadata
         )
 
-    fun recordExtra(type: ExtraType) = recordDelivery(
-        extras = listOf(ExtraRun(type, 1)),
-        isLegalDelivery = type !in setOf(ExtraType.WIDE, ExtraType.NO_BALL)
-    )
+    fun recordExtra(type: ExtraType, runs: Int = 0) {
+        if (runs < 0) return
+        recordDelivery(
+            runsOffBat = if (type == ExtraType.NO_BALL) runs else 0,
+            extras = listOf(
+                ExtraRun(
+                    type,
+                    when (type) {
+                        ExtraType.WIDE -> runs + 1
+                        ExtraType.BYE, ExtraType.LEG_BYE -> runs
+                        else -> 1
+                    }
+                )
+            ),
+            isLegalDelivery = type !in setOf(ExtraType.WIDE, ExtraType.NO_BALL)
+        )
+    }
 
     fun recordObstructingField(batterId: String, deliveryType: ExtraType, runsScored: Int) {
         val state = scoringState() ?: return

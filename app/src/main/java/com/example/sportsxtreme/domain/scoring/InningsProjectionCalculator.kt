@@ -68,7 +68,16 @@ object InningsProjectionCalculator {
                 (if (dismissal?.dismissedPlayerId == striker) null else striker) to
                     (if (dismissal?.dismissedPlayerId == nonStriker) null else nonStriker)
             } else {
-                val swapsStrike = delivery.totalRuns % 2 != 0
+                // The automatic one-run penalty on a no-ball or wide does not
+                // mean the batters crossed. Rotate only for runs completed.
+                val completedRuns = delivery.runsOffBat + delivery.extras.sumOf { extra ->
+                    when (extra.type) {
+                        ExtraType.WIDE -> (extra.runs - 1).coerceAtLeast(0)
+                        ExtraType.BYE, ExtraType.LEG_BYE -> extra.runs
+                        else -> 0
+                    }
+                }
+                val swapsStrike = completedRuns % 2 != 0
                 val endsOver = delivery.isLegalDelivery &&
                     deliveries.take(index).count { event -> event.isLegalDelivery } % 6 == 5
                 if (swapsStrike.xor(endsOver)) nonStriker to striker else striker to nonStriker

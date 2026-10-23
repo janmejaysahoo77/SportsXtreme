@@ -11,10 +11,33 @@ import com.example.sportsxtreme.presentation.home.*
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
+import com.example.sportsxtreme.domain.model.LiveMatch
 import android.content.Intent
+import android.location.Geocoder
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.ComponentActivity
+import androidx.activity.viewModels
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Locale
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +53,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,8 +78,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class ViewAllScoreCardActivity : ComponentActivity() {
+
+    private val liveMatchViewModel: LiveMatchViewModel by viewModels()
+
+    companion object {
+        const val EXTRA_CURRENT_LOCATION = "extra_current_location"
+    }
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,54 +95,62 @@ class ViewAllScoreCardActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
+        val homeLocation = intent.getStringExtra(EXTRA_CURRENT_LOCATION)
+            ?.takeIf(String::isNotBlank)
+            ?: "Location unavailable"
+        val deviceLocation = homeLocation.takeUnless {
+            it.startsWith("Finding your location", ignoreCase = true) || it == "Location unavailable"
+        }
+
         setContent {
+            val matchState by liveMatchViewModel.uiState.collectAsState()
             ViewAllScoreCardScreen(
+                initialLocation = homeLocation,
+                deviceLocation = deviceLocation,
+                matches = matchState.matches,
+                isLoading = matchState.isLoading,
+                isOffline = matchState.isOffline,
+                errorMessage = matchState.errorMessage,
                 onBack = { finish() },
-                onOpenScorecard = { score ->
+                onResolveLocation = { query, onResolved ->
+                    lifecycleScope.launch {
+                        val resolved = resolveLocation(query)
+                        onResolved(resolved)
+                    }
+                },
+                onOpenScorecard = { match ->
                     startActivity(
-                        Intent(this, ScorecardActivity::class.java).apply {
-                            putExtra(ScorecardActivity.EXTRA_LEAGUE, score.league)
-                            putExtra(ScorecardActivity.EXTRA_ROUND, score.round)
-                            putExtra(ScorecardActivity.EXTRA_LEFT_NAME, score.leftName)
-                            putExtra(ScorecardActivity.EXTRA_LEFT_SCORE, score.leftScore)
-                            putExtra(ScorecardActivity.EXTRA_LEFT_OVERS, score.leftOvers)
-                            putExtra(ScorecardActivity.EXTRA_RIGHT_NAME, score.rightName)
-                            putExtra(ScorecardActivity.EXTRA_RIGHT_SCORE, score.rightScore)
-                            putExtra(ScorecardActivity.EXTRA_RIGHT_OVERS, score.rightOvers)
-                            putExtra(ScorecardActivity.EXTRA_TARGET, score.target)
-                            putExtra(ScorecardActivity.EXTRA_RRR, score.rrr)
-                            putExtra(ScorecardActivity.EXTRA_WIN, score.win)
-                            putExtra(ScorecardActivity.EXTRA_NOTE, score.note)
-                        }
+                        Intent(this, ScorecardActivity::class.java)
+                            .putExtra(ScorecardActivity.EXTRA_MATCH_ID, match.matchId)
                     )
                 }
             )
         }
     }
+
+    @Suppress("DEPRECATION")
+    private suspend fun resolveLocation(query: String): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val address = Geocoder(this@ViewAllScoreCardActivity, Locale.getDefault())
+                .getFromLocationName(query, 1)
+                ?.firstOrNull()
+                ?: return@withContext null
+            val locationLabel = listOfNotNull(
+                address.locality,
+                address.subAdminArea,
+                address.adminArea,
+                address.countryName
+            )
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct()
+                .joinToString(", ")
+            locationLabel.ifBlank {
+                address.featureName?.takeIf(String::isNotBlank).orEmpty()
+            }.takeIf(String::isNotBlank)
+        }.getOrNull()
+    }
 }
-
-private data class ScoreCardItem(
-    val league: String,
-    val round: String,
-    val leftName: String,
-    val leftScore: String,
-    val leftOvers: String,
-    val rightName: String,
-    val rightScore: String,
-    val rightOvers: String,
-    val target: String,
-    val rrr: String,
-    val win: String,
-    val note: String
-)
-
-private val scoreCards = listOf(
-    ScoreCardItem("VALORANT PRO LEAGUE", "Semi-final - Match 07", "NSC", "142/4", "18.4 OV", "VCR", "138/6", "18.1 OV", "156", "8.42", "NSC 61%", "VCR chose to bowl - Powerplay complete"),
-    ScoreCardItem("CRICKET PREMIER CUP", "Qualifier - Match 12", "BBS", "96/2", "11.3 OV", "KDP", "94/7", "15.0 OV", "148", "7.86", "BBS 68%", "BBS need 52 from 51 balls"),
-    ScoreCardItem("FOOTBALL NIGHT CUP", "Group A - Match 04", "FCR", "2", "62 MIN", "BLU", "1", "62 MIN", "90", "LIVE", "FCR 54%", "High press active in the second half"),
-    ScoreCardItem("KABADDI ARENA", "Eliminator - Match 03", "KAL", "31", "HT", "TIT", "27", "HT", "40", "BONUS", "KAL 58%", "KAL lead by 4 with two super tackles"),
-    ScoreCardItem("BADMINTON OPEN", "Court 2 - Set 03", "RAY", "18", "SET 3", "DEV", "16", "SET 3", "21", "RALLY", "RAY 63%", "Both players trading long baseline rallies")
-)
 
 private val Primary = Color(0xFFC1FF00)
 private val Cyan = Color(0xFF00D2FF)
@@ -121,7 +161,34 @@ private val Muted = Color(0xFF7F9196)
 private enum class ScoreUiIcon { BACK, SORT, SEARCH, LOCATION, SHIELD, BOLT }
 
 @Composable
-private fun ViewAllScoreCardScreen(onBack: () -> Unit, onOpenScorecard: (ScoreCardItem) -> Unit) {
+private fun ViewAllScoreCardScreen(
+    initialLocation: String,
+    deviceLocation: String?,
+    matches: List<LiveMatch>,
+    isLoading: Boolean,
+    isOffline: Boolean,
+    errorMessage: String?,
+    onBack: () -> Unit,
+    onResolveLocation: (String, (String?) -> Unit) -> Unit,
+    onOpenScorecard: (LiveMatch) -> Unit
+) {
+    var currentLocation by remember { mutableStateOf(initialLocation) }
+    var showLocationPicker by remember { mutableStateOf(false) }
+    var isSearchOpen by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredMatches = remember(matches, searchQuery) {
+        val query = searchQuery.trim()
+        if (query.isBlank()) matches
+        else matches.filter { match ->
+            sequenceOf(
+                match.tournamentName,
+                match.teamAName,
+                match.teamBName,
+                match.teamAShortName,
+                match.teamBShortName
+            ).any { name -> name.contains(query, ignoreCase = true) }
+        }
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -140,16 +207,44 @@ private fun ViewAllScoreCardScreen(onBack: () -> Unit, onOpenScorecard: (ScoreCa
                 .fillMaxSize()
                 .padding(start = 16.dp, top = 22.dp, end = 16.dp)
         ) {
-            TopBar(onBack)
+            TopBar(currentLocation, onBack) { showLocationPicker = true }
             Spacer(Modifier.height(22.dp))
             Text(
-                text = "Live matches near you",
+                text = "Live matches",
                 color = Primary,
                 fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(18.dp))
-            ControlRow()
+            ControlRow(
+                onChooseLocation = { showLocationPicker = true },
+                onSearch = {
+                    isSearchOpen = !isSearchOpen
+                    if (!isSearchOpen) searchQuery = ""
+                }
+            )
+            if (isSearchOpen) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    label = { Text("Tournament or team name") },
+                    placeholder = { Text("Search tournaments or teams") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Primary,
+                        unfocusedBorderColor = Muted,
+                        focusedLabelColor = Primary,
+                        unfocusedLabelColor = Muted,
+                        cursorColor = Primary
+                    )
+                )
+            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -158,16 +253,82 @@ private fun ViewAllScoreCardScreen(onBack: () -> Unit, onOpenScorecard: (ScoreCa
                     .padding(top = 18.dp, bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                scoreCards.forEach { score ->
-                    ScoreCard(score, onClick = { onOpenScorecard(score) })
+                if (isOffline && matches.isNotEmpty()) {
+                    Text("Showing last synced scores while offline", color = Color(0xFFFFD660), fontSize = 10.sp)
+                }
+                when {
+                    isLoading && matches.isEmpty() -> {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(top = 56.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator(color = Primary, strokeWidth = 2.dp)
+                            Text("Loading live scorecards…", color = Muted, fontSize = 12.sp)
+                        }
+                    }
+                    matches.isEmpty() -> {
+                        Text(
+                            text = errorMessage ?: "No live scorecards are available right now.",
+                            color = Muted,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(top = 56.dp)
+                        )
+                    }
+                    filteredMatches.isEmpty() -> {
+                        Text(
+                            text = "No tournaments or teams match \"${searchQuery.trim()}\".",
+                            color = Muted,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(top = 56.dp)
+                        )
+                    }
+                    else -> {
+                        for (match in filteredMatches) {
+                            AndroidView(
+                                factory = { context ->
+                                    LiveMatchCardView(context).apply {
+                                        setOnClickListener { onOpenScorecard(match) }
+                                    }
+                                },
+                                update = { card ->
+                                    card.bind(match)
+                                    card.setOnClickListener { onOpenScorecard(match) }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
                 }
             }
         }
     }
+
+    if (showLocationPicker) {
+        LocationPickerDialog(
+            currentLocation = currentLocation,
+            deviceLocation = deviceLocation,
+            onDismiss = { showLocationPicker = false },
+            onUseCurrentLocation = {
+                currentLocation = deviceLocation ?: "Location unavailable"
+                showLocationPicker = false
+            },
+            onResolveLocation = { query, onResolved ->
+                onResolveLocation(query) { resolved ->
+                    if (resolved != null) {
+                        currentLocation = resolved
+                    }
+                    onResolved(resolved)
+                }
+            }
+        )
+    }
 }
 
 @Composable
-private fun TopBar(onBack: () -> Unit) {
+private fun TopBar(location: String, onBack: () -> Unit, onChooseLocation: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -185,12 +346,12 @@ private fun TopBar(onBack: () -> Unit) {
                 .weight(1f)
                 .padding(start = 12.dp)
         )
-        LocationChip()
+        LocationChip(location, onChooseLocation)
     }
 }
 
 @Composable
-private fun ControlRow() {
+private fun ControlRow(onChooseLocation: () -> Unit, onSearch: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -198,8 +359,8 @@ private fun ControlRow() {
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         ActionPill(ScoreUiIcon.SORT, "Sort", Modifier.weight(1f))
-        ActionPill(ScoreUiIcon.SEARCH, "Search", Modifier.weight(1f))
-        ActionPill(ScoreUiIcon.LOCATION, "Choose Location", Modifier.weight(1.28f), accent = Primary)
+        ActionPill(ScoreUiIcon.SEARCH, "Search", Modifier.weight(1f), onClick = onSearch)
+        ActionPill(ScoreUiIcon.LOCATION, "Choose Location", Modifier.weight(1.28f), accent = Primary, onClick = onChooseLocation)
     }
 }
 
@@ -219,31 +380,46 @@ private fun IconButtonIcon(icon: ScoreUiIcon, onClick: () -> Unit) {
 }
 
 @Composable
-private fun LocationChip() {
+private fun LocationChip(location: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .height(42.dp)
             .clip(RoundedCornerShape(21.dp))
             .background(Primary.copy(alpha = 0.16f))
             .border(1.dp, Primary.copy(alpha = 0.55f), RoundedCornerShape(21.dp))
+            .clickable(onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         ScoreIcon(icon = ScoreUiIcon.LOCATION, tint = Primary, modifier = Modifier.size(17.dp))
         Spacer(Modifier.width(6.dp))
-        Text(text = "Madanpur", color = Color(0xFFE4EEE8), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = location,
+            color = Color(0xFFE4EEE8),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 116.dp)
+        )
     }
 }
 
 @Composable
-private fun ActionPill(icon: ScoreUiIcon, label: String, modifier: Modifier = Modifier, accent: Color = Color.White) {
+private fun ActionPill(
+    icon: ScoreUiIcon,
+    label: String,
+    modifier: Modifier = Modifier,
+    accent: Color = Color.White,
+    onClick: () -> Unit = {}
+) {
     Row(
         modifier = modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(9.dp))
             .background(Panel.copy(alpha = 0.92f))
             .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(9.dp))
-            .clickable { },
+            .clickable(onClick = onClick),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -261,153 +437,89 @@ private fun ActionPill(icon: ScoreUiIcon, label: String, modifier: Modifier = Mo
 }
 
 @Composable
-private fun ScoreCard(score: ScoreCardItem, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .background(
-                Brush.linearGradient(
-                    listOf(Color(0xFF0D3263), Color(0xFF07111C), Color(0xFF071C3A))
-                )
-            )
-            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
-            .padding(16.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = score.league,
-                    color = Color(0xFFCCD9E5),
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(text = score.round, color = Muted, fontSize = 8.2.sp, fontWeight = FontWeight.Bold)
-            }
-            Text(text = "LIVE", color = Color(0xFFFF3A48), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        }
-
-        Spacer(Modifier.height(18.dp))
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(116.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TeamBox(score.leftName, score.leftScore, score.leftOvers, ScoreUiIcon.SHIELD, Primary, Modifier.weight(1f))
-            VsBubble()
-            TeamBox(score.rightName, score.rightScore, score.rightOvers, ScoreUiIcon.BOLT, Cyan, Modifier.weight(1f))
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            StatChip("TARGET", score.target)
-            Spacer(Modifier.width(8.dp))
-            StatChip("RRR", score.rrr)
-            Spacer(Modifier.width(8.dp))
-            StatChip("WIN", score.win)
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        Text(
-            text = score.note,
-            color = Color(0xFFB2BFCD),
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-}
-
-@Composable
-private fun TeamBox(
-    name: String,
-    score: String,
-    detail: String,
-    icon: ScoreUiIcon,
-    accent: Color,
-    modifier: Modifier = Modifier
+private fun LocationPickerDialog(
+    currentLocation: String,
+    deviceLocation: String?,
+    onDismiss: () -> Unit,
+    onUseCurrentLocation: () -> Unit,
+    onResolveLocation: (String, (String?) -> Unit) -> Unit
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(10.dp))
-            .background(Brush.verticalGradient(listOf(Color(0xFF17232F).copy(alpha = 0.92f), Color(0xFF080F16).copy(alpha = 0.95f))))
-            .border(1.dp, accent.copy(alpha = 0.32f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 8.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background(accent.copy(alpha = 0.16f))
-                .border(1.dp, accent.copy(alpha = 0.55f), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            ScoreIcon(icon = icon, tint = accent, modifier = Modifier.size(22.dp))
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(text = name, color = accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-        Text(
-            text = score,
-            color = Color.White,
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
-            fontStyle = FontStyle.Italic
-        )
-        Text(text = detail, color = Color(0xFF7D8B9A), fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
-    }
-}
+    var query by remember(currentLocation) { mutableStateOf(currentLocation.takeUnless { it == "Location unavailable" }.orEmpty()) }
+    var isResolving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val focusManager = LocalFocusManager.current
 
-@Composable
-private fun VsBubble() {
-    Box(
-        modifier = Modifier
-            .width(54.dp)
-            .fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(Primary)
-                .border(1.dp, Color.White.copy(alpha = 0.5f), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(text = "VS", color = Color(0xFF070E14), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    AlertDialog(
+        onDismissRequest = { if (!isResolving) onDismiss() },
+        containerColor = Panel,
+        title = { Text("Choose Location", color = Color.White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Enter the city or area to show on this screen.", color = Muted, fontSize = 12.sp)
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = {
+                        query = it
+                        errorMessage = null
+                    },
+                    label = { Text("City or area") },
+                    placeholder = { Text("e.g. Bhubaneswar") },
+                    singleLine = true,
+                    enabled = !isResolving,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = {
+                        focusManager.clearFocus()
+                    }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Primary,
+                        unfocusedBorderColor = Muted,
+                        focusedLabelColor = Primary,
+                        unfocusedLabelColor = Muted,
+                        cursorColor = Primary
+                    )
+                )
+                errorMessage?.let { Text(it, color = Color(0xFFFF7180), fontSize = 11.sp) }
+                if (!deviceLocation.isNullOrBlank()) {
+                    TextButton(
+                        onClick = onUseCurrentLocation,
+                        enabled = !isResolving
+                    ) {
+                        Text("Use current location · $deviceLocation", color = Primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !isResolving,
+                onClick = {
+                    val value = query.trim()
+                    if (value.isBlank()) {
+                        errorMessage = "Enter a city or area."
+                    } else {
+                        isResolving = true
+                        errorMessage = null
+                        onResolveLocation(value) { resolved ->
+                            isResolving = false
+                            if (resolved == null) {
+                                errorMessage = "Location not found. Try a nearby city or area."
+                            } else {
+                                onDismiss()
+                            }
+                        }
+                    }
+                }
+            ) {
+                if (isResolving) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Primary, strokeWidth = 2.dp)
+                else Text("Set location", color = Primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isResolving) { Text("Cancel", color = Muted) }
         }
-    }
-}
-
-@Composable
-private fun StatChip(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .height(32.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White)
-            .border(1.dp, Color.Black.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
-            .padding(horizontal = 9.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(text = label, color = Color(0xFF222222), fontSize = 7.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.width(5.dp))
-        Text(text = value, color = Color.Black, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
-    }
+    )
 }
 
 @Composable

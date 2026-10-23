@@ -396,7 +396,7 @@ class LiveMatchCardView @JvmOverloads constructor(
                 "Need ${match.target - match.score} runs from ${remainingBallsText(match)}"
             match.isLive -> match.matchStatusNote ?: "Powerplay"
             match.isCompleted -> "Match Completed"
-            match.isUpcoming -> "Starts at 4:30 PM"
+            match.isUpcoming -> match.matchStatusNote ?: "Upcoming match"
             else -> ""
         }
 

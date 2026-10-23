@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -60,6 +61,9 @@ import com.example.sportsxtreme.presentation.components.SportsXtremeAppBar
 import com.example.sportsxtreme.presentation.profile.Lime
 import coil3.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FieldPath
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 // Color Palette matching pixel-perfect screenshots
 private val GreenAccent = Color(0xFFC1FF00)
@@ -137,6 +141,7 @@ fun LeaderBoardScreen2(
     val tournamentOptions = remember { androidx.compose.runtime.mutableStateListOf<Pair<String, String>>() }
     var leaderboardError by remember { mutableStateOf<String?>(null) }
     val firestore = remember { FirebaseFirestore.getInstance() }
+    val leaderboardScope = rememberCoroutineScope()
 
     DisposableEffect(firestore) {
         val registration = firestore.collection("tournaments").addSnapshotListener { snapshot, _ ->
@@ -152,6 +157,8 @@ fun LeaderBoardScreen2(
         val formatKey = when (selectedFormat) { "Limited Overs" -> "LIMITED_OVERS"; "Test" -> "TEST"; else -> selectedFormat.uppercase() }
         val activeTournamentId = if (selectedTab == LeaderboardTab.PLAYER) "" else selectedTournamentId
         val registrations = mutableListOf<com.google.firebase.firestore.ListenerRegistration>()
+        var effectActive = true
+        var playerSnapshotRevision = 0L
         if (selectedTab == LeaderboardTab.PLAYER) {
             val registration = firestore.collection("leaderboards").document("playerAggregates").collection("entries")
                 .whereEqualTo("sport", "CRICKET")
@@ -167,14 +174,45 @@ fun LeaderBoardScreen2(
                             doc.getString("format") == formatKey &&
                             doc.getString("tournamentId").orEmpty() == activeTournamentId
                     }
-                    val records = documents.map { doc ->
-                        val id = doc.getString("playerId").orEmpty()
+                    val revision = ++playerSnapshotRevision
+                    leaderboardScope.launch {
+                        // Older deleted accounts may still have aggregate rows from
+                        // before deleteAccount began pruning leaderboard contributions.
+                        // A canonical ID distinct from the player ID identifies a
+                        // linked account; hide that row if its user profile is gone.
+                        val linkedAccountIds = documents.mapNotNull { doc ->
+                            val playerId = doc.getString("playerId")?.trim().orEmpty()
+                            val canonicalId = doc.getString("canonicalPlayerId")?.trim()
+                                ?.takeIf(String::isNotBlank)
+                                ?: playerId.substringAfterLast("::").trim()
+                            canonicalId.takeIf { it.isNotBlank() && it != playerId }
+                        }.distinct()
+                        val existingAccountIds = runCatching {
+                            linkedAccountIds.chunked(30).flatMap { accountIds ->
+                                firestore.collection("users")
+                                    .whereIn(FieldPath.documentId(), accountIds)
+                                    .get()
+                                    .await()
+                                    .documents
+                                    .map { it.id }
+                            }.toSet()
+                        }.getOrDefault(linkedAccountIds.toSet())
+                        if (!effectActive || revision != playerSnapshotRevision) return@launch
+                        val missingLinkedAccounts = linkedAccountIds.toSet() - existingAccountIds
+                        val records = documents.map { doc ->
+                        val playerId = doc.getString("playerId")?.trim().orEmpty()
+                        // New aggregate rows carry the linked account ID. Older rows
+                        // used team-scoped IDs (`teamId::userId`), so use the shared
+                        // user ID suffix as a backward-compatible identity key.
+                        val id = doc.getString("canonicalPlayerId")?.trim()
+                            ?.takeIf(String::isNotBlank)
+                            ?: playerId.substringAfterLast("::").trim()
                         val value = when (selectedSkill) {
                             "Bowling" -> doc.getLong("bowlingPoints") ?: 0L
                             "All-rounder" -> doc.getLong("allRounderPoints") ?: 0L
                             else -> doc.getLong("battingPoints") ?: 0L
                         }
-                        val name = doc.getString("name").orEmpty().ifBlank { id }
+                        val name = doc.getString("name").orEmpty().ifBlank { playerId }
                         val stats = when (selectedSkill) {
                             "Bowling" -> "W ${doc.getLong("wickets") ?: 0} • ECO ${rate((doc.getLong("runsConceded") ?: 0L).toDouble() * 6 / (doc.getLong("legalBalls") ?: 0L).coerceAtLeast(1))} • AVG ${rate((doc.getLong("runsConceded") ?: 0L).toDouble() / (doc.getLong("wickets") ?: 0L).coerceAtLeast(1))}"
                             "All-rounder" -> "BAT ${doc.getLong("battingPoints") ?: 0} • BOWL ${doc.getLong("bowlingPoints") ?: 0} • FIELD ${doc.getLong("fieldingPoints") ?: 0}"
@@ -185,8 +223,17 @@ fun LeaderBoardScreen2(
                             "", doc.getString("teamShortName").orEmpty().ifBlank { doc.getString("teamName").orEmpty() },
                             value.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), CyanAccent,
                             doc.getString("profilePhotoUrl").orEmpty(), displayStats))
-                    }.sortedWith(compareByDescending<Triple<Long, String, PlayerRank>> { it.first }.thenBy { it.third.name.lowercase(Locale.ROOT) }.thenBy { it.second })
-                    playerRows.addAll(records.mapIndexed { index, row -> row.third.copy(rank = index + 1) })
+                        }
+                            .filter { it.second.isNotBlank() }
+                            .filterNot { row -> row.second in missingLinkedAccounts }
+                            .sortedWith(compareByDescending<Triple<Long, String, PlayerRank>> { it.first }
+                                .thenBy { it.third.name.lowercase(Locale.ROOT) }
+                                .thenBy { it.second })
+                            // Multiple aggregate documents can reference one player. Keep that
+                            // player's highest-scoring entry so they appear only once.
+                            .distinctBy { it.second }
+                        playerRows.addAll(records.mapIndexed { index, row -> row.third.copy(rank = index + 1) })
+                    }
                 }
             registrations += registration
         } else {
@@ -220,7 +267,10 @@ fun LeaderBoardScreen2(
                 }
             registrations += registration
         }
-        onDispose { registrations.forEach { it.remove() } }
+        onDispose {
+            effectActive = false
+            registrations.forEach { it.remove() }
+        }
     }
 
     Box(

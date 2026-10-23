@@ -19,6 +19,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,15 +56,29 @@ class ManagePlayersInsideTeamActivity : ComponentActivity() {
         const val EXTRA_TEAM_ID = "com.example.sportsxtreme.extra.TEAM_ID"
     }
 
-    private val ManageBackground = XtremeBgBlue
+    private val ManageBackground = Color(0xFF0A101C)
     private val ManageCard = XtremeCardBlue
     private val ManageStroke = Color(0xFF253443)
-    private val ManageAccent = Color(0xFFC9FF16)
+    private val ManageAccent = Color(0xFFC1FF00)
     private val ManageMuted = Color(0xFFAAB5C0)
 
     @Composable
 private fun ManagePlayersScreen(teamName: String, onBack: () -> Unit, onProfile: () -> Unit, onAddPlayer: () -> Unit) {
-        Column(Modifier.fillMaxSize().background(ManageBackground).padding(horizontal = 12.dp)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(ManageBackground)
+                .drawBehind {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(ManageAccent.copy(alpha = 0.15f), Color.Transparent),
+                            center = Offset(size.width / 2f, -50f),
+                            radius = size.height * 0.6f
+                        )
+                    )
+                }
+        ) {
+          Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
             Row(
                 Modifier.fillMaxWidth().padding(top = 18.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -129,6 +146,7 @@ private fun ManagePlayersScreen(teamName: String, onBack: () -> Unit, onProfile:
                 )
             ActionButton("♙+  Add Player", Modifier.weight(1.1f), filled = true, onClick = onAddPlayer)
             }
+          }
         }
     }
 

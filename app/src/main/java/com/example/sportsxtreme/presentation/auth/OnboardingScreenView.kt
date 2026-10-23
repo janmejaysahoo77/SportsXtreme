@@ -1423,7 +1423,8 @@ class OnboardingScreenView @JvmOverloads constructor(
                         startTimeMs = transitionStartMs
                         invalidate()
                     } else {
-                        (context as? MainActivity)?.showSignupScreen()
+                        GuestExperiencePreferences.markOnboardingComplete(context)
+                        (context as? MainActivity)?.showSportSelectionScreen()
                     }
                     performClick()
                 }

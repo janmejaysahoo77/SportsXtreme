@@ -404,6 +404,8 @@ class ScorecardActivity : ComponentActivity() {
             else -> ""
         }
         val target = if (isFirstInnings) "—" else targetValue?.toString() ?: "—"
+        val finalization = get("finalization") as? Map<*, *>
+        val finalResult = (finalization?.get("result") as? String)?.uppercase(Locale.US).orEmpty()
         val requiredRunRate = if (isFirstInnings) "—" else {
             liveScore?.decimal("requiredRunRate")?.formatRate()
                 ?: activeInnings?.let { inning ->
@@ -419,6 +421,7 @@ class ScorecardActivity : ComponentActivity() {
         return previous.copy(
             tournamentId = getString("tournamentId").orEmpty(),
             status = getString("status")?.uppercase(Locale.US) ?: previous.status,
+            result = finalResult.ifBlank { previous.result },
             league = if (isFriendlyMatch) getString("title")?.takeIf(String::isNotBlank) ?: "Friendly Match"
                 else getString("tournamentName")?.takeIf(String::isNotBlank)
                     ?: (liveScore?.get("tournamentName") as? String)?.takeIf(String::isNotBlank)
@@ -501,6 +504,7 @@ class ScorecardActivity : ComponentActivity() {
             league = intent.getStringExtra(EXTRA_LEAGUE)?.takeIf(String::isNotBlank) ?: "MATCH SCORECARD",
             tournamentId = intent.getStringExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID).orEmpty(),
             status = "LIVE",
+            result = "",
             matchId = resolveMatchId(intent),
             round = intent.getStringExtra(EXTRA_ROUND)?.takeIf(String::isNotBlank).orEmpty(),
             leftName = intent.getStringExtra(EXTRA_LEFT_NAME)?.takeIf(String::isNotBlank) ?: "TEAM A",
@@ -539,6 +543,7 @@ private data class MatchDetail(
     val league: String,
     val tournamentId: String,
     val status: String,
+    val result: String,
     val matchId: String,
     val round: String,
     val leftName: String,
@@ -1373,7 +1378,20 @@ private fun LiveScorePanel(match: MatchDetail) {
             }
         }
 
-        if (!match.isFirstInnings && runsNeeded != null && ballsRemaining != null) {
+        val leftRuns = match.leftScore.substringBefore('/').toIntOrNull()
+        val rightRuns = match.rightScore.substringBefore('/').toIntOrNull()
+        val isCompletedTie = match.status == "COMPLETED" &&
+            (match.result == "TIE" || (leftRuns != null && leftRuns == rightRuns))
+
+        if (isCompletedTie) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "Match tied",
+                color = Color(0xFFFF4D5E),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black
+            )
+        } else if (match.status != "COMPLETED" && !match.isFirstInnings && runsNeeded != null && ballsRemaining != null) {
             Spacer(Modifier.height(10.dp))
             Text(
                 text = if (runsNeeded == 0) "Target reached" else "$battingName need $runsNeeded runs from $ballsRemaining balls",

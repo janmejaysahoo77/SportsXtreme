@@ -134,7 +134,7 @@ class MainScoringActivity : ComponentActivity() {
                 onBack = ::pauseScoringAndFinish,
                 onLeaveScoring = ::leaveScoringToHostQuickScoring,
                 onRun = { runs, dir, meta -> scoringViewModel.recordRuns(runs, dir, meta) },
-                onExtra = scoringViewModel::recordExtra,
+                onExtra = { type, runs -> scoringViewModel.recordExtra(type, runs) },
                 onRecordOut = { type, variant, fielderId, brilliantCatch ->
                     scoringViewModel.recordWicket(type, variant, fielderId, brilliantCatch)
                 },
@@ -235,7 +235,7 @@ private fun MainScoringScreen(
     onBack: () -> Unit,
     onLeaveScoring: () -> Unit,
     onRun: (Int, String?, Map<String, String>) -> Unit,
-    onExtra: (com.example.sportsxtreme.domain.model.ExtraType) -> Unit,
+    onExtra: (com.example.sportsxtreme.domain.model.ExtraType, Int) -> Unit,
     onRecordOut: (DismissalType, String, String?, Boolean) -> Unit,
     onRecordObstructingField: (String, ExtraType, Int) -> Unit,
     onRecordRunOut: (String, String, String?, Boolean, ExtraType, Int) -> Unit,
@@ -262,6 +262,7 @@ private fun MainScoringScreen(
     var showHitBallTwiceSheet by remember { mutableStateOf(false) }
     var showObstructingFieldSheet by remember { mutableStateOf(false) }
     var showRunOutSheet by remember { mutableStateOf(false) }
+    var pendingExtraType by remember { mutableStateOf<ExtraType?>(null) }
     var wagonRun by remember { mutableStateOf(0) }
     var battingPlayers by remember { mutableStateOf(emptyList<Player>()) }
     var bowlingPlayers by remember { mutableStateOf(emptyList<Player>()) }
@@ -367,7 +368,10 @@ private fun MainScoringScreen(
                         onRun(runs, null, emptyMap())
                     }
                 },
-                onExtra = onExtra,
+                onExtra = { type ->
+                    if (type in setOf(ExtraType.WIDE, ExtraType.NO_BALL, ExtraType.BYE, ExtraType.LEG_BYE)) pendingExtraType = type
+                    else onExtra(type, 0)
+                },
                 onWicket = { showOutPicker = true },
                 onUndo = onUndo
             )
@@ -610,9 +614,9 @@ private fun MainScoringScreen(
             HitBallTwiceBottomSheet(
                 strikerName = matchState?.striker?.displayName.orEmpty(),
                 onDismiss = { showHitBallTwiceSheet = false },
-                onConfirm = { noBall ->
+                onConfirm = {
                     showHitBallTwiceSheet = false
-                    onRecordOut(DismissalType.HIT_BALL_TWICE, "Hit the ball twice", null, noBall)
+                    onRecordOut(DismissalType.HIT_BALL_TWICE, "Hit the ball twice", null, false)
                 }
             )
         }
@@ -761,6 +765,77 @@ private fun MainScoringScreen(
                     }
                 }
             }
+        }
+        pendingExtraType?.let { type ->
+            ExtraRunsDialog(
+                type = type,
+                onDismiss = { pendingExtraType = null },
+                onSelect = { runs ->
+                    pendingExtraType = null
+                    onExtra(type, runs)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExtraRunsDialog(type: ExtraType, onDismiss: () -> Unit, onSelect: (Int) -> Unit) {
+    var customSelected by remember(type) { mutableStateOf(false) }
+    var customRuns by remember(type) { mutableStateOf("") }
+    var selectedRuns by remember(type) { mutableStateOf<Int?>(null) }
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                .background(OutSheetBackground).border(1.dp, ScoringStroke, RoundedCornerShape(16.dp)).padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                when (type) {
+                    ExtraType.NO_BALL -> "NO BALL RUNS"
+                    ExtraType.WIDE -> "WIDE RUNS"
+                    ExtraType.BYE -> "BYE RUNS"
+                    ExtraType.LEG_BYE -> "LEG BYE RUNS"
+                    else -> "EXTRA RUNS"
+                },
+                color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black
+            )
+            Text("Select runs completed", color = ScoringMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp, bottom = 14.dp))
+            val runChoices = if (type == ExtraType.BYE || type == ExtraType.LEG_BYE) 1..6 else 0..6
+            runChoices.chunked(4).forEach { rowRuns ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    rowRuns.forEach { runs ->
+                        val selected = !customSelected && selectedRuns == runs
+                        Text("+$runs", color = if (selected) ScoringAccent else Color.White, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                                .background(if (selected) Color.Transparent else ScoringCard)
+                                .border(if (selected) 1.dp else 0.dp, if (selected) ScoringAccent else Color.Transparent, RoundedCornerShape(8.dp))
+                                .clickable { customSelected = false; selectedRuns = runs }.padding(vertical = 13.dp))
+                    }
+                    repeat(4 - rowRuns.size) { Spacer(Modifier.weight(1f)) }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+            if (customSelected) {
+                BasicTextField(
+                    value = customRuns,
+                    onValueChange = { customRuns = it.filter(Char::isDigit).take(4); selectedRuns = null },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 16.sp),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(ScoringCard).padding(12.dp),
+                    decorationBox = { inner -> Box { if (customRuns.isEmpty()) Text("Enter runs", color = ScoringMuted); inner() } }
+                )
+            } else {
+                Text("CUSTOM", color = ScoringAccent, fontWeight = FontWeight.Black,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).border(1.dp, ScoringAccent, RoundedCornerShape(8.dp))
+                        .clickable { customSelected = true; selectedRuns = null }.padding(12.dp), textAlign = TextAlign.Center)
+            }
+            val runsToConfirm = if (customSelected) customRuns.toIntOrNull() else selectedRuns
+            if (runsToConfirm != null) {
+                Text("CONFIRM", color = ScoringBg, fontWeight = FontWeight.Black, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                    .clip(RoundedCornerShape(8.dp)).background(ScoringAccent).clickable { onSelect(runsToConfirm) }.padding(12.dp), textAlign = TextAlign.Center)
+            }
+            Text("CANCEL", color = ScoringMuted, modifier = Modifier.padding(top = 12.dp).clickable(onClick = onDismiss).padding(6.dp))
         }
     }
 }
@@ -1166,10 +1241,8 @@ private fun HitWicketOutBottomSheet(
 private fun HitBallTwiceBottomSheet(
     strikerName: String,
     onDismiss: () -> Unit,
-    onConfirm: (noBall: Boolean) -> Unit
+    onConfirm: () -> Unit
 ) {
-    var noBall by remember { mutableStateOf(false) }
-
     BoxWithConstraints(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(onClick = onDismiss))
         Column(
@@ -1189,7 +1262,7 @@ private fun HitBallTwiceBottomSheet(
         ) {
             Box(Modifier.align(Alignment.CenterHorizontally).width(38.dp).height(4.dp).clip(CircleShape).background(ScoringStroke))
             Text("Hit the Ball Twice", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 12.dp))
-            Text("Who?", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 22.dp))
+            Text("The striker will be out", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 22.dp))
             RetiredHurtPlayerCard(
                 name = strikerName,
                 role = "Striker",
@@ -1199,24 +1272,10 @@ private fun HitBallTwiceBottomSheet(
                 onClick = {}
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).clickable { noBall = !noBall }.padding(vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    Modifier.size(20.dp).border(1.dp, if (noBall) ScoringAccent else ScoringMuted, RoundedCornerShape(3.dp))
-                        .background(if (noBall) ScoringAccent else Color.Transparent, RoundedCornerShape(3.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (noBall) Text("✓", color = ScoringBg, fontSize = 14.sp, fontWeight = FontWeight.Black)
-                }
-                Text("No Ball", color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(start = 9.dp))
-            }
-
             Spacer(Modifier.weight(1f))
             Box(
                 Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(8.dp))
-                    .background(ScoringAccent).clickable { onConfirm(noBall) },
+                    .background(ScoringAccent).clickable(onClick = onConfirm),
                 contentAlignment = Alignment.Center
             ) {
                 Text("OUT", color = ScoringBg, fontSize = 14.sp, fontWeight = FontWeight.Black)
@@ -1853,16 +1912,24 @@ private fun CurrentOverCard(events: List<com.example.sportsxtreme.domain.model.B
             Text("CURRENT OVER", color = ScoringMuted, fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 1.4.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("LAST BALL: ", color = ScoringMuted, fontSize = 7.sp, fontWeight = FontWeight.Black)
-                Text(lastEvent?.totalRuns?.let { "$it Runs" } ?: "--", color = ScoringAccent, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                Text(lastEvent?.let { currentOverBallLabel(it) } ?: "--", color = ScoringAccent, fontSize = 9.sp, fontWeight = FontWeight.Black)
             }
         }
         Row(
             modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            events.takeLast(6).map { it.totalRuns.toString() to if (it.totalRuns == 4) ScoringBlue else if (it.totalRuns == 6) ScoringAccent else null }
-                .let { values -> if (values.isEmpty()) List(6) { "--" to null } else values }
-                .forEachIndexed { index, (value, col) ->
+            events.takeLast(6).map { event ->
+                val extraLabel = currentOverExtraLabel(event)
+                val label = extraLabel ?: event.totalRuns.toString()
+                val color = if (extraLabel != null) null
+                    else if (event.totalRuns == 4) ScoringBlue
+                    else if (event.totalRuns == 6) ScoringAccent
+                    else null
+                Triple(label, color, extraLabel != null)
+            }
+                .let { values -> if (values.isEmpty()) List(6) { Triple("--", null, false) } else values }
+                .forEachIndexed { index, (value, col, isExtra) ->
                 val color = col ?: Color(0xFF222A3A)
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(
@@ -1873,7 +1940,7 @@ private fun CurrentOverCard(events: List<com.example.sportsxtreme.domain.model.B
                             .border(1.dp, color, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(value, color = if (col != null) color else Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                        Text(value, color = if (col != null) color else Color.White, fontSize = if (isExtra) 9.sp else 14.sp, fontWeight = FontWeight.Black, maxLines = 1)
                     }
                     Text("B${index + 1}", color = ScoringMuted, fontSize = 7.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 4.dp))
                 }
@@ -1881,6 +1948,23 @@ private fun CurrentOverCard(events: List<com.example.sportsxtreme.domain.model.B
         }
     }
 }
+
+private fun currentOverExtraLabel(event: com.example.sportsxtreme.domain.model.BallEvent): String? {
+    val noBall = event.extras.firstOrNull { it.type == ExtraType.NO_BALL }
+    if (noBall != null) {
+        val batRuns = event.runsOffBat
+        return if (batRuns > 0) "NB+$batRuns" else "NB"
+    }
+    val wide = event.extras.firstOrNull { it.type == ExtraType.WIDE }
+    if (wide != null) {
+        val additionalRuns = (wide.runs - 1).coerceAtLeast(0)
+        return if (additionalRuns > 0) "WD+$additionalRuns" else "WD"
+    }
+    return null
+}
+
+private fun currentOverBallLabel(event: com.example.sportsxtreme.domain.model.BallEvent): String =
+    currentOverExtraLabel(event) ?: "${event.totalRuns} Runs"
 
 // ── Run Pad ───────────────────────────────────────────────
 @Composable

@@ -4,7 +4,6 @@ import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.common.WindowInsetsUtils
 import com.example.sportsxtreme.data.di.AuthDependencies
-import com.example.sportsxtreme.domain.model.AuthFeatureFlags
 import com.example.sportsxtreme.presentation.tournament.*
 import com.example.sportsxtreme.presentation.components.*
 import com.example.sportsxtreme.presentation.auth.*
@@ -16,15 +15,7 @@ import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.LinearGradient
-import android.graphics.Paint
-import android.graphics.Rect
-import android.graphics.RectF
-import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.Editable
@@ -61,11 +52,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import android.app.Activity
-import android.content.Intent
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.sin
 
 class SignupScreenView @JvmOverloads constructor(
     context: Context,
@@ -78,9 +64,7 @@ class SignupScreenView @JvmOverloads constructor(
     private val splashTitleBlue = Color.rgb(0, 127, 255)
     private val panelColor = Color.argb(186, 4, 7, 7)
 
-    private lateinit var fullNameInput: EditText
     private lateinit var emailInput: EditText
-    private lateinit var phoneInput: EditText
     private lateinit var passwordInput: EditText
     private lateinit var confirmPasswordInput: EditText
     private lateinit var errorMessageView: TextView
@@ -116,12 +100,7 @@ class SignupScreenView @JvmOverloads constructor(
             )
         }
 
-        content.addView(LogoMarkView(context), LinearLayout.LayoutParams(dp(98), dp(58)).apply {
-            bottomMargin = dp(4)
-        })
-        content.addView(BrandWordmarkView(context), LinearLayout.LayoutParams(dp(210), dp(28)).apply {
-            bottomMargin = dp(18)
-        })
+        content.addView(AuthBrandingHeaderView(context), fullWidthParams(bottom = dp(18), height = dp(90)))
 
         content.addView(titleText("SIGN UP", 32f, Color.WHITE).apply {
             setShadowLayer(3.5f * density, 2f * density, 2f * density, splashTitleBlue)
@@ -135,15 +114,7 @@ class SignupScreenView @JvmOverloads constructor(
             includeFontPadding = false
         }, fullWidthParams(top = dp(8), bottom = dp(18)))
 
-        fullNameInput = addField(content, "FULL NAME", "ENTER FULL NAME", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PERSON_NAME)
         emailInput = addField(content, "EMAIL", "ATHLETE@DOMAIN.COM", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
-        phoneInput = addField(content, "PHONE NUMBER", "+1 (000) 000-0000", InputType.TYPE_CLASS_PHONE).apply {
-            verifiedPhoneNumber?.let {
-                setText(it)
-                isEnabled = false
-                alpha = 0.72f
-            }
-        }
         passwordInput = addField(content, "PASSWORD", "********", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD).apply {
             transformationMethod = PasswordTransformationMethod.getInstance()
         }
@@ -233,13 +204,14 @@ class SignupScreenView @JvmOverloads constructor(
     private fun handleSignup(context: Context) {
         if (isSignupLoading) return
 
-        val name = fullNameInput.text.toString().trim()
         val email = emailInput.text.toString().trim()
-        val phoneNumber = phoneInput.text.toString().trim()
+        val name = email.substringBefore('@').replace(Regex("[._-]+"), " ").trim()
+            .ifBlank { "SportsXtreme Athlete" }
+        val phoneNumber = verifiedPhoneNumber.orEmpty()
         val password = passwordInput.text.toString()
         val confirmPassword = confirmPasswordInput.text.toString()
 
-        val validationError = validateSignup(name, email, phoneNumber, password, confirmPassword)
+        val validationError = validateSignup(email, password, confirmPassword)
         if (validationError != null) {
             showError(validationError)
             return
@@ -257,16 +229,8 @@ class SignupScreenView @JvmOverloads constructor(
                     showError(null)
                     if (verifiedPhoneNumber != null) {
                         (context as? MainActivity)?.showSportSelectionScreen()
-                    } else if (AuthFeatureFlags.EMAIL_VERIFICATION_ENABLED) {
-                        (context as? MainActivity)?.showEmailVerificationScreen()
-                    } else if (AuthFeatureFlags.PHONE_OTP_ENABLED) {
-                        sendOtpAndContinue(context, phoneNumber)
                     } else {
-                        when (val profileResult = authViewModel.completePendingAuthentication()) {
-                            is Resource.Success -> (context as? MainActivity)?.showHomeScreen()
-                            is Resource.Error -> showError(profileResult.message ?: "Signup failed")
-                            is Resource.Loading -> Unit
-                        }
+                        (context as? MainActivity)?.showPhoneAuthScreen(forSignupCompletion = true)
                     }
                 }
                 is Resource.Error -> {
@@ -275,27 +239,6 @@ class SignupScreenView @JvmOverloads constructor(
                 is Resource.Loading -> Unit
             }
             setLoading(false)
-        }
-    }
-
-    private suspend fun sendOtpAndContinue(context: Context, phoneNumber: String) {
-        val activity = context as? Activity
-        if (activity == null) {
-            showError("Phone verification needs an active screen.")
-            return
-        }
-        AuthDependencies.bindPhoneAuthActivity(activity)
-        when (val otpResult = authViewModel.sendPhoneOtp(phoneNumber)) {
-            is Resource.Success -> {
-                showError(null)
-                if (otpResult.data?.isAutoVerified == true) {
-                    (context as? MainActivity)?.showSportSelectionScreen()
-                } else {
-                    (context as? MainActivity)?.showOtpVerificationScreen(otpResult.data?.phoneNumber ?: phoneNumber)
-                }
-            }
-            is Resource.Error -> showError(otpResult.message ?: "Could not send OTP")
-            is Resource.Loading -> Unit
         }
     }
 
@@ -329,16 +272,7 @@ class SignupScreenView @JvmOverloads constructor(
                     when (val authResult = authViewModel.signInWithGoogle(googleCredential.idToken)) {
                         is Resource.Success -> {
                             showError(null)
-                            if (AuthFeatureFlags.PHONE_OTP_ENABLED && !AuthFeatureFlags.GOOGLE_BYPASSES_EMAIL_VERIFICATION) {
-                                context.startActivity(Intent(context, PhooneNumberAfterGoogleLogin::class.java))
-                                (context as? Activity)?.overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
-                            } else {
-                                when (val profileResult = authViewModel.completePendingAuthentication()) {
-                                    is Resource.Success -> (context as? MainActivity)?.showHomeScreen()
-                                    is Resource.Error -> showError(profileResult.message ?: "Google signup failed")
-                                    is Resource.Loading -> Unit
-                                }
-                            }
+                            (context as? MainActivity)?.showPhoneAuthScreen(forSignupCompletion = true)
                         }
                         is Resource.Error -> showError(authResult.message ?: "Google signup failed")
                         is Resource.Loading -> Unit
@@ -358,12 +292,9 @@ class SignupScreenView @JvmOverloads constructor(
         }
     }
 
-    private fun validateSignup(name: String, email: String, phoneNumber: String, password: String, confirmPassword: String): String? {
-        val phoneDigits = phoneNumber.count { it.isDigit() }
+    private fun validateSignup(email: String, password: String, confirmPassword: String): String? {
         return when {
-            name.isBlank() -> "Name is required"
             !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> "Enter a valid email"
-            phoneDigits !in 10..15 -> "Enter +91XXXXXXXXXX or a 10 digit phone number"
             password.length < 6 -> "Password must be at least 6 characters"
             password != confirmPassword -> "Passwords do not match"
             else -> null
@@ -418,22 +349,12 @@ class SignupScreenView @JvmOverloads constructor(
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            val googleSignupButton = socialButton(context, "GOOGLE", R.drawable.googleicon).apply {
+            val googleSignupButton = socialButton(context, "Sign Up With Google", R.drawable.googleicon).apply {
                 setOnClickListener {
                     handleGoogleSignup(context)
                 }
             }
-            addView(googleSignupButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                rightMargin = dp(6)
-            })
-            addView(socialButton(context, "FACEBOOK", R.drawable.facebook_icon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                rightMargin = dp(6)
-            })
-            addView(socialButton(context, "OTP", R.drawable.baseline_local_phone_24).apply {
-                setOnClickListener {
-                    (context as? MainActivity)?.showPhoneAuthScreen()
-                }
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+            addView(googleSignupButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT))
         }
     }
 
@@ -443,9 +364,8 @@ class SignupScreenView @JvmOverloads constructor(
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(6).toFloat()
-                setColor(Color.argb(224, 22, 22, 23))
-                setStroke(dp(1), Color.argb(58, 255, 255, 255))
+                cornerRadius = dp(24).toFloat()
+                setColor(Color.rgb(26, 26, 26))
             }
 
             if (iconRes != null) {
@@ -453,8 +373,8 @@ class SignupScreenView @JvmOverloads constructor(
                     setImageResource(iconRes)
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     contentDescription = "$label icon"
-                }, LinearLayout.LayoutParams(dp(14), dp(14)).apply {
-                    rightMargin = dp(8)
+                }, LinearLayout.LayoutParams(dp(18), dp(18)).apply {
+                    rightMargin = dp(10)
                 })
             } else {
                 addView(TextView(context).apply {
@@ -472,8 +392,8 @@ class SignupScreenView @JvmOverloads constructor(
                 text = label
                 gravity = Gravity.CENTER
                 setTextColor(Color.WHITE)
-                textSize = 11f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                textSize = 13f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
                 includeFontPadding = false
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
@@ -531,94 +451,4 @@ class SignupScreenView @JvmOverloads constructor(
         super.onDetachedFromWindow()
     }
 
-    private class LogoMarkView(context: Context) : View(context) {
-        private val appIcon: Bitmap? = BitmapFactory.decodeResource(resources, R.drawable.appicon)
-        private val source = Rect()
-        private val bounds = RectF()
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        private var logoShader: Shader? = null
-
-        init {
-            appIcon?.let { bitmap ->
-                source.set(
-                    (bitmap.width * 0.2f).toInt(),
-                    (bitmap.height * 0.34f).toInt(),
-                    (bitmap.width * 0.84f).toInt(),
-                    (bitmap.height * 0.62f).toInt()
-                )
-            }
-        }
-
-        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-            super.onSizeChanged(w, h, oldw, oldh)
-            val wf = w.toFloat()
-            val hf = h.toFloat()
-            if (wf > 0 && hf > 0) {
-                val cx = wf / 2f
-                val cy = hf / 2f
-                val density = resources.displayMetrics.density
-                logoShader = LinearGradient(
-                    cx - 52f * density, cy, cx + 52f * density, cy,
-                    intArrayOf(Color.TRANSPARENT, Color.argb(46, 193, 255, 0), Color.argb(88, 193, 255, 0), Color.argb(46, 193, 255, 0), Color.TRANSPARENT),
-                    floatArrayOf(0f, 0.24f, 0.5f, 0.76f, 1f), Shader.TileMode.CLAMP
-                )
-            }
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val density = resources.displayMetrics.density
-            val w = width.toFloat()
-            val h = height.toFloat()
-            val cx = w / 2f
-            val cy = h / 2f
-
-            drawNeonAccent(canvas, cx, cy, density)
-
-            val bitmap = appIcon ?: return
-            if (source.isEmpty) return
-            val iconWidth = min(w * 0.86f, 86f * density)
-            val iconHeight = iconWidth * source.height() / source.width()
-            bounds.set(cx - iconWidth / 2f, cy - iconHeight / 2f, cx + iconWidth / 2f, cy + iconHeight / 2f)
-            canvas.drawBitmap(bitmap, source, bounds, bitmapPaint)
-        }
-
-        private fun drawNeonAccent(canvas: Canvas, cx: Float, cy: Float, density: Float) {
-            paint.style = Paint.Style.FILL
-            paint.shader = logoShader
-            bounds.set(cx - 52f * density, cy - 6f * density, cx + 52f * density, cy + 6f * density)
-            canvas.drawRoundRect(bounds, 6f * density, 6f * density, paint)
-            paint.shader = null
-
-            paint.color = Color.argb(172, 193, 255, 0)
-            bounds.set(cx - 34f * density, cy + 20f * density, cx + 34f * density, cy + 22f * density)
-            canvas.drawRoundRect(bounds, 1f * density, 1f * density, paint)
-        }
-    }
-
-    private inner class BrandWordmarkView(context: Context) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            paint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
-            paint.textSize = min(width / 11.2f, 18f * resources.displayMetrics.density)
-            paint.letterSpacing = 0.03f
-            val sports = "SPORTS"
-            val x = "X"
-            val treme = "TREME"
-            val total = paint.measureText(sports) + paint.measureText(x) + paint.measureText(treme) + 2f
-            var left = width / 2f - total / 2f
-            val baseline = height * 0.68f
-
-            paint.color = Color.rgb(236, 243, 238)
-            canvas.drawText(sports, left, baseline, paint)
-            left += paint.measureText(sports) + 1f
-            paint.color = splashTitleBlue
-            canvas.drawText(x, left, baseline, paint)
-            left += paint.measureText(x) * 0.93f
-            canvas.drawText(treme, left, baseline, paint)
-        }
-    }
 }

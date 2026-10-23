@@ -250,7 +250,7 @@ class AuthRepositoryImpl(
             }
             rawMessage.contains("blocked all requests", ignoreCase = true) ||
                 rawMessage.contains("unusual activity", ignoreCase = true) -> {
-                "Firebase has temporarily blocked verification emails from this device because too many requests were sent. Wait a while before trying again."
+                "SportsXtreme has temporarily blocked verification codes on this device because too many requests were sent. Wait a while before trying again."
             }
             rawMessage.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) -> {
                 "This login link is invalid or does not match the email address. Request a new login link."

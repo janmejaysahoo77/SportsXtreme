@@ -268,6 +268,7 @@ class SportSelectionView @JvmOverloads constructor(
             background = chooseButtonBackground(false)
             setOnClickListener {
                 if (selectedSport != null) {
+                    GuestExperiencePreferences.saveSelectedSport(context, selectedSport!!.name)
                     (context as? MainActivity)?.showHomeScreen()
                 }
             }

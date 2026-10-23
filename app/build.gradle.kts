@@ -65,6 +65,7 @@ dependencies {
     implementation("com.google.firebase:firebase-functions")
     implementation(libs.firebase.storage)
     implementation(libs.google.play.services.auth.api.phone)
+    implementation(libs.google.play.services.location)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.room.runtime)

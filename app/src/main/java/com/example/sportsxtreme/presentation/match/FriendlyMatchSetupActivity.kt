@@ -144,7 +144,7 @@ private fun FriendlyMatchSetupScreen(
     var customBowlerOversError by remember { mutableStateOf(false) }
     val formats = listOf("Limited Overs", "T20 Match", "T10 Match", "Test Match")
     val overs = listOf("5", "10", "20", "Custom")
-    val matchFormats = listOf(MatchFormat.ODI, MatchFormat.T20, MatchFormat.T10, MatchFormat.TEST)
+    val matchFormats = listOf(MatchFormat.LIMITED_OVERS, MatchFormat.T20, MatchFormat.T10, MatchFormat.TEST)
     val ballTypes = listOf(BallType.LEATHER, BallType.TENNIS, BallType.OTHER)
     val totalOversLocked = format == 1 || format == 2
 

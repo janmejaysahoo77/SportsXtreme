@@ -19,6 +19,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.sportsxtreme.common.NestedHorizontalScrollHelper
 import com.example.sportsxtreme.domain.model.LiveMatch
+import com.example.sportsxtreme.presentation.auth.MainActivity
+import com.example.sportsxtreme.presentation.scoring.ViewAllScoreCardActivity
 import kotlinx.coroutines.launch
 
 /**
@@ -47,6 +49,13 @@ class LiveMatchesSectionView @JvmOverloads constructor(
 
     private var adapter: LiveMatchAdapter? = null
     private var viewModel: LiveMatchViewModel? = null
+    private var searchQuery: String = ""
+
+    /** Filters the live scorecards by tournament or either team's name. */
+    fun setSearchQuery(query: String) {
+        searchQuery = query.trim()
+        viewModel?.uiState?.value?.let(::render)
+    }
 
     init {
         orientation = VERTICAL
@@ -76,7 +85,12 @@ class LiveMatchesSectionView @JvmOverloads constructor(
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
-                    context.startActivity(android.content.Intent(context, com.example.sportsxtreme.presentation.scoring.ViewAllScoreCardActivity::class.java))
+                    context.startActivity(
+                        android.content.Intent(context, ViewAllScoreCardActivity::class.java).putExtra(
+                            ViewAllScoreCardActivity.EXTRA_CURRENT_LOCATION,
+                            (context as? MainActivity)?.readHomeLocationLabel().orEmpty()
+                        )
+                    )
                 }
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
@@ -216,6 +230,16 @@ class LiveMatchesSectionView @JvmOverloads constructor(
 
     private fun render(state: LiveMatchesUiState) {
         val matches = state.matches
+        val query = searchQuery
+        val visibleMatches = if (query.isBlank()) matches else matches.filter { match ->
+            sequenceOf(
+                match.tournamentName,
+                match.teamAName,
+                match.teamBName,
+                match.teamAShortName,
+                match.teamBShortName
+            ).any { it.contains(query, ignoreCase = true) }
+        }
 
         // Offline note: show only when we still have cached matches but Firestore failed.
         offlineNote.visibility = if (state.isOffline && matches.isNotEmpty()) View.VISIBLE else View.GONE
@@ -229,11 +253,16 @@ class LiveMatchesSectionView @JvmOverloads constructor(
             }
 
             // Empty state.
-            matches.isEmpty() -> {
+            visibleMatches.isEmpty() -> {
                 skeletonContainer.visibility = View.GONE
                 placeholderContainer.visibility = View.VISIBLE
-                placeholderTitle.text = "No Live Matches Right Now"
-                placeholderSubtitle.text = "Check Upcoming Matches"
+                if (matches.isEmpty()) {
+                    placeholderTitle.text = "No Live Matches Right Now"
+                    placeholderSubtitle.text = "Check Upcoming Matches"
+                } else {
+                    placeholderTitle.text = "No Matching Matches"
+                    placeholderSubtitle.text = "Try another tournament or team name"
+                }
                 recyclerView.visibility = View.GONE
             }
 
@@ -242,7 +271,7 @@ class LiveMatchesSectionView @JvmOverloads constructor(
                 skeletonContainer.visibility = View.GONE
                 placeholderContainer.visibility = View.GONE
                 recyclerView.visibility = View.VISIBLE
-                adapter?.submitList(matches)
+                adapter?.submitList(visibleMatches)
             }
         }
     }

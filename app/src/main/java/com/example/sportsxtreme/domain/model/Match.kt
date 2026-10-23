@@ -49,10 +49,19 @@ enum class MatchType {
 }
 
 enum class MatchFormat {
+    LIMITED_OVERS,
     T10,
     T20,
     ODI,
     TEST
+}
+
+fun matchFormatDisplayName(value: String): String = when (value.trim().uppercase()) {
+    "LIMITED_OVERS", "ODI" -> "Limited Overs"
+    "T10" -> "T10"
+    "T20" -> "T20"
+    "TEST" -> "Test"
+    else -> value.trim().replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
 }
 
 enum class BallType {

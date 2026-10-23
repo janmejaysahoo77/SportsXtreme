@@ -79,6 +79,7 @@ import com.example.sportsxtreme.domain.model.Team
 import com.example.sportsxtreme.domain.repository.TeamRepository
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.MatchFormat
+import com.example.sportsxtreme.domain.model.matchFormatDisplayName
 import com.example.sportsxtreme.domain.usecase.MatchUseCases
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -436,7 +437,7 @@ private fun PreviewTemporaryTeamLogo(team: PreviewSelectedTeam, modifier: Modifi
 
 @Composable
 private fun MatchInformation(match: Match?) {
-    val formatStr = match?.format?.name?.replace('_', ' ') ?: "Not set"
+    val formatStr = match?.format?.name?.let(::matchFormatDisplayName) ?: "Not set"
     val isTest = match?.format == MatchFormat.TEST
     val matchTypeStr = match?.matchType?.name?.replace('_', ' ') ?: "Not set"
     val oversStr = match?.overs?.toString() ?: "Not set"

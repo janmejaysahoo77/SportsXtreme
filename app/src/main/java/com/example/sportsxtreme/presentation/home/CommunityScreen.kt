@@ -96,6 +96,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
 import android.widget.Toast
 import android.content.Intent
+import org.json.JSONObject
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
@@ -110,6 +111,8 @@ import androidx.compose.ui.unit.sp
 import java.util.Calendar
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.presentation.components.SportsXtremeAppBar
+import com.example.sportsxtreme.presentation.components.GuestAuthDialog
+import com.example.sportsxtreme.presentation.auth.MainActivity
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
@@ -132,6 +135,24 @@ private val CyanAccent = Color(0xFF00D2FF)
 private val ScreenBg = Color(0xFF0A101C)
 private val MutedText = Color(0xFF9AA7A3)
 private val StrokeBorder = Color(0x334E5B64)
+
+private const val COMMUNITY_DRAFTS_PREFS = "community_form_drafts"
+private const val LOOKING_FOR_DRAFT = "looking_for"
+private const val SELF_PROFILE_DRAFT = "self_profile"
+
+private fun readCommunityDraft(context: android.content.Context, key: String): JSONObject = runCatching {
+    JSONObject(context.getSharedPreferences(COMMUNITY_DRAFTS_PREFS, android.content.Context.MODE_PRIVATE).getString(key, "{}"))
+}.getOrDefault(JSONObject())
+
+private fun saveCommunityDraft(context: android.content.Context, key: String, draft: JSONObject) {
+    context.getSharedPreferences(COMMUNITY_DRAFTS_PREFS, android.content.Context.MODE_PRIVATE)
+        .edit().putString(key, draft.toString()).apply()
+}
+
+private fun clearCommunityDraft(context: android.content.Context, key: String) {
+    context.getSharedPreferences(COMMUNITY_DRAFTS_PREFS, android.content.Context.MODE_PRIVATE)
+        .edit().remove(key).apply()
+}
 
 private data class CommunityCategory(
     val title: String,
@@ -188,6 +209,7 @@ fun CommunityScreen(
     var showCreateOptions by remember { mutableStateOf(false) }
     var showProfileForm by remember { mutableStateOf(false) }
     var showLookingForForm by remember { mutableStateOf(false) }
+    var guestPromptDetail by remember { mutableStateOf<String?>(null) }
     val createOptionsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val profileFormSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val lookingForSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -392,7 +414,12 @@ fun CommunityScreen(
                             ownerPhotoUrls = ownerPhotoUrls,
                             currentUserId = currentUser?.uid,
                             accountPhotoUrl = accountPhotoUrl,
+                            onGuestAction = { guestPromptDetail = it },
                             onConnect = { profile ->
+                                if (FirebaseAuth.getInstance().currentUser == null) {
+                                    guestPromptDetail = "Login or sign up to respond to Community posts."
+                                    return@OpportunityCard
+                                }
                                 selectedContactProfile = profile
                                 contactWhatsappNumber = null
                                 isLoadingContact = true
@@ -422,7 +449,11 @@ fun CommunityScreen(
                 .size(52.dp)
                 .clip(CircleShape)
                 .background(GreenAccent)
-                .clickable { showCreateOptions = true },
+                .clickable {
+                    if (FirebaseAuth.getInstance().currentUser == null) {
+                        guestPromptDetail = "Login or sign up to post requirements or your profile."
+                    } else showCreateOptions = true
+                },
             contentAlignment = Alignment.Center
         ) {
             Text("+", color = Color(0xFF172000), fontSize = 34.sp, fontWeight = FontWeight.Medium)
@@ -518,6 +549,7 @@ fun CommunityScreen(
                                     .addOnSuccessListener {
                                         isPostingRequest = false
                                         Toast.makeText(context, "Your request is now on Community.", Toast.LENGTH_SHORT).show()
+                                        clearCommunityDraft(context, LOOKING_FOR_DRAFT)
                                         showLookingForForm = false
                                     }
                                     .addOnFailureListener { error ->
@@ -542,6 +574,15 @@ fun CommunityScreen(
                     }
                 )
             }
+        }
+
+        guestPromptDetail?.let { detail ->
+            GuestAuthDialog(
+                detail = detail,
+                onDismiss = { guestPromptDetail = null },
+                onSignup = { guestPromptDetail = null; (context as? MainActivity)?.showSignupScreen() },
+                onLogin = { guestPromptDetail = null; (context as? MainActivity)?.showLoginScreen() }
+            )
         }
 
         if (showProfileForm) {
@@ -610,6 +651,7 @@ fun CommunityScreen(
                                     .addOnSuccessListener {
                                         isPostingProfile = false
                                         Toast.makeText(context, "Your profile is now on Community.", Toast.LENGTH_SHORT).show()
+                                        clearCommunityDraft(context, SELF_PROFILE_DRAFT)
                                         showProfileForm = false
                                     }
                                     .addOnFailureListener { error ->
@@ -663,18 +705,27 @@ private fun LookingForOpportunityScreen(
     onPost: (String, String, String, String, String, String, String, String, Boolean) -> Unit
 ) {
     val context = LocalContext.current
-    var category by remember { mutableStateOf("") }
-    var title by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var date by remember { mutableStateOf("") }
-    var time by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-    var format by remember { mutableStateOf("") }
-    var whatsappNumber by remember { mutableStateOf("") }
-    var whatsappConsent by remember { mutableStateOf(false) }
+    val draft = remember { readCommunityDraft(context, LOOKING_FOR_DRAFT) }
+    var category by remember { mutableStateOf(draft.optString("category")) }
+    var title by remember { mutableStateOf(draft.optString("title")) }
+    var description by remember { mutableStateOf(draft.optString("description")) }
+    var date by remember { mutableStateOf(draft.optString("date")) }
+    var time by remember { mutableStateOf(draft.optString("time")) }
+    var location by remember { mutableStateOf(draft.optString("location")) }
+    var format by remember { mutableStateOf(draft.optString("format")) }
+    var whatsappNumber by remember { mutableStateOf(draft.optString("whatsappNumber")) }
+    var whatsappConsent by remember { mutableStateOf(draft.optBoolean("whatsappConsent")) }
     var openMenu by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     val categories = listOf("Batter", "Bowler", "All Rounder", "Wicket Keeper", "Umpire")
+
+    LaunchedEffect(category, title, description, date, time, location, format, whatsappNumber, whatsappConsent) {
+        saveCommunityDraft(context, LOOKING_FOR_DRAFT, JSONObject().apply {
+            put("category", category); put("title", title); put("description", description)
+            put("date", date); put("time", time); put("location", location); put("format", format)
+            put("whatsappNumber", whatsappNumber); put("whatsappConsent", whatsappConsent)
+        })
+    }
 
     Box(modifier.fillMaxSize().background(Color(0xFF08131D)).navigationBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
@@ -810,18 +861,23 @@ private fun AddSelfProfileForm(
     onBack: () -> Unit,
     onPost: (String, String, String, String, String, String, String, String, String, Boolean, Uri?) -> Unit
 ) {
-    var fullName by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-    var organization by remember { mutableStateOf("") }
-    var experience by remember { mutableStateOf("") }
-    var groundType by remember { mutableStateOf("") }
-    var ballType by remember { mutableStateOf("") }
-    var chargePerMatch by remember { mutableStateOf("") }
-    var whatsappNumber by remember { mutableStateOf("") }
-    var whatsappConsent by remember { mutableStateOf(false) }
-    var selectedPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    val context = LocalContext.current
+    val draft = remember { readCommunityDraft(context, SELF_PROFILE_DRAFT) }
+    var fullName by remember { mutableStateOf(draft.optString("fullName")) }
+    var category by remember { mutableStateOf(draft.optString("category")) }
+    var location by remember { mutableStateOf(draft.optString("location")) }
+    var organization by remember { mutableStateOf(draft.optString("organization")) }
+    var experience by remember { mutableStateOf(draft.optString("experience")) }
+    var groundType by remember { mutableStateOf(draft.optString("groundType")) }
+    var ballType by remember { mutableStateOf(draft.optString("ballType")) }
+    var chargePerMatch by remember { mutableStateOf(draft.optString("chargePerMatch")) }
+    var whatsappNumber by remember { mutableStateOf(draft.optString("whatsappNumber")) }
+    var whatsappConsent by remember { mutableStateOf(draft.optBoolean("whatsappConsent")) }
+    var selectedPhotoUri by remember { mutableStateOf(draft.optString("selectedPhotoUri").takeIf { it.isNotBlank() }?.let(Uri::parse)) }
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
         selectedPhotoUri = uri
     }
     var openMenu by remember { mutableStateOf("") }
@@ -829,6 +885,15 @@ private fun AddSelfProfileForm(
     val categories = listOf("Batter", "Bowler", "AllRounder", "Wicket keeper", "Umpire")
     val groundTypes = listOf("Turf", "Matting", "Concrete", "Grass", "Indoor")
     val ballTypes = listOf("Leather", "Tennis", "Tape Ball", "Other")
+
+    LaunchedEffect(fullName, category, location, organization, experience, groundType, ballType, chargePerMatch, whatsappNumber, whatsappConsent, selectedPhotoUri) {
+        saveCommunityDraft(context, SELF_PROFILE_DRAFT, JSONObject().apply {
+            put("fullName", fullName); put("category", category); put("location", location)
+            put("organization", organization); put("experience", experience); put("groundType", groundType)
+            put("ballType", ballType); put("chargePerMatch", chargePerMatch); put("whatsappNumber", whatsappNumber)
+            put("whatsappConsent", whatsappConsent); put("selectedPhotoUri", selectedPhotoUri?.toString().orEmpty())
+        })
+    }
 
     Column(
         modifier = Modifier
@@ -1378,6 +1443,7 @@ private fun OpportunityCard(
     ownerPhotoUrls: Map<String, String>,
     currentUserId: String?,
     accountPhotoUrl: String?,
+    onGuestAction: (String) -> Unit,
     onConnect: (Opportunity) -> Unit
 ) {
     val context = LocalContext.current
@@ -1463,7 +1529,12 @@ private fun OpportunityCard(
                                     context.startActivity(Intent.createChooser(intent, "Share community post"))
                                 })
                                 if (!isOwner) {
-                                    DropdownMenuItem(text = { Text("Report") }, onClick = { menuExpanded = false; showReportSheet = true })
+                                    DropdownMenuItem(text = { Text("Report") }, onClick = {
+                                        menuExpanded = false
+                                        if (FirebaseAuth.getInstance().currentUser == null) {
+                                            onGuestAction("Login or sign up to report this Community post.")
+                                        } else showReportSheet = true
+                                    })
                                 }
                             }
                         }

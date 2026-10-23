@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.net.Uri
 import android.content.Intent
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
@@ -30,11 +31,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -46,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.CornerRadius
@@ -68,6 +75,7 @@ import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
 import com.example.sportsxtreme.presentation.auth.MainActivity
+import com.example.sportsxtreme.presentation.components.GuestAccessCard
 import com.example.sportsxtreme.data.remote.cloudinary.CloudinaryProfilePhotoUploader
 import com.example.sportsxtreme.domain.model.User
 import com.example.sportsxtreme.domain.model.PendingUserProfile
@@ -78,6 +86,9 @@ import com.example.sportsxtreme.domain.usecase.AuthUseCases
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.UserProfileChangeRequest
+import com.google.firebase.functions.FirebaseFunctions
+import com.google.firebase.functions.FirebaseFunctionsException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -104,6 +115,8 @@ private data class ProfileUiState(
     val profilePhotoRefreshKey: Long = 0L,
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
+    val isAccountDeleted: Boolean = false,
+    val requiresReauthentication: Boolean = false,
     val infoMessage: String? = null,
     val errorMessage: String? = null
 )
@@ -193,15 +206,62 @@ private fun ProfileScreen(
 ) {
     var uiState by remember { mutableStateOf(ProfileUiState()) }
     var activeEditSection by remember { mutableStateOf<ProfileEditSection?>(null) }
+    var showNameDialog by remember { mutableStateOf(false) }
+    var nameDraft by remember { mutableStateOf("") }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
     var draftProfile by remember { mutableStateOf(uiState.profile) }
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val context = LocalContext.current
-    val isOwnProfile = remember(viewedUserId) {
+    var isGuest by remember { mutableStateOf(FirebaseAuth.getInstance().currentUser == null) }
+    DisposableEffect(Unit) {
+        val auth = FirebaseAuth.getInstance()
+        val listener = FirebaseAuth.AuthStateListener { isGuest = it.currentUser == null }
+        auth.addAuthStateListener(listener)
+        onDispose { auth.removeAuthStateListener(listener) }
+    }
+    val deleteAccount: () -> Unit = {
+        val user = FirebaseAuth.getInstance().currentUser
+        if (user == null) {
+            uiState = uiState.copy(errorMessage = "No signed-in account was found.")
+        } else scope.launch {
+            uiState = uiState.copy(isSaving = true, errorMessage = null, infoMessage = null)
+            try {
+                FirebaseFunctions.getInstance()
+                    .getHttpsCallable("deleteAccount")
+                    .call()
+                    .await()
+                context.deleteDatabase("sports_xtreme.db")
+                Toast.makeText(context, "Account deleted", Toast.LENGTH_SHORT).show()
+                FirebaseAuth.getInstance().signOut()
+                context.startActivity(
+                    Intent(context, MainActivity::class.java)
+                        .putExtra(MainActivity.EXTRA_FORCE_LOGIN, true)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                )
+            } catch (error: Exception) {
+                uiState = uiState.copy(
+                    isSaving = false,
+                    requiresReauthentication = error is FirebaseFunctionsException &&
+                        error.code == FirebaseFunctionsException.Code.FAILED_PRECONDITION,
+                    errorMessage = if (error is FirebaseFunctionsException &&
+                        error.code == FirebaseFunctionsException.Code.FAILED_PRECONDITION
+                    ) {
+                        "For your security, sign in again before deleting your account."
+                    } else {
+                        error.localizedMessage ?: "Could not delete the account. Please try again."
+                    }
+                )
+            }
+        }
+    }
+    val authUserId = FirebaseAuth.getInstance().currentUser?.uid
+    val isOwnProfile = remember(viewedUserId, authUserId) {
         viewedUserId.isBlank() || viewedUserId == useCases.getCurrentUser()?.id
     }
 
-    LaunchedEffect(viewedUserId) {
+    LaunchedEffect(viewedUserId, isGuest) {
+        if (isGuest) return@LaunchedEffect
         uiState = if (isOwnProfile) {
             loadProfileUiState(useCases)
         } else {
@@ -213,16 +273,16 @@ private fun ProfileScreen(
     // immediately, then calculate match totals separately.  Older accounts do not
     // have the cached /users/{id}/stats/summary document, so that document alone
     // would always render zeros for those players.
-    LaunchedEffect(viewedUserId, isOwnProfile, uiState.profile.id) {
-        if (isOwnProfile || uiState.profile.id.isBlank()) return@LaunchedEffect
+    LaunchedEffect(viewedUserId, isOwnProfile, uiState.profile.id, isGuest) {
+        if (isGuest || uiState.profile.id.isBlank()) return@LaunchedEffect
         val refreshedStats = loadLivePlayerStats(uiState.profile.id, uiState.stats)
         if (refreshedStats != uiState.stats) {
             uiState = uiState.copy(stats = refreshedStats)
         }
     }
 
-    DisposableEffect(uiState.profile.id) {
-        if (!isOwnProfile) return@DisposableEffect onDispose { }
+    DisposableEffect(uiState.profile.id, isGuest) {
+        if (isGuest || !isOwnProfile) return@DisposableEffect onDispose { }
         val userId = uiState.profile.id
         if (userId.isBlank()) return@DisposableEffect onDispose { }
 
@@ -325,6 +385,7 @@ private fun ProfileScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .then(if (isGuest) Modifier.blur(10.dp) else Modifier)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 10.dp, vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -333,6 +394,15 @@ private fun ProfileScreen(
                 if (uiState.isLoading) {
                     Spacer(Modifier.height(10.dp))
                     ProfileSkeleton()
+                } else if (uiState.isAccountDeleted) {
+                    Text(
+                        "Account already deleted",
+                        color = Platinum,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp)
+                    )
                 } else {
                     if (uiState.isSaving || uiState.infoMessage != null || uiState.errorMessage != null) {
                         ProfileStatusLine(uiState)
@@ -344,7 +414,11 @@ private fun ProfileScreen(
                         profilePhotoPreviewUri = uiState.profilePhotoPreviewUri,
                         profilePhotoRefreshKey = uiState.profilePhotoRefreshKey,
                         editEnabled = isOwnProfile && !uiState.isSaving,
-                        onEditAvatar = onPickPhoto
+                        onEditAvatar = onPickPhoto,
+                        onEditName = {
+                            nameDraft = uiState.profile.name
+                            showNameDialog = true
+                        }
                     )
                     Spacer(Modifier.height(14.dp))
                     HostedSummary(uiState.profile)
@@ -393,7 +467,7 @@ private fun ProfileScreen(
                     )
                     Spacer(Modifier.height(18.dp))
                     if (isOwnProfile) {
-                        SettingsCard(onLogout)
+                        SettingsCard(onLogout, onDeleteAccount = { showDeleteConfirmation = true })
                         Text(
                             "Version 1.0.0",
                             color = SoftText,
@@ -401,6 +475,35 @@ private fun ProfileScreen(
                             modifier = Modifier.padding(top = 12.dp, bottom = 10.dp)
                         )
                     }
+                }
+            }
+
+            if (isGuest) {
+                Box(
+                    Modifier.fillMaxSize().background(Color.Black.copy(alpha = .42f)).clickable { },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Go back",
+                        tint = Color.White,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 16.dp, top = 16.dp)
+                            .size(28.dp)
+                            .clickable(onClick = onBack)
+                    )
+                    GuestAccessCard(
+                        title = "Sign in to see your profile",
+                        detail = "Login or sign up to view your profile and stats.",
+                        onSignup = {
+                            context.startActivity(
+                                Intent(context, MainActivity::class.java)
+                                    .putExtra(MainActivity.EXTRA_FORCE_SIGNUP, true)
+                            )
+                        },
+                        modifier = Modifier.padding(horizontal = 24.dp)
+                    )
                 }
             }
 
@@ -466,6 +569,105 @@ private fun ProfileScreen(
                     )
                 }
             }
+
+            if (showNameDialog) {
+                AlertDialog(
+                    onDismissRequest = { if (!uiState.isSaving) showNameDialog = false },
+                    title = { Text("Change your name", color = Platinum) },
+                    text = {
+                        OutlinedTextField(
+                            value = nameDraft,
+                            onValueChange = { nameDraft = it },
+                            enabled = !uiState.isSaving,
+                            singleLine = true,
+                            label = { Text("Name") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = !uiState.isSaving && nameDraft.trim().isNotEmpty() && nameDraft.trim() != uiState.profile.name,
+                            onClick = {
+                                val updatedName = nameDraft.trim().replace(Regex("\\s+"), " ")
+                                if (updatedName.length > 80) {
+                                    uiState = uiState.copy(errorMessage = "Name must be 80 characters or fewer.")
+                                    return@TextButton
+                                }
+                                uiState = uiState.copy(isSaving = true, errorMessage = null, infoMessage = null)
+                                scope.launch {
+                                    val updatedProfile = uiState.profile.copy(name = updatedName)
+                                    when (useCases.updateUserProfile(updatedProfile)) {
+                                        is Resource.Success -> {
+                                            runCatching {
+                                                FirebaseAuth.getInstance().currentUser
+                                                    ?.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(updatedName).build())
+                                                    ?.await()
+                                            }
+                                            uiState = uiState.copy(profile = updatedProfile, isSaving = false, infoMessage = "Name updated.", errorMessage = null)
+                                            showNameDialog = false
+                                        }
+                                        is Resource.Error -> uiState = uiState.copy(isSaving = false, errorMessage = "Could not update your name.", infoMessage = null)
+                                        is Resource.Loading -> uiState = uiState.copy(isSaving = true)
+                                    }
+                                }
+                            }
+                        ) { Text(if (uiState.isSaving) "Saving..." else "Save", color = Lime) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showNameDialog = false }, enabled = !uiState.isSaving) {
+                            Text("Cancel", color = Platinum)
+                        }
+                    },
+                    containerColor = Color(0xFF081014),
+                    titleContentColor = Platinum,
+                    textContentColor = Platinum
+                )
+            }
+
+            if (showDeleteConfirmation) {
+                AlertDialog(
+                    onDismissRequest = { if (!uiState.isSaving) showDeleteConfirmation = false },
+                    title = { Text("Delete account?", color = Platinum) },
+                    text = {
+                        Column {
+                            Text("This permanently deletes your account and the data you own. This cannot be undone.", color = SoftText)
+                            uiState.errorMessage?.let {
+                                Text(it, color = Color(0xFFFF8D8D), modifier = Modifier.padding(top = 10.dp))
+                            }
+                            if (uiState.isSaving) {
+                                CircularProgressIndicator(color = Lime, modifier = Modifier.padding(top = 12.dp).size(24.dp))
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        if (uiState.requiresReauthentication) {
+                            TextButton(
+                                onClick = {
+                                    FirebaseAuth.getInstance().signOut()
+                                    context.startActivity(
+                                        Intent(context, MainActivity::class.java)
+                                            .putExtra(MainActivity.EXTRA_FORCE_LOGIN, true)
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                                    )
+                                },
+                                enabled = !uiState.isSaving
+                            ) {
+                                Text("Sign in again", color = Lime)
+                            }
+                        } else {
+                            TextButton(onClick = deleteAccount, enabled = !uiState.isSaving) {
+                                Text("Delete account", color = Color(0xFFFF8D8D))
+                            }
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteConfirmation = false }, enabled = !uiState.isSaving) {
+                            Text("Cancel", color = Platinum)
+                        }
+                    },
+                    containerColor = Card
+                )
+            }
         }
     }
 }
@@ -503,22 +705,26 @@ private suspend fun loadProfileUiState(useCases: AuthUseCases): ProfileUiState {
         )
     }
 
-    val signedInUser = currentUser ?: return ProfileUiState(
+    currentUser ?: return ProfileUiState(
         profile = fallbackProfile,
         stats = fallbackProfile.toFallbackStats(),
         settings = UserProfileSettings(userId = ""),
         isLoading = false,
         errorMessage = "Could not find logged-in user."
     )
-    useCases.createOrUpdateUserProfile(signedInUser.toPendingProfile())
-
-    val profileResult = useCases.getUserProfile(userId)
-    val statsResult = useCases.getUserProfileStats(userId)
-    val settingsResult = useCases.getUserProfileSettings(userId)
+    val (profileResult, statsResult, settingsResult) = coroutineScope {
+        val profile = async { useCases.getUserProfile(userId) }
+        val stats = async { useCases.getUserProfileStats(userId) }
+        val settings = async { useCases.getUserProfileSettings(userId) }
+        Triple(profile.await(), stats.await(), settings.await())
+    }
 
     val profile = profileResult.successData() ?: fallbackProfile
     val storedStats = statsResult.successData() ?: profile.toFallbackStats()
-    val stats = loadLivePlayerStats(userId, storedStats)
+    // Show the saved summary immediately. The live match/scorecard reconciliation
+    // runs after the profile is visible so large histories cannot hold the page
+    // behind its loading skeleton.
+    val stats = storedStats
     val settings = settingsResult.successData() ?: UserProfileSettings(userId = userId)
     val errorMessage = listOf(
         profileResult.errorText(),
@@ -552,6 +758,8 @@ private suspend fun loadOtherProfileUiState(
             ),
             stats = UserProfileStats(userId = userId),
             isLoading = false,
+            isAccountDeleted = profileResult.errorText()
+                ?.contains("User profile not found", ignoreCase = true) == true,
             errorMessage = if (profileResult.errorText()?.contains("PERMISSION_DENIED", true) == true) {
                 profileResult.errorText()
             } else null
@@ -824,7 +1032,8 @@ private fun HeroProfileCard(
     profilePhotoPreviewUri: Uri?,
     profilePhotoRefreshKey: Long,
     editEnabled: Boolean,
-    onEditAvatar: () -> Unit
+    onEditAvatar: () -> Unit,
+    onEditName: () -> Unit
 ) {
     Box(
         Modifier
@@ -860,7 +1069,26 @@ private fun HeroProfileCard(
                 onEditAvatar = onEditAvatar
             )
             Spacer(Modifier.height(16.dp))
-            Text(profile.name, color = Platinum, fontSize = 27.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                Text(profile.name, color = Platinum, fontSize = 27.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                if (editEnabled) {
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Lime)
+                            .clickable(onClick = onEditName),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(R.drawable.baseline_edit_24),
+                            contentDescription = "Change name",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
             Text(
                 listOf(profile.location, profile.joinedLabel)
                     .filter { it.isNotBlank() }
@@ -1205,7 +1433,7 @@ private fun DetailCard(label: String, value: String) {
 }
 
 @Composable
-private fun SettingsCard(onLogout: () -> Unit) {
+private fun SettingsCard(onLogout: () -> Unit, onDeleteAccount: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -1220,6 +1448,13 @@ private fun SettingsCard(onLogout: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Logout", color = Color(0xFFFF8D8D), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth().height(34.dp).clickable(onClick = onDeleteAccount),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Delete Account", color = Color(0xFFFF6B6B), fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

@@ -4,7 +4,6 @@ import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,9 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -36,10 +33,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
 import com.example.sportsxtreme.presentation.auth.MainActivity
+import com.example.sportsxtreme.presentation.components.AuthBrandingHeaderView
 import com.example.sportsxtreme.presentation.components.AuthBackgroundView
 import kotlinx.coroutines.launch
 
@@ -68,38 +65,47 @@ fun PhoneAuth() {
     ) {
         SportsXtremeBackground()
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 22.dp, vertical = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(18.dp)
+                .clip(RoundedCornerShape(18.dp))
         ) {
-            Spacer(modifier = Modifier.height(10.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+            Spacer(modifier = Modifier.height(38.dp))
 
-            LogoHeader()
+            AndroidView(
+                factory = { AuthBrandingHeaderView(it) },
+                modifier = Modifier.width(210.dp).height(90.dp)
+            )
 
-            Spacer(modifier = Modifier.height(30.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = "PHONE AUTH",
+                text = "VERIFY YOUR MOBILE",
                 color = Color.White,
-                fontSize = 32.sp,
+                fontSize = 27.sp,
                 fontWeight = FontWeight.Bold,
-                fontStyle = FontStyle.Italic,
+                textAlign = TextAlign.Center,
                 style = TextStyle(
                     shadow = Shadow(
                         color = splashTitleBlue,
-                        offset = Offset(2f, 2f),
-                        blurRadius = 4f
+                        offset = Offset(1f, 1f),
+                        blurRadius = 2f
                     )
                 )
             )
 
             Text(
-                text = "ENTER YOUR PHONE NUMBER TO CONTINUE",
-                color = Color(0xFFDAE5D2),
-                fontSize = 11.5.sp,
-                modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
+                text = "Enter your mobile number to receive a verification code.",
+                color = Color(0xFFE1E5E2),
+                fontSize = 14.sp,
+                modifier = Modifier.padding(top = 12.dp, bottom = 26.dp),
                 textAlign = TextAlign.Center
             )
 
@@ -110,7 +116,7 @@ fun PhoneAuth() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "PHONE NUMBER",
+                    text = "MOBILE NUMBER",
                     color = primaryFixed,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
@@ -119,9 +125,9 @@ fun PhoneAuth() {
                 )
 
                 Text(
-                    text = "${phoneNumber.length} / ${selectedCountry.digitCount} DIGITS",
-                    color = if (phoneNumber.length == selectedCountry.digitCount) primaryFixed else Color(0xFF88998D),
-                    fontSize = 9.sp,
+                    text = "${selectedCountry.digitCount} DIGITS",
+                    color = primaryFixed,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontStyle = FontStyle.Italic
                 )
@@ -133,7 +139,7 @@ fun PhoneAuth() {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(64.dp)
                     .background(
                         color = if (isInputFocused) Color(0xDE070D0D) else Color(0xBA040707),
                         shape = RoundedCornerShape(8.dp)
@@ -166,8 +172,7 @@ fun PhoneAuth() {
                         text = selectedCountry.dialCode,
                         color = Color.White,
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontStyle = FontStyle.Italic
+                        fontWeight = FontWeight.Medium
                     )
 
                     Text(
@@ -205,9 +210,7 @@ fun PhoneAuth() {
                     enabled = !isLoading,
                     textStyle = TextStyle(
                         color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontStyle = FontStyle.Italic
+                        fontSize = 16.sp
                     ),
                     cursorBrush = SolidColor(primaryFixed),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
@@ -220,9 +223,7 @@ fun PhoneAuth() {
                                 Text(
                                     text = selectedCountry.placeholder,
                                     color = Color(0xFF5A6668),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontStyle = FontStyle.Italic
+                                    fontSize = 16.sp
                                 )
                             }
                             innerTextField()
@@ -249,7 +250,7 @@ fun PhoneAuth() {
                 )
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Continue Button
             Button(
@@ -286,7 +287,7 @@ fun PhoneAuth() {
                 enabled = !isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
+                    .height(64.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = primaryFixed,
                     contentColor = onPrimary,
@@ -316,18 +317,17 @@ fun PhoneAuth() {
                     }
                 } else {
                     Text(
-                        text = "CONTINUE",
-                        fontSize = 14.sp,
+                        text = "SEND VERIFICATION CODE  →",
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        fontStyle = FontStyle.Italic,
-                        letterSpacing = 0.5.sp
+                        letterSpacing = 0.2.sp
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Back to Login / Signup prompt
+            // Existing account prompt
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -336,41 +336,28 @@ fun PhoneAuth() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "BACK TO LOGIN",
+                    text = "Already have an account?",
+                    color = Color(0xFFE1E5E2),
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(end = 4.dp)
+                )
+
+                Text(
+                    text = "LOG IN",
                     color = splashTitleBlue,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontStyle = FontStyle.Italic,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .clickable {
                             (context as? MainActivity)?.showLoginScreen()
                         }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-
-                Text(
-                    text = " • ",
-                    color = Color(0xFF637477),
-                    fontSize = 11.sp
-                )
-
-                Text(
-                    text = "BACK TO SIGN UP",
-                    color = primaryFixed,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontStyle = FontStyle.Italic,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable {
-                            (context as? MainActivity)?.showSignupScreen()
-                        }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
                 )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+            }
         }
 
         // Country Picker Dialog
@@ -401,43 +388,4 @@ fun SportsXtremeBackground(modifier: Modifier = Modifier) {
             AuthBackgroundView(context)
         }
     )
-}
-
-@Composable
-fun LogoHeader() {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Image(
-            painter = painterResource(id = R.drawable.appicon),
-            contentDescription = "App Icon",
-            modifier = Modifier
-                .size(98.dp, 58.dp),
-            contentScale = ContentScale.Fit
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "SPORTS",
-                color = Color(0xFFECF3EE),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                fontStyle = FontStyle.Italic
-            )
-            Text(
-                text = "X",
-                color = Color(0xFF007FFF),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                fontStyle = FontStyle.Italic
-            )
-            Text(
-                text = "TREME",
-                color = Color(0xFFECF3EE),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                fontStyle = FontStyle.Italic
-            )
-        }
-    }
 }

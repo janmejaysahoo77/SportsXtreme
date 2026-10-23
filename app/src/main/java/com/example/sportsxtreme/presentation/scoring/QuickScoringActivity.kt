@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -58,6 +59,9 @@ import com.example.sportsxtreme.domain.model.Match
 import com.example.sportsxtreme.domain.repository.MatchRepository
 import com.example.sportsxtreme.domain.repository.TournamentRepository
 import com.example.sportsxtreme.presentation.match.SelectPlayingTeamsActivity
+import com.example.sportsxtreme.presentation.auth.MainActivity
+import com.example.sportsxtreme.presentation.components.GuestAccessCard
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.AndroidEntryPoint
 import java.text.SimpleDateFormat
@@ -80,6 +84,7 @@ class QuickScoringActivity : ComponentActivity() {
     private val isLoading = mutableStateOf(true)
     private val isResuming = mutableStateOf(false)
     private val isDeleting = mutableStateOf(false)
+    private val isGuest = mutableStateOf(FirebaseAuth.getInstance().currentUser == null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,23 +92,27 @@ class QuickScoringActivity : ComponentActivity() {
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
 
-        lifecycleScope.launch {
-            matchRepository.observeLatestScoringMatch().collect { result ->
-                when (result) {
-                    is Resource.Success -> {
-                        val match = result.data ?: return@collect
-                        if (System.currentTimeMillis() - match.updatedAtEpochMs >= RESUME_WINDOW_MS) {
-                            matchRepository.expirePausedScoringMatch(match.id, match.updatedAtEpochMs)
-                            resumableMatch.value = null
-                        } else {
-                            resumableMatch.value = match
-                            loadTournamentAndStage(match)
+        if (isGuest.value) {
+            isLoading.value = false
+        } else {
+            lifecycleScope.launch {
+                matchRepository.observeLatestScoringMatch().collect { result ->
+                    when (result) {
+                        is Resource.Success -> {
+                            val match = result.data ?: return@collect
+                            if (System.currentTimeMillis() - match.updatedAtEpochMs >= RESUME_WINDOW_MS) {
+                                matchRepository.expirePausedScoringMatch(match.id, match.updatedAtEpochMs)
+                                resumableMatch.value = null
+                            } else {
+                                resumableMatch.value = match
+                                loadTournamentAndStage(match)
+                            }
                         }
+                        is Resource.Error -> resumableMatch.value = null
+                        is Resource.Loading -> Unit
                     }
-                    is Resource.Error -> resumableMatch.value = null
-                    is Resource.Loading -> Unit
+                    isLoading.value = false
                 }
-                isLoading.value = false
             }
         }
 
@@ -115,10 +124,18 @@ class QuickScoringActivity : ComponentActivity() {
                 isLoading = isLoading.value,
                 isResuming = isResuming.value,
                 isDeleting = isDeleting.value,
+                isGuest = isGuest.value,
                 onBack = { finish() },
                 onResume = ::resumeMatch,
                 onDelete = ::deleteMatch
             )
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (isGuest.value && FirebaseAuth.getInstance().currentUser != null) {
+            recreate()
         }
     }
 
@@ -199,10 +216,12 @@ private fun QuickScoringScreen(
     isLoading: Boolean,
     isResuming: Boolean,
     isDeleting: Boolean,
+    isGuest: Boolean,
     onBack: () -> Unit,
     onResume: (Match) -> Unit,
     onDelete: (Match) -> Unit
 ) {
+    val context = LocalContext.current
     Box(
         Modifier.fillMaxSize().background(QuickBg).drawBehind {
             drawCircle(Color(0x22125E8E), size.width * .62f, Offset(size.width * .94f, size.height * .12f))
@@ -228,6 +247,16 @@ private fun QuickScoringScreen(
             ) {
                 Text("PICK UP WHERE YOU LEFT OFF", color = QuickAccent, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
                 when {
+                    isGuest -> GuestAccessCard(
+                        title = "Quick Scoring",
+                        detail = "Login or sign up to see and resume your quick scoring matches.",
+                        onSignup = {
+                            context.startActivity(
+                                Intent(context, MainActivity::class.java)
+                                    .putExtra(MainActivity.EXTRA_FORCE_SIGNUP, true)
+                            )
+                        }
+                    )
                     isLoading -> Text("Checking for a paused match…", color = QuickMuted, fontSize = 14.sp)
                     match == null -> EmptyQuickScoringCard()
                     else -> ResumableMatchCard(
