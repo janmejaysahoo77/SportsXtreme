@@ -82,10 +82,10 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                 if (status?.statusCode == CommonStatusCodes.SUCCESS) {
                     val message = extras?.getString(SmsRetriever.EXTRA_SMS_MESSAGE)
                     if (message != null) {
-                        Log.d("OTP_AUTOFILL", "SMS received: $message")
+                        Log.d("OTP_AUTOFILL", "SMS retrieved via Retriever, processing extraction")
                         extractOtpAndFill(message)
                     } else {
-                        Log.w("OTP_AUTOFILL", "SMS retrieved but message is null. Extras: ${extras?.keySet()}")
+                        Log.w("OTP_AUTOFILL", "SMS retrieved but message is null")
                     }
                 } else if (status?.statusCode == CommonStatusCodes.TIMEOUT) {
                     Log.d("OTP_AUTOFILL", "SMS Retrieval timed out")
@@ -127,7 +127,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         otpScope.launch {
             authViewModel.state.collect { state ->
                 state.smsMessage?.let { message ->
-                    Log.d("OTP_AUTOFILL", "SMS message from shared state: $message")
+                    Log.d("OTP_AUTOFILL", "SMS message received from shared state, processing extraction")
                     extractOtpAndFill(message)
                     authViewModel.clearSmsMessage()
                 }
@@ -135,7 +135,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                 state.pendingPhoneSession?.let { session ->
                     if (session.isAutoVerified) {
                         session.autoFilledCode?.let { code ->
-                            Log.d("OTP_AUTOFILL", "Firebase auto-retrieved code: $code")
+                            Log.d("OTP_AUTOFILL", "Firebase auto-retrieved code available, filling inputs")
                             fillOtp(code)
                         } ?: run {
                             verifyAutomaticallyIfReady(context)
@@ -170,12 +170,12 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         val matcher = pattern.matcher(message)
         if (matcher.find()) {
             val otp = matcher.group(1)
-            Log.d("OTP_AUTOFILL", "Extracted OTP: $otp")
+            Log.d("OTP_AUTOFILL", "6-digit OTP extracted successfully from SMS")
             if (otp != null && otp.length == 6) {
                 fillOtp(otp)
             }
         } else {
-            Log.d("OTP_AUTOFILL", "No 6-digit OTP found in message: $message")
+            Log.d("OTP_AUTOFILL", "No 6-digit OTP pattern matched in SMS message")
         }
     }
 
@@ -488,14 +488,18 @@ class OtpVerificationScreenView @JvmOverloads constructor(
     private fun verifyOtp(context: Context) {
         if (isVerifying) return
         val code = otpInputs.joinToString(separator = "") { it.text.toString() }
+        Log.d("OTP_SYSTEM", "[UI] verifyOtp triggered with code length: ${code.length}")
         if (code.length != 6) {
+            Log.w("OTP_SYSTEM", "[UI] verifyOtp validation failed: Incomplete OTP code (length=${code.length})")
             showError("Enter the complete 6 digit code")
             return
         }
         setVerifying(true)
         otpScope.launch {
+            Log.d("OTP_SYSTEM", "[UI] Calling authViewModel.verifyPhoneOtp...")
             when (val result = authViewModel.verifyPhoneOtp(code)) {
                 is Resource.Success -> {
+                    Log.i("OTP_SYSTEM", "[UI] verifyOtp SUCCESS! isNewUser=${result.data}")
                     showMessage("Verification complete.")
                     val mainActivity = context as? MainActivity
                     if (mainActivity?.isSignupPhoneVerificationPending() == true) {
@@ -507,6 +511,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                     }
                 }
                 is Resource.Error -> {
+                    Log.e("OTP_SYSTEM", "[UI] verifyOtp FAILED: ${result.message}")
                     showError(result.message ?: "OTP verification failed")
                 }
                 is Resource.Loading -> Unit
@@ -517,12 +522,15 @@ class OtpVerificationScreenView @JvmOverloads constructor(
 
     private fun verifyAutomaticallyIfReady(context: Context) {
         val autoVerified = authViewModel.state.value.pendingPhoneSession?.isAutoVerified == true
+        Log.d("OTP_SYSTEM", "[UI] verifyAutomaticallyIfReady check: autoVerified=$autoVerified")
         if (!autoVerified) return
         setVerifying(true)
         showMessage("Phone verified automatically.")
         otpScope.launch {
+            Log.d("OTP_SYSTEM", "[UI] Calling authViewModel.verifyPhoneOtp for auto-verified session...")
             when (val result = authViewModel.verifyPhoneOtp("")) {
                 is Resource.Success -> {
+                    Log.i("OTP_SYSTEM", "[UI] verifyAutomaticallyIfReady SUCCESS! isNewUser=${result.data}")
                     val mainActivity = context as? MainActivity
                     if (mainActivity?.isSignupPhoneVerificationPending() == true) {
                         mainActivity.showHomeScreen()
@@ -532,7 +540,10 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                         navigateAfterVerification(context)
                     }
                 }
-                is Resource.Error -> showError(result.message ?: "Automatic verification failed")
+                is Resource.Error -> {
+                    Log.e("OTP_SYSTEM", "[UI] verifyAutomaticallyIfReady FAILED: ${result.message}")
+                    showError(result.message ?: "Automatic verification failed")
+                }
                 is Resource.Loading -> Unit
             }
             setVerifying(false)
@@ -541,11 +552,13 @@ class OtpVerificationScreenView @JvmOverloads constructor(
 
     private fun resendOtp() {
         if (isVerifying) return
+        Log.d("OTP_SYSTEM", "[UI] resendOtp triggered by user")
         setVerifying(true, label = "RESENDING...")
         otpScope.launch {
             when (val result = authViewModel.resendPhoneOtp()) {
                 is Resource.Success -> {
                     resendCount += 1
+                    Log.i("OTP_SYSTEM", "[UI] resendOtp SUCCESS! resendCount=$resendCount, isAutoVerified=${result.data?.isAutoVerified}")
                     resendView.text = "CODE RESENT ${resendCount}X"
                     clearOtp()
                     if (result.data?.isAutoVerified == true) {
@@ -554,7 +567,10 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                         showMessage("New code request queued.")
                     }
                 }
-                is Resource.Error -> showError(result.message ?: "Could not resend OTP")
+                is Resource.Error -> {
+                    Log.e("OTP_SYSTEM", "[UI] resendOtp FAILED: ${result.message}")
+                    showError(result.message ?: "Could not resend OTP")
+                }
                 is Resource.Loading -> Unit
             }
             setVerifying(false)

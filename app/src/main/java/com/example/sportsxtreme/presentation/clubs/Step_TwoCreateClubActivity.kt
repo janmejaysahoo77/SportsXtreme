@@ -86,9 +86,10 @@ fun StepTwoTheme(content: @Composable () -> Unit) {
 
 @Composable
 fun CreateClubStepTwoScreen(onBack: () -> Unit, onContinue: () -> Unit) {
-    var contactName by remember { mutableStateOf("") }
-    var mobileNumber by remember { mutableStateOf("+91 98765 43210") }
-    var emailAddress by remember { mutableStateOf("club@example.com") }
+    val currentUser = remember { com.example.sportsxtreme.data.di.AuthDependencies.authViewModel().state.value.authenticatedUser }
+    var contactName by remember { mutableStateOf(currentUser?.name.orEmpty()) }
+    var mobileNumber by remember { mutableStateOf(currentUser?.mobileNumber.orEmpty()) }
+    var emailAddress by remember { mutableStateOf(currentUser?.email.orEmpty()) }
     var alternativeContact by remember { mutableStateOf("") }
     var website by remember { mutableStateOf("") }
 

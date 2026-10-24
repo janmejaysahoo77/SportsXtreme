@@ -272,7 +272,7 @@ private fun MobileInputCard(mobileNumber: String, onMobileChange: (String) -> Un
             Text("+91", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
             BasicTextField(value = mobileNumber, onValueChange = onMobileChange, modifier = Modifier.padding(start = 13.dp).weight(1f), singleLine = true,
                 textStyle = TextStyle(color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black), cursorBrush = SolidColor(MobileAccent), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                decorationBox = { inner -> Box { if (mobileNumber.isEmpty()) Text("98765 43210", color = MobileDim, fontSize = 22.sp, fontWeight = FontWeight.Black); inner() } })
+                decorationBox = { inner -> Box { if (mobileNumber.isEmpty()) Text("Mobile Number", color = MobileDim, fontSize = 20.sp, fontWeight = FontWeight.Bold); inner() } })
         }
         DividerLine(Modifier.padding(top = 14.dp))
         FieldLabel("PLAYER NAME", Modifier.padding(top = 42.dp))

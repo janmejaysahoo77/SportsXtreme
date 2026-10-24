@@ -199,6 +199,52 @@ class FirebaseFirestoreUserDataSource(
         }
     }
 
+    override suspend fun getUserProfileByPhone(phoneNumber: String): Result<UserProfile?> {
+        return suspendCancellableCoroutine { continuation ->
+            val cleanPhone = phoneNumber.trim()
+            if (cleanPhone.isBlank()) {
+                continuation.resume(Result.success(null))
+                return@suspendCancellableCoroutine
+            }
+
+            firestore.collection(USERS_COLLECTION)
+                .whereEqualTo("phoneNumber", cleanPhone)
+                .limit(1)
+                .get()
+                .addOnSuccessListener { querySnapshot ->
+                    val doc = querySnapshot.documents.firstOrNull()
+                    if (doc != null && doc.exists()) {
+                        continuation.resume(Result.success(doc.toUserProfile(doc.id)))
+                    } else {
+                        // Retry with stripped non-digits if needed
+                        val digits = cleanPhone.filter { it.isDigit() }
+                        if (digits.isNotBlank()) {
+                            firestore.collection(USERS_COLLECTION)
+                                .whereEqualTo("phoneNumber", digits)
+                                .limit(1)
+                                .get()
+                                .addOnSuccessListener { retrySnapshot ->
+                                    val retryDoc = retrySnapshot.documents.firstOrNull()
+                                    if (retryDoc != null && retryDoc.exists()) {
+                                        continuation.resume(Result.success(retryDoc.toUserProfile(retryDoc.id)))
+                                    } else {
+                                        continuation.resume(Result.success(null))
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    continuation.resume(Result.success(null))
+                                }
+                        } else {
+                            continuation.resume(Result.success(null))
+                        }
+                    }
+                }
+                .addOnFailureListener { exception ->
+                    continuation.resume(Result.failure(exception))
+                }
+        }
+    }
+
     override suspend fun updateUserProfile(profile: UserProfile): Result<UserProfile> {
         return suspendCancellableCoroutine { continuation ->
             val payload = profile.toFirestorePayload() + mapOf(
