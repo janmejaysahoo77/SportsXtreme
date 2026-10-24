@@ -23,6 +23,17 @@ class PendingFirestoreUserDataSource : FirestoreUserDataSource {
         )
     }
 
+    override suspend fun getUserProfileByPhone(phoneNumber: String): Result<UserProfile?> {
+        return Result.success(
+            UserProfile(
+                id = "user_phone_123",
+                name = "Phone User",
+                email = "user@sportsxtreme.com",
+                phoneNumber = phoneNumber
+            )
+        )
+    }
+
     override suspend fun updateUserProfile(profile: UserProfile): Result<UserProfile> {
         return Result.success(profile)
     }

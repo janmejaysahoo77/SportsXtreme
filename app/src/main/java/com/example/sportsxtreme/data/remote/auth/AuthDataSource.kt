@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.data.remote.auth
 
 import android.content.Context
+import android.util.Log
 import com.example.sportsxtreme.domain.model.AuthProvider
 import com.example.sportsxtreme.domain.model.AuthSession
 import com.example.sportsxtreme.domain.model.EmailSignupRequest
@@ -17,8 +18,12 @@ class AuthDataSource(
     private val firebaseAuth: FirebaseAuth = FirebaseAuth.getInstance()
 ) {
     fun currentUser(): User? {
-        val firebaseUser = firebaseAuth.currentUser ?: return null
-        return User(
+        val firebaseUser = firebaseAuth.currentUser
+        if (firebaseUser == null) {
+            Log.d(TAG, "[AUTH] AuthDataSource.currentUser(): null (No user signed in)")
+            return null
+        }
+        val user = User(
             id = firebaseUser.uid,
             name = firebaseUser.displayName.orEmpty(),
             mobileNumber = firebaseUser.phoneNumber.orEmpty(),
@@ -27,9 +32,12 @@ class AuthDataSource(
             isEmailVerified = firebaseUser.isEmailVerified,
             isPhoneVerified = !firebaseUser.phoneNumber.isNullOrBlank()
         )
+        Log.d(TAG, "[AUTH] AuthDataSource.currentUser(): UID=${user.id}, email=${user.email}, isVerified=${user.isEmailVerified}")
+        return user
     }
 
     suspend fun createEmailAccount(request: EmailSignupRequest): Result<AuthSession> {
+        Log.d(TAG, "[AUTH] AuthDataSource.createEmailAccount creating account for email=${request.email}")
         return suspendCancellableCoroutine { continuation ->
             val task = firebaseAuth.createUserWithEmailAndPassword(request.email, request.password)
 
@@ -45,6 +53,7 @@ class AuthDataSource(
                     isPhoneVerified = false
                 )
                 if (firebaseUser == null) {
+                    Log.e(TAG, "[AUTH] AuthDataSource.createEmailAccount: Account created but firebaseUser is null")
                     continuation.resume(Result.failure(IllegalStateException("Firebase account was created, but no active user was returned.")))
                     return@addOnSuccessListener
                 }
@@ -56,22 +65,27 @@ class AuthDataSource(
                     .addOnSuccessListener {
                         firebaseUser.sendEmailVerification()
                             .addOnSuccessListener {
+                                Log.i(TAG, "[AUTH] AuthDataSource.createEmailAccount SUCCESS! UID=${firebaseUser.uid}")
                                 continuation.resume(Result.success(AuthSession(user, authResult.additionalUserInfo?.isNewUser == true)))
                             }
                             .addOnFailureListener { exception ->
+                                Log.e(TAG, "[AUTH] AuthDataSource.createEmailAccount: Verification email failed: ${exception.message}", exception)
                                 continuation.resume(Result.failure(exception))
                             }
                     }
                     .addOnFailureListener { exception ->
+                        Log.e(TAG, "[AUTH] AuthDataSource.createEmailAccount: Profile update failed: ${exception.message}", exception)
                         continuation.resume(Result.failure(exception))
                     }
             }.addOnFailureListener { exception ->
+                Log.e(TAG, "[AUTH] AuthDataSource.createEmailAccount FAILED: ${exception.message}", exception)
                 continuation.resume(Result.failure(exception))
             }
         }
     }
 
     suspend fun signInWithEmailAndPassword(email: String, password: String): Result<AuthSession> {
+        Log.d(TAG, "[AUTH] AuthDataSource.signInWithEmailAndPassword for email=$email")
         return suspendCancellableCoroutine { continuation ->
             firebaseAuth.signInWithEmailAndPassword(email, password)
                 .addOnSuccessListener { authResult ->
@@ -85,31 +99,39 @@ class AuthDataSource(
                         isEmailVerified = firebaseUser?.isEmailVerified == true,
                         isPhoneVerified = !firebaseUser?.phoneNumber.isNullOrBlank()
                     )
+                    Log.i(TAG, "[AUTH] AuthDataSource.signInWithEmailAndPassword SUCCESS! UID=${user.id}, isEmailVerified=${user.isEmailVerified}")
                     continuation.resume(Result.success(AuthSession(user, authResult.additionalUserInfo?.isNewUser == true)))
                 }
                 .addOnFailureListener { exception ->
+                    Log.e(TAG, "[AUTH] AuthDataSource.signInWithEmailAndPassword FAILED: ${exception.message}", exception)
                     continuation.resume(Result.failure(exception))
                 }
         }
     }
 
     suspend fun sendEmailSignInLink(email: String): Result<Unit> {
+        Log.d(TAG, "[AUTH] AuthDataSource.sendEmailSignInLink for email=$email")
         return suspendCancellableCoroutine { continuation ->
             firebaseAuth.sendSignInLinkToEmail(email, emailLinkActionCodeSettings())
                 .addOnSuccessListener {
+                    Log.i(TAG, "[AUTH] AuthDataSource.sendEmailSignInLink SUCCESS for email=$email")
                     continuation.resume(Result.success(Unit))
                 }
                 .addOnFailureListener { exception ->
+                    Log.e(TAG, "[AUTH] AuthDataSource.sendEmailSignInLink FAILED: ${exception.message}", exception)
                     continuation.resume(Result.failure(exception))
                 }
         }
     }
 
     fun isSignInWithEmailLink(link: String): Boolean {
-        return firebaseAuth.isSignInWithEmailLink(link)
+        val result = firebaseAuth.isSignInWithEmailLink(link)
+        Log.d(TAG, "[AUTH] AuthDataSource.isSignInWithEmailLink: $result")
+        return result
     }
 
     suspend fun signInWithEmailLink(email: String, link: String): Result<AuthSession> {
+        Log.d(TAG, "[AUTH] AuthDataSource.signInWithEmailLink for email=$email")
         return suspendCancellableCoroutine { continuation ->
             firebaseAuth.signInWithEmailLink(email, link)
                 .addOnSuccessListener { authResult ->
@@ -123,15 +145,18 @@ class AuthDataSource(
                         isEmailVerified = true,
                         isPhoneVerified = !firebaseUser?.phoneNumber.isNullOrBlank()
                     )
+                    Log.i(TAG, "[AUTH] AuthDataSource.signInWithEmailLink SUCCESS! UID=${user.id}")
                     continuation.resume(Result.success(AuthSession(user, authResult.additionalUserInfo?.isNewUser == true)))
                 }
                 .addOnFailureListener { exception ->
+                    Log.e(TAG, "[AUTH] AuthDataSource.signInWithEmailLink FAILED: ${exception.message}", exception)
                     continuation.resume(Result.failure(exception))
                 }
         }
     }
 
     suspend fun deleteCurrentUserAndSignOut(): Result<Unit> {
+        Log.d(TAG, "[AUTH] AuthDataSource.deleteCurrentUserAndSignOut called")
         return suspendCancellableCoroutine { continuation ->
             val firebaseUser = firebaseAuth.currentUser
             if (firebaseUser == null) {
@@ -143,20 +168,24 @@ class AuthDataSource(
             firebaseUser.delete()
                 .addOnSuccessListener {
                     firebaseAuth.signOut()
+                    Log.i(TAG, "[AUTH] User deleted and signed out successfully")
                     continuation.resume(Result.success(Unit))
                 }
                 .addOnFailureListener { exception ->
                     firebaseAuth.signOut()
+                    Log.e(TAG, "[AUTH] User deletion failed, signed out: ${exception.message}", exception)
                     continuation.resume(Result.failure(exception))
                 }
         }
     }
 
     fun signOut() {
+        Log.d(TAG, "[AUTH] AuthDataSource.signOut called")
         firebaseAuth.signOut()
     }
 
     suspend fun resendEmailVerification(): Result<Unit> {
+        Log.d(TAG, "[AUTH] AuthDataSource.resendEmailVerification called")
         return suspendCancellableCoroutine { continuation ->
             val firebaseUser = firebaseAuth.currentUser
             if (firebaseUser == null) {
@@ -166,15 +195,18 @@ class AuthDataSource(
 
             firebaseUser.sendEmailVerification()
                 .addOnSuccessListener {
+                    Log.i(TAG, "[AUTH] AuthDataSource.resendEmailVerification SUCCESS")
                     continuation.resume(Result.success(Unit))
                 }
                 .addOnFailureListener { exception ->
+                    Log.e(TAG, "[AUTH] AuthDataSource.resendEmailVerification FAILED: ${exception.message}", exception)
                     continuation.resume(Result.failure(exception))
                 }
         }
     }
 
     suspend fun sendEmailChangeVerification(newEmail: String): Result<Unit> {
+        Log.d(TAG, "[AUTH] AuthDataSource.sendEmailChangeVerification for newEmail=$newEmail")
         return suspendCancellableCoroutine { continuation ->
             val firebaseUser = firebaseAuth.currentUser
             if (firebaseUser == null) {
@@ -188,15 +220,18 @@ class AuthDataSource(
 
             firebaseUser.verifyBeforeUpdateEmail(newEmail)
                 .addOnSuccessListener {
+                    Log.i(TAG, "[AUTH] AuthDataSource.sendEmailChangeVerification SUCCESS for $newEmail")
                     continuation.resume(Result.success(Unit))
                 }
                 .addOnFailureListener { exception ->
+                    Log.e(TAG, "[AUTH] AuthDataSource.sendEmailChangeVerification FAILED: ${exception.message}", exception)
                     continuation.resume(Result.failure(exception))
                 }
         }
     }
 
     suspend fun reloadAndCheckEmailVerified(): Result<Boolean> {
+        Log.d(TAG, "[AUTH] AuthDataSource.reloadAndCheckEmailVerified called")
         return suspendCancellableCoroutine { continuation ->
             val firebaseUser = firebaseAuth.currentUser
             if (firebaseUser == null) {
@@ -206,9 +241,12 @@ class AuthDataSource(
 
             firebaseUser.reload()
                 .addOnSuccessListener {
-                    continuation.resume(Result.success(firebaseAuth.currentUser?.isEmailVerified == true))
+                    val isVerified = firebaseAuth.currentUser?.isEmailVerified == true
+                    Log.i(TAG, "[AUTH] AuthDataSource.reloadAndCheckEmailVerified result: isEmailVerified=$isVerified")
+                    continuation.resume(Result.success(isVerified))
                 }
                 .addOnFailureListener { exception ->
+                    Log.e(TAG, "[AUTH] AuthDataSource.reloadAndCheckEmailVerified FAILED: ${exception.message}", exception)
                     continuation.resume(Result.failure(exception))
                 }
         }
@@ -226,6 +264,7 @@ class AuthDataSource(
     }
 
     suspend fun signInWithCredential(credential: AuthCredential, provider: AuthProvider): Result<AuthSession> {
+        Log.d(TAG, "[AUTH] AuthDataSource.signInWithCredential with provider=$provider")
         return suspendCancellableCoroutine { continuation ->
             val task = firebaseAuth.signInWithCredential(credential)
 
@@ -240,8 +279,10 @@ class AuthDataSource(
                     isEmailVerified = provider == AuthProvider.GOOGLE || firebaseUser?.isEmailVerified == true,
                     isPhoneVerified = !firebaseUser?.phoneNumber.isNullOrBlank()
                 )
+                Log.i(TAG, "[AUTH] AuthDataSource.signInWithCredential SUCCESS! UID=${user.id}, provider=$provider, isNewUser=${authResult.additionalUserInfo?.isNewUser}")
                 continuation.resume(Result.success(AuthSession(user, authResult.additionalUserInfo?.isNewUser == true)))
             }.addOnFailureListener { exception ->
+                Log.e(TAG, "[AUTH] AuthDataSource.signInWithCredential FAILED: ${exception.message}", exception)
                 continuation.resume(Result.failure(exception))
             }
         }
@@ -260,6 +301,7 @@ class AuthDataSource(
     }
 
     private companion object {
+        private const val TAG = "AuthDataSource"
         const val EMAIL_LINK_CONTINUE_URL = "https://sportsxtreme-95fbb.firebaseapp.com/auth"
     }
 }
