@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.PersonAddAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,20 +37,25 @@ fun MembersScreen(
     onBack: () -> Unit,
     onAddMember: () -> Unit = {}
 ) {
+    val activeUser = remember { com.example.sportsxtreme.data.di.AuthDependencies.authViewModel().state.value.authenticatedUser }
+    val adminName = activeUser?.name.orEmpty().ifBlank { "Club Admin" }
+    val adminEmail = activeUser?.email.orEmpty().ifBlank { "admin@victorycc.com" }
+    val adminPhone = activeUser?.mobileNumber.orEmpty().ifBlank { "Mobile Number" }
+
     val admins = listOf(
-        MemberData("01", "Suresh Nayak", "suresh.nayak@victorycc.com", "+91 9876543210", "Admin"),
-        MemberData("02", "Vikas Sharma", "vikas.sharma@victorycc.com", "+91 9123456780", "Admin")
+        MemberData("01", adminName, adminEmail, adminPhone, "Admin"),
+        MemberData("02", "Vikas Sharma", "vikas.sharma@victorycc.com", "Mobile Number", "Admin")
     )
     
     val captains = listOf(
-        MemberData("01", "Rahul Kumar", "rahul.kumar@victorycc.com", "+91 9876543211", "Captain"),
-        MemberData("02", "Amit Sharma", "amit.sharma@victorycc.com", "+91 9123456781", "Captain")
+        MemberData("01", "Rahul Kumar", "rahul.kumar@victorycc.com", "Mobile Number", "Captain"),
+        MemberData("02", "Amit Sharma", "amit.sharma@victorycc.com", "Mobile Number", "Captain")
     )
     
     val players = listOf(
-        MemberData("01", "Vivek Sharma", "vivek.sharma@victorycc.com", "+91 9876543212", "Player"),
-        MemberData("02", "Nilesh Rao", "nilesh.rao@victorycc.com", "+91 9876543213", "Player"),
-        MemberData("03", "Arjun Patil", "arjun.patil@victorycc.com", "+91 9876543214", "Player")
+        MemberData("01", "Vivek Sharma", "vivek.sharma@victorycc.com", "Mobile Number", "Player"),
+        MemberData("02", "Nilesh Rao", "nilesh.rao@victorycc.com", "Mobile Number", "Player"),
+        MemberData("03", "Arjun Patil", "arjun.patil@victorycc.com", "Mobile Number", "Player")
     )
 
     Scaffold(

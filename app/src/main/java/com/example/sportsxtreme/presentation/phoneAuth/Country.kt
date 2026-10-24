@@ -10,7 +10,7 @@ data class Country(
 ) {
     companion object {
         val ALL: List<Country> = listOf(
-            Country("IN", "India", "+91", "🇮🇳", 10, "98765 43210"),
+            Country("IN", "India", "+91", "🇮🇳", 10, "Mobile Number"),
             Country("US", "United States", "+1", "🇺🇸", 10, "(555) 000-0000"),
             Country("GB", "United Kingdom", "+44", "🇬🇧", 10, "7911 123456"),
             Country("AU", "Australia", "+61", "🇦🇺", 9, "412 345 678"),
