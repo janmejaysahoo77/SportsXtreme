@@ -9,6 +9,7 @@ import com.example.sportsxtreme.data.local.dao.BattingDao
 import com.example.sportsxtreme.data.local.dao.BowlingDao
 import com.example.sportsxtreme.data.local.dao.InningsDao
 import com.example.sportsxtreme.data.local.dao.LiveMatchDao
+import com.example.sportsxtreme.data.local.dao.NotificationDao
 import com.example.sportsxtreme.data.local.dao.MatchDao
 import com.example.sportsxtreme.data.local.dao.MatchSummaryDao
 import com.example.sportsxtreme.data.local.dao.PlayerDao
@@ -21,6 +22,7 @@ import com.example.sportsxtreme.data.local.entity.InningsEntity
 import com.example.sportsxtreme.data.local.entity.LiveMatchEntity
 import com.example.sportsxtreme.data.local.entity.MatchEntity
 import com.example.sportsxtreme.data.local.entity.MatchSummaryEntity
+import com.example.sportsxtreme.data.local.entity.NotificationEntity
 import com.example.sportsxtreme.data.local.entity.PlayerEntity
 import com.example.sportsxtreme.data.local.entity.PlayingXIEntity
 import com.example.sportsxtreme.data.local.entity.SyncQueueEntity
@@ -38,9 +40,10 @@ import com.example.sportsxtreme.data.local.entity.TeamEntity
         BowlingEntity::class,
         MatchSummaryEntity::class,
         SyncQueueEntity::class,
-        LiveMatchEntity::class
+        LiveMatchEntity::class,
+        NotificationEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = true
 )
 abstract class SportsXtremeDatabase : RoomDatabase() {
@@ -54,6 +57,7 @@ abstract class SportsXtremeDatabase : RoomDatabase() {
     abstract fun matchSummaryDao(): MatchSummaryDao
     abstract fun syncQueueDao(): SyncQueueDao
     abstract fun liveMatchDao(): LiveMatchDao
+    abstract fun notificationDao(): NotificationDao
 
     companion object {
         val MIGRATION_5_6 = object : Migration(5, 6) {
@@ -314,6 +318,27 @@ abstract class SportsXtremeDatabase : RoomDatabase() {
         val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE live_matches ADD COLUMN tournamentStage TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS notifications (
+                        id TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        iconType TEXT NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        isRead INTEGER NOT NULL,
+                        targetUrl TEXT,
+                        extraData TEXT,
+                        PRIMARY KEY(id)
+                    )
+                    """.trimIndent()
+                )
             }
         }
     }
