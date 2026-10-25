@@ -7,6 +7,8 @@ import com.example.sportsxtreme.domain.model.UserAchievement
 import com.example.sportsxtreme.domain.model.UserProfile
 import com.example.sportsxtreme.domain.model.UserProfileSettings
 import com.example.sportsxtreme.domain.model.UserProfileStats
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.functions.FirebaseFunctions
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -15,36 +17,42 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 class FirebaseFirestoreUserDataSource(
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
+    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 ) : FirestoreUserDataSource {
     override suspend fun createOrUpdateUser(profile: PendingUserProfile): Result<User> {
         return suspendCancellableCoroutine { continuation ->
             val document = firestore.collection(USERS_COLLECTION).document(profile.id)
-            val payload = mutableMapOf<String, Any?>(
+            val publicPayload = mutableMapOf<String, Any?>(
                 "id" to profile.id,
-                "email" to profile.email,
-                "authProvider" to profile.authProvider.name,
-                "isEmailVerified" to profile.isEmailVerified,
-                "isPhoneVerified" to profile.isPhoneVerified,
-                "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
             if (profile.name.isNotBlank()) {
-                payload["name"] = profile.name
+                publicPayload["name"] = profile.name
             }
-            if (profile.phoneNumber.isNotBlank()) {
-                payload["phoneNumber"] = profile.phoneNumber
-            }
-            // The Firestore value may have been changed after sign-in (for example by a
-            // Cloudinary profile-photo upload). Do not overwrite it with the Auth photo
-            // whenever the profile is refreshed.
 
-            document
-                .set(payload, SetOptions.merge())
-                .addOnSuccessListener {
-                    seedProfileSubcollections(profile.id)
+            document.get()
+                .addOnSuccessListener { existingProfile ->
+                    if (!existingProfile.exists()) {
+                        publicPayload["createdAt"] = FieldValue.serverTimestamp()
+                    }
+                    document.set(publicPayload, SetOptions.merge())
                         .addOnSuccessListener {
-                            continuation.resume(Result.success(profile.toUser()))
+                            FirebaseFunctions.getInstance()
+                                .getHttpsCallable("syncPrivateUserAccount")
+                                .call(emptyMap<String, Any>())
+                                .addOnSuccessListener {
+                                    seedProfileSubcollections(profile.id)
+                                        .addOnSuccessListener {
+                                            continuation.resume(Result.success(profile.toUser()))
+                                        }
+                                        .addOnFailureListener { exception ->
+                                            continuation.resume(Result.failure(exception))
+                                        }
+                                }
+                                .addOnFailureListener { exception ->
+                                    continuation.resume(Result.failure(exception))
+                                }
                         }
                         .addOnFailureListener { exception ->
                             continuation.resume(Result.failure(exception))
@@ -170,7 +178,8 @@ class FirebaseFirestoreUserDataSource(
                 .get()
                 .addOnSuccessListener { snapshot ->
                     if (snapshot.exists()) {
-                        continuation.resume(Result.success(snapshot.toUserProfile(userId)))
+                        val baseProfile = snapshot.toUserProfile(userId)
+                        enrichWithPrivateAccountIfOwner(userId, baseProfile, continuation)
                     } else {
                         // Older profile documents were sometimes created with an
                         // auto-generated document ID while retaining the Firebase
@@ -183,7 +192,8 @@ class FirebaseFirestoreUserDataSource(
                             .addOnSuccessListener { legacyProfiles ->
                                 val legacyProfile = legacyProfiles.documents.firstOrNull()
                                 if (legacyProfile != null) {
-                                    continuation.resume(Result.success(legacyProfile.toUserProfile(userId)))
+                                    val baseProfile = legacyProfile.toUserProfile(userId)
+                                    enrichWithPrivateAccountIfOwner(userId, baseProfile, continuation)
                                 } else {
                                     continuation.resume(Result.failure(NoSuchElementException("User profile not found")))
                                 }
@@ -199,15 +209,66 @@ class FirebaseFirestoreUserDataSource(
         }
     }
 
+    private fun enrichWithPrivateAccountIfOwner(
+        userId: String,
+        baseProfile: UserProfile,
+        continuation: kotlinx.coroutines.CancellableContinuation<Result<UserProfile>>
+    ) {
+        val currentUid = auth.currentUser?.uid
+        if (currentUid != null && currentUid == userId) {
+            val authUser = auth.currentUser
+            userDocument(userId).collection(PRIVATE_COLLECTION).document(ACCOUNT_DOCUMENT).get()
+                .addOnSuccessListener { privateDoc ->
+                    val email = privateDoc.getString("email")
+                        ?.ifBlank { null }
+                        ?: baseProfile.email.ifBlank { null }
+                        ?: authUser?.email.orEmpty()
+                    val phone = privateDoc.getString("phoneNumber")
+                        ?.ifBlank { null }
+                        ?: baseProfile.phoneNumber.ifBlank { null }
+                        ?: authUser?.phoneNumber.orEmpty()
+                    val authProviderStr = privateDoc.getString("authProvider")
+                    val authProvider = if (!authProviderStr.isNullOrBlank()) {
+                        runCatching { com.example.sportsxtreme.domain.model.AuthProvider.valueOf(authProviderStr) }
+                            .getOrDefault(baseProfile.authProvider)
+                    } else baseProfile.authProvider
+
+                    val isEmailVerified = privateDoc.getBoolean("isEmailVerified")
+                        ?: authUser?.isEmailVerified
+                        ?: baseProfile.isEmailVerified
+                    val isPhoneVerified = privateDoc.getBoolean("isPhoneVerified")
+                        ?: baseProfile.isPhoneVerified
+
+                    val enriched = baseProfile.copy(
+                        email = email,
+                        phoneNumber = phone,
+                        authProvider = authProvider,
+                        isEmailVerified = isEmailVerified,
+                        isPhoneVerified = isPhoneVerified
+                    )
+                    continuation.resume(Result.success(enriched))
+                }
+                .addOnFailureListener {
+                    val enriched = baseProfile.copy(
+                        email = authUser?.email.orEmpty().ifBlank { baseProfile.email },
+                        phoneNumber = authUser?.phoneNumber.orEmpty().ifBlank { baseProfile.phoneNumber },
+                        isEmailVerified = authUser?.isEmailVerified ?: baseProfile.isEmailVerified
+                    )
+                    continuation.resume(Result.success(enriched))
+                }
+        } else {
+            continuation.resume(Result.success(baseProfile.copy(email = "", phoneNumber = "")))
+        }
+    }
+
     override suspend fun updateUserProfile(profile: UserProfile): Result<UserProfile> {
         return suspendCancellableCoroutine { continuation ->
-            val payload = profile.toFirestorePayload() + mapOf(
+            val publicPayload = profile.toFirestorePayload() + mapOf(
                 "updatedAt" to FieldValue.serverTimestamp()
             )
 
-            firestore.collection(USERS_COLLECTION)
-                .document(profile.id)
-                .set(payload, SetOptions.merge())
+            val userRef = firestore.collection(USERS_COLLECTION).document(profile.id)
+            userRef.set(publicPayload, SetOptions.merge())
                 .addOnSuccessListener {
                     continuation.resume(Result.success(profile))
                 }
@@ -221,29 +282,13 @@ class FirebaseFirestoreUserDataSource(
         return mapOf(
             "id" to id,
             "name" to name,
-            "email" to email,
-            "phoneNumber" to phoneNumber,
             "profilePhotoUrl" to profilePhotoUrl,
             "location" to location,
             "joinedLabel" to joinedLabel,
             "gender" to gender,
             "role" to role,
             "battingStyle" to battingStyle,
-            "bowlingStyle" to bowlingStyle,
-            "followers" to followers,
-            "following" to following,
-            "matchesPlayed" to matchesPlayed,
-            "wins" to wins,
-            "bestScore" to bestScore,
-            "trophies" to trophies,
-            "hostedTournaments" to hostedTournaments,
-            "hostedSeries" to hostedSeries,
-            "hostedMatches" to hostedMatches,
-            "topPerformerStreak" to topPerformerStreak,
-            "isPro" to isPro,
-            "authProvider" to authProvider.name,
-            "isEmailVerified" to isEmailVerified,
-            "isPhoneVerified" to isPhoneVerified
+            "bowlingStyle" to bowlingStyle
         )
     }
 
@@ -376,6 +421,8 @@ class FirebaseFirestoreUserDataSource(
 
     private companion object {
         const val USERS_COLLECTION = "users"
+        const val PRIVATE_COLLECTION = "private"
+        const val ACCOUNT_DOCUMENT = "account"
         const val STATS_COLLECTION = "stats"
         const val SUMMARY_DOCUMENT = "summary"
         const val SETTINGS_COLLECTION = "settings"

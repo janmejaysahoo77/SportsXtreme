@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#071116">
+    <title>Open in SportsXtreme</title>
+    <style>
+      :root { color-scheme: dark; font-family: Arial, sans-serif; background: #071116; color: #eaf2f4; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; }
+      main { box-sizing: border-box; width: min(100% - 32px, 480px); padding: 32px; border: 1px solid #26333a; border-radius: 20px; background: #0c1419; }
+      h1 { margin-top: 0; font-size: 1.7rem; }
+      p { color: #a8b5b9; line-height: 1.55; }
+      a { display: inline-block; margin-top: 12px; padding: 13px 18px; border-radius: 10px; background: #c7ff1a; color: #071116; font-weight: 700; text-decoration: none; }
+      small { display: block; margin-top: 20px; color: #a8b5b9; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">Open this link in SportsXtreme</h1>
+      <p id="description">This link opens in the SportsXtreme Android app.</p>
+      <a href="https://play.google.com/store/apps/details?id=com.example.sportsxtreme">Get SportsXtreme on Google Play</a>
+      <small>After installing the app, return to this browser tab and open the original link again.</small>
+    </main>
+    <script>
+      const route = location.pathname.split("/").filter(Boolean)[0];
+      const pages = {
+        join: ["Match invitation", "Install SportsXtreme to choose a team and join this match."],
+        "team-invite": ["Team invitation", "Install SportsXtreme to open this team invitation."],
+        "tournament-invite": ["Tournament invitation", "Install SportsXtreme to open this tournament invitation."],
+        scorecard: ["Public scorecard", "Install SportsXtreme to view this live or completed scorecard."]
+      };
+      const [title, description] = pages[route] || pages.scorecard;
+      document.title = `${title} · SportsXtreme`;
+      document.getElementById("title").textContent = title;
+      document.getElementById("description").textContent = description;
+    </script>
+  </body>
+</html>

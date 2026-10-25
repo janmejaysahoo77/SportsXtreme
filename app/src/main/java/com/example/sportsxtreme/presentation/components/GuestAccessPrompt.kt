@@ -20,7 +20,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -64,24 +67,35 @@ fun GuestAuthDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.border(1.dp, Color(0xFF26394B), RoundedCornerShape(12.dp)),
+        shape = RoundedCornerShape(12.dp),
         title = null,
         text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Image(painterResource(R.drawable.whiteuser), "Guest account", Modifier.size(78.dp))
-                Text("Account required", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
-                Text(detail, color = Color(0xFFADB9C0), fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth().drawBehind {
+                    drawRect(
+                        Brush.radialGradient(
+                            colors = listOf(Color(0x30C1FF00), Color.Transparent),
+                            center = Offset(size.width / 2f, 0f),
+                            radius = size.height * 1.35f
+                        )
+                    )
+                }
+            ) {
+                Text("Account required", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Image(painterResource(R.drawable.whiteuser), "Guest account", Modifier.padding(top = 8.dp).size(68.dp))
+                Text(detail, color = Color(0xFFD8E1EB), fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 10.dp))
             }
         },
         confirmButton = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-                if (onLogin != null) TextButton(onClick = onLogin) { Text("Login") }
-                Button(onClick = onSignup, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC8FF00), contentColor = Color(0xFF172000))) {
-                    Text("Sign up", fontWeight = FontWeight.Bold)
-                }
+                if (onLogin != null) TextButton(onClick = onLogin) { Text("Login", color = Color(0xFFC1FF00)) }
+                TextButton(onClick = onDismiss) { Text("Cancel", color = Color(0xFFC1FF00)) }
+                TextButton(onClick = onSignup) { Text("Sign up", color = Color(0xFFC1FF00)) }
             }
         },
-        containerColor = Color(0xFF101A24),
+        containerColor = Color(0xFF0B121E),
         textContentColor = Color.White
     )
 }

@@ -104,6 +104,7 @@ class ScorecardActivity : ComponentActivity() {
     private val functions by lazy { FirebaseFunctions.getInstance() }
     private var matchListener: ListenerRegistration? = null
     private var deliveriesListener: ListenerRegistration? = null
+    private val incrementedViews = mutableSetOf<String>()
 
     companion object {
         const val EXTRA_LEAGUE = "scorecard.extra.LEAGUE"
@@ -162,9 +163,14 @@ class ScorecardActivity : ComponentActivity() {
 
         val matchId = resolveMatchId(intent)
         if (matchId.isNotBlank()) {
-            if (savedInstanceState == null) {
+            if (savedInstanceState == null && incrementedViews.add(matchId)) {
                 firestore.collection("matches").document(matchId)
-                    .update("scorecardViews", FieldValue.increment(1))
+                    .update(
+                        mapOf(
+                            "scorecardViews" to FieldValue.increment(1),
+                            "lastViewedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
                     .addOnFailureListener { error ->
                         Log.w("ScorecardActivity", "Could not increment scorecard views", error)
                     }

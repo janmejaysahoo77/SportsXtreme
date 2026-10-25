@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -94,6 +95,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import android.widget.Toast
 import android.content.Intent
 import org.json.JSONObject
@@ -206,6 +212,8 @@ fun CommunityScreen(
     onMenuClick: () -> Unit = {}
 ) {
     var selectedFilterIndex by remember { mutableIntStateOf(0) }
+    var isSearchExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     var showCreateOptions by remember { mutableStateOf(false) }
     var showProfileForm by remember { mutableStateOf(false) }
     var showLookingForForm by remember { mutableStateOf(false) }
@@ -347,7 +355,19 @@ fun CommunityScreen(
             }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            SportsXtremeAppBar(onMenuClick = onMenuClick, showSearch = true)
+            SportsXtremeAppBar(
+                onMenuClick = onMenuClick,
+                showSearch = true,
+                onSearchClick = { isSearchExpanded = true },
+                searchExpanded = isSearchExpanded,
+                searchQuery = searchQuery,
+                searchPlaceholder = "Players, roles, or listings",
+                onSearchQueryChange = { searchQuery = it },
+                onSearchClose = {
+                    searchQuery = ""
+                    isSearchExpanded = false
+                }
+            )
             Spacer(Modifier.height(10.dp))
             FilterRow(selectedIndex = selectedFilterIndex, onSelectFilter = { selectedFilterIndex = it })
             AnimatedContent(
@@ -359,11 +379,24 @@ fun CommunityScreen(
                 },
                 label = "community-tab-content"
             ) { tabIndex ->
-                val displayedProfiles = remember(tabIndex, communityProfiles.toList()) {
-                    when (tabIndex) {
+                val displayedProfiles = remember(tabIndex, communityProfiles.toList(), searchQuery) {
+                    val query = searchQuery.trim().lowercase()
+                    val tabProfiles = if (query.isNotBlank()) communityProfiles.toList() else when (tabIndex) {
                         1 -> communityProfiles.filter { it.isRequest }
                         2 -> communityProfiles.filterNot { it.isRequest }
                         else -> communityProfiles.toList()
+                    }
+                    if (query.isBlank()) tabProfiles else tabProfiles.filter { profile ->
+                        val searchable = listOf(
+                            profile.name, profile.role, profile.description, profile.organization.orEmpty(),
+                            profile.location.orEmpty(), profile.requestTitle.orEmpty(), profile.requestFormat.orEmpty()
+                        ).joinToString(" ").lowercase()
+                        val normalizedQuery = when (query) {
+                            "wk", "keeper", "wicketkeeper" -> "wicket keeper"
+                            "allrounder", "all-rounder" -> "all rounder"
+                            else -> query
+                        }
+                        searchable.contains(query) || searchable.contains(normalizedQuery)
                     }
                 }
                 LazyColumn(
@@ -397,7 +430,7 @@ fun CommunityScreen(
                     if (displayedProfiles.isEmpty()) {
                         item {
                             Text(
-                                text = when (tabIndex) {
+                                text = if (searchQuery.isNotBlank()) "No community listings match this search." else when (tabIndex) {
                                     1 -> "No one is looking for an opportunity right now."
                                     2 -> "No self profiles are available yet."
                                     else -> "No community posts yet. Be the first to add your profile."
@@ -774,10 +807,9 @@ private fun LookingForOpportunityScreen(
                             checkmarkColor = Color(0xFF111800)
                         )
                     )
-                    Text(
-                        "I consent to sharing my WhatsApp number with users who wish to contact me regarding this listing. My number will not be displayed publicly, but tapping the WhatsApp button will allow users to contact me directly via WhatsApp. For more, check Privacy Policy.",
-                        color = Color(0xFFB6C4CF), fontSize = 10.sp, lineHeight = 14.sp,
-                        modifier = Modifier.weight(1f).clickable { whatsappConsent = !whatsappConsent }.padding(top = 12.dp)
+                    WhatsAppConsentText(
+                        modifier = Modifier.weight(1f).padding(top = 12.dp),
+                        onToggleConsent = { whatsappConsent = !whatsappConsent }
                     )
                 }
                 if (error.isNotBlank()) Text(error, color = Color(0xFFFF6878), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp))
@@ -942,12 +974,9 @@ private fun AddSelfProfileForm(
                     checkmarkColor = Color(0xFF111800)
                 )
             )
-            Text(
-                "I consent to sharing my WhatsApp number with users who wish to contact me regarding this listing. My number will not be displayed publicly, but tapping the WhatsApp button will allow users to contact me directly via WhatsApp. For more, check Privacy Policy.",
-                color = Color(0xFFB6C4CF),
-                fontSize = 10.sp,
-                lineHeight = 14.sp,
-                modifier = Modifier.weight(1f).clickable { whatsappConsent = !whatsappConsent }.padding(top = 12.dp)
+            WhatsAppConsentText(
+                modifier = Modifier.weight(1f).padding(top = 12.dp),
+                onToggleConsent = { whatsappConsent = !whatsappConsent }
             )
         }
 
@@ -984,6 +1013,42 @@ private fun AddSelfProfileForm(
             } else Text("Post", color = Color(0xFF111800), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
         }
     }
+}
+
+@Composable
+private fun WhatsAppConsentText(
+    modifier: Modifier = Modifier,
+    onToggleConsent: () -> Unit
+) {
+    val context = LocalContext.current
+    val text = buildAnnotatedString {
+        append("I consent to sharing my WhatsApp number with users who wish to contact me regarding this listing. My number will not be displayed publicly, but tapping the WhatsApp button will allow users to contact me directly via WhatsApp. For more, check ")
+        pushStringAnnotation(tag = "privacy-policy", annotation = "open")
+        withStyle(
+            SpanStyle(
+                color = GreenAccent,
+                fontWeight = FontWeight.Bold,
+                textDecoration = TextDecoration.Underline
+            )
+        ) {
+            append("Privacy Policy")
+        }
+        pop()
+        append(".")
+    }
+    ClickableText(
+        text = text,
+        modifier = modifier,
+        style = TextStyle(color = Color(0xFFB6C4CF), fontSize = 10.sp, lineHeight = 14.sp),
+        onClick = { offset ->
+            val isPolicyLink = text.getStringAnnotations("privacy-policy", offset, offset).isNotEmpty()
+            if (isPolicyLink) {
+                context.startActivity(WebPageActivity.intent(context, "/app-privacy-policy"))
+            } else {
+                onToggleConsent()
+            }
+        }
+    )
 }
 
 @Composable

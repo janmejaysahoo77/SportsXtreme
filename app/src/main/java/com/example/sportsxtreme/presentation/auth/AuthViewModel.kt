@@ -102,9 +102,9 @@ class AuthViewModel(
         }
     }
 
-    suspend fun signInWithGoogle(idToken: String): Resource<AuthSession> {
+    suspend fun signInWithGoogle(idToken: String, existingAccountOnly: Boolean = false): Resource<AuthSession> {
         setLoading()
-        val result = useCases.signInWithGoogle(idToken)
+        val result = useCases.signInWithGoogle(idToken, existingAccountOnly)
         return result.also { updateAuthSession(it) }
     }
 

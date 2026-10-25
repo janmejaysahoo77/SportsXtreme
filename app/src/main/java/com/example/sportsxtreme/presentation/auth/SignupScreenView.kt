@@ -1,5 +1,35 @@
 package com.example.sportsxtreme.presentation.auth
 
+import android.content.Context
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.text.Editable
+import android.text.InputType
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.TextWatcher
+import android.text.method.LinkMovementMethod
+import android.text.method.PasswordTransformationMethod
+import android.text.style.ClickableSpan
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
+import android.util.AttributeSet
+import android.util.Patterns
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Space
+import android.widget.TextView
+import android.widget.Toast
+
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.common.WindowInsetsUtils
@@ -14,31 +44,6 @@ import com.example.sportsxtreme.presentation.home.*
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
-import android.content.Context
-import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
-import android.text.Editable
-import android.text.InputType
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.TextWatcher
-import android.text.method.PasswordTransformationMethod
-import android.text.style.ForegroundColorSpan
-import android.text.style.StyleSpan
-import android.util.AttributeSet
-import android.util.Patterns
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.FrameLayout
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.Space
-import android.widget.TextView
-import android.widget.Toast
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -69,6 +74,8 @@ class SignupScreenView @JvmOverloads constructor(
     private lateinit var confirmPasswordInput: EditText
     private lateinit var errorMessageView: TextView
     private lateinit var createAccountButton: TextView
+    private lateinit var consentCheckBox: CheckBox
+    private lateinit var googleSignupButton: LinearLayout
     private val authViewModel = AuthDependencies.authViewModel()
     private val signupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val credentialManager = CredentialManager.create(context)
@@ -92,7 +99,7 @@ class SignupScreenView @JvmOverloads constructor(
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(10), dp(22), dp(28))
+            setPadding(dp(22), dp(46), dp(22), dp(28))
             WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -124,6 +131,7 @@ class SignupScreenView @JvmOverloads constructor(
 
         errorMessageView = errorMessage(context)
         content.addView(errorMessageView, fullWidthParams(bottom = dp(8)))
+        content.addView(consentCheckbox(context), fullWidthParams(top = dp(4), bottom = dp(4)))
         content.addView(primaryButton(context), fullWidthParams(top = dp(10), bottom = dp(16), height = dp(52)))
         if (verifiedPhoneNumber == null) {
             content.addView(divider(context), fullWidthParams(bottom = dp(16), height = dp(18)))
@@ -161,7 +169,9 @@ class SignupScreenView @JvmOverloads constructor(
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-                override fun afterTextChanged(s: Editable?) = Unit
+                override fun afterTextChanged(s: Editable?) {
+                    refreshCreateAccountButton()
+                }
             })
             setOnFocusChangeListener { view, hasFocus ->
                 view.background = fieldBackground(hasFocus)
@@ -185,10 +195,90 @@ class SignupScreenView @JvmOverloads constructor(
                 cornerRadius = dp(7).toFloat()
                 setColor(primaryFixed)
             }
+            isEnabled = false
+            alpha = 0.5f
             setOnClickListener {
                 handleSignup(context)
             }
         }
+    }
+
+    private fun consentCheckbox(context: Context): View = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+
+        val checkbox = CheckBox(context).apply {
+            consentCheckBox = this
+            buttonTintList = ColorStateList.valueOf(primaryFixed)
+            text = ""
+            setPadding(0, 0, 0, 0)
+            minWidth = dp(32)
+            minHeight = dp(40)
+            isChecked = false
+            setOnCheckedChangeListener { _, checked ->
+                refreshCreateAccountButton()
+                if (::googleSignupButton.isInitialized) {
+                    googleSignupButton.isEnabled = checked && !isSignupLoading
+                    googleSignupButton.alpha = if (checked && !isSignupLoading) 1f else 0.5f
+                }
+            }
+        }
+        addView(checkbox, LinearLayout.LayoutParams(dp(32), dp(40)))
+
+        val label = "I agree to the Terms of Service and acknowledge the Privacy Policy."
+        val consentText = SpannableString(label)
+        addConsentLink(context, consentText, label, "Terms of Service", "/terms")
+        addConsentLink(context, consentText, label, "Privacy Policy", "/app-privacy-policy")
+        addView(TextView(context).apply {
+            text = consentText
+            setTextColor(Color.rgb(218, 229, 210))
+            textSize = 11f
+            includeFontPadding = false
+            movementMethod = LinkMovementMethod.getInstance()
+            highlightColor = Color.TRANSPARENT
+            setOnClickListener { checkbox.isChecked = !checkbox.isChecked }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = dp(12)
+        })
+    }
+
+    private fun addConsentLink(
+        context: Context,
+        text: SpannableString,
+        fullLabel: String,
+        linkLabel: String,
+        path: String
+    ) {
+        val start = fullLabel.indexOf(linkLabel)
+        text.setSpan(object : ClickableSpan() {
+            override fun onClick(widget: View) {
+                context.startActivity(WebPageActivity.intent(context, path))
+            }
+
+            override fun updateDrawState(ds: android.text.TextPaint) {
+                ds.color = primaryFixed
+                ds.isUnderlineText = true
+            }
+        }, start, start + linkLabel.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+
+    private fun refreshCreateAccountButton() {
+        if (!::createAccountButton.isInitialized || !::consentCheckBox.isInitialized) return
+        val canCreateAccount = consentCheckBox.isChecked && isValidEmailSignupInput() && !isSignupLoading
+        createAccountButton.isEnabled = canCreateAccount
+        createAccountButton.alpha = if (canCreateAccount) 1f else if (isSignupLoading) 0.72f else 0.5f
+    }
+
+    private fun isValidEmailSignupInput(): Boolean {
+        if (!::emailInput.isInitialized || !::passwordInput.isInitialized || !::confirmPasswordInput.isInitialized) {
+            return false
+        }
+        val email = emailInput.text.toString().trim()
+        val password = passwordInput.text.toString()
+        val confirmPassword = confirmPasswordInput.text.toString()
+        return Patterns.EMAIL_ADDRESS.matcher(email).matches() &&
+            password.length >= 6 &&
+            password == confirmPassword
     }
 
     private fun errorMessage(context: Context): TextView {
@@ -203,6 +293,10 @@ class SignupScreenView @JvmOverloads constructor(
 
     private fun handleSignup(context: Context) {
         if (isSignupLoading) return
+        if (!consentCheckBox.isChecked) {
+            showError("Please agree to the Terms of Service and acknowledge the Privacy Policy to create an account.")
+            return
+        }
 
         val email = emailInput.text.toString().trim()
         val name = email.substringBefore('@').replace(Regex("[._-]+"), " ").trim()
@@ -244,6 +338,14 @@ class SignupScreenView @JvmOverloads constructor(
 
     private fun handleGoogleSignup(context: Context) {
         if (isSignupLoading) return
+        if (!consentCheckBox.isChecked) {
+            Toast.makeText(
+                context,
+                "Please agree to the Terms of Service and acknowledge the Privacy Policy first.",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
 
         val serverClientId = googleServerClientId(context)
         if (serverClientId.isNullOrBlank()) {
@@ -308,11 +410,14 @@ class SignupScreenView @JvmOverloads constructor(
 
     private fun setLoading(loading: Boolean, googleLoading: Boolean = false) {
         isSignupLoading = loading
-        createAccountButton.isEnabled = !loading
-        createAccountButton.alpha = if (loading) 0.72f else 1f
+        refreshCreateAccountButton()
         createAccountButton.text = if (loading) "CREATING..." else context.getString(R.string.str_create_account)
         if (googleLoading) {
             createAccountButton.text = context.getString(R.string.str_create_account)
+        }
+        if (::googleSignupButton.isInitialized) {
+            googleSignupButton.isEnabled = !loading && consentCheckBox.isChecked
+            googleSignupButton.alpha = if (loading) 0.72f else if (consentCheckBox.isChecked) 1f else 0.5f
         }
     }
 
@@ -349,7 +454,9 @@ class SignupScreenView @JvmOverloads constructor(
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            val googleSignupButton = socialButton(context, "Sign Up With Google", R.drawable.googleicon).apply {
+            googleSignupButton = socialButton(context, "Sign Up With Google", R.drawable.googleicon).apply {
+                isEnabled = false
+                alpha = 0.5f
                 setOnClickListener {
                     handleGoogleSignup(context)
                 }

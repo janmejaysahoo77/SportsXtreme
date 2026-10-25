@@ -98,7 +98,7 @@ class LoginScreenView @JvmOverloads constructor(
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(16), dp(22), dp(28))
+            setPadding(dp(22), dp(34), dp(22), dp(28))
             WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -138,6 +138,7 @@ class LoginScreenView @JvmOverloads constructor(
         content.addView(divider(context), fullWidthParams(bottom = dp(16), height = dp(18)))
         content.addView(socialRow(context), fullWidthParams(bottom = dp(26), height = dp(44)))
         content.addView(signupPrompt(context), fullWidthParams(bottom = dp(8), height = dp(28)))
+        content.addView(privacyPolicyLink(context), fullWidthParams(top = dp(2), bottom = dp(4), height = dp(22)))
         content.addView(Space(context), LinearLayout.LayoutParams(1, dp(8)))
 
         scrollView.addView(content)
@@ -287,22 +288,12 @@ class LoginScreenView @JvmOverloads constructor(
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            googleLoginButton = socialButton(context, "GOOGLE", R.drawable.googleicon).apply {
+            googleLoginButton = socialButton(context, "Sign In With Google", R.drawable.googleicon).apply {
                 setOnClickListener {
                     handleGoogleLogin(context)
                 }
             }
-            addView(googleLoginButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                rightMargin = dp(6)
-            })
-            addView(socialButton(context, "FACEBOOK", R.drawable.facebook_icon), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                rightMargin = dp(6)
-            })
-            addView(socialButton(context, "OTP", R.drawable.baseline_local_phone_24).apply {
-                setOnClickListener {
-                    (context as? MainActivity)?.showPhoneAuthScreen()
-                }
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+            addView(googleLoginButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT))
         }
     }
 
@@ -333,7 +324,10 @@ class LoginScreenView @JvmOverloads constructor(
                     credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
                 ) {
                     val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                    when (val authResult = authViewModel.signInWithGoogle(googleCredential.idToken)) {
+                    when (val authResult = authViewModel.signInWithGoogle(
+                        googleCredential.idToken,
+                        existingAccountOnly = true
+                    )) {
                         is Resource.Success -> {
                             showError(null)
                             when (val profileResult = authViewModel.completePendingAuthentication()) {
@@ -371,9 +365,8 @@ class LoginScreenView @JvmOverloads constructor(
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(6).toFloat()
-                setColor(Color.argb(224, 22, 22, 23))
-                setStroke(dp(1), Color.argb(58, 255, 255, 255))
+                cornerRadius = dp(24).toFloat()
+                setColor(Color.rgb(26, 26, 26))
             }
 
             if (iconRes != null) {
@@ -381,8 +374,8 @@ class LoginScreenView @JvmOverloads constructor(
                     setImageResource(iconRes)
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     contentDescription = "$label icon"
-                }, LinearLayout.LayoutParams(dp(14), dp(14)).apply {
-                    rightMargin = dp(8)
+                }, LinearLayout.LayoutParams(dp(18), dp(18)).apply {
+                    rightMargin = dp(10)
                 })
             } else {
                 addView(TextView(context).apply {
@@ -400,8 +393,8 @@ class LoginScreenView @JvmOverloads constructor(
                 text = label
                 gravity = Gravity.CENTER
                 setTextColor(Color.WHITE)
-                textSize = 11f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                textSize = 13f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
                 includeFontPadding = false
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
@@ -421,6 +414,20 @@ class LoginScreenView @JvmOverloads constructor(
             setOnClickListener {
                 (context as? MainActivity)?.showSignupScreen()
             }
+        }
+    }
+
+    private fun privacyPolicyLink(context: Context): TextView = TextView(context).apply {
+        text = "Privacy Policy"
+        gravity = Gravity.CENTER
+        setTextColor(Color.rgb(193, 255, 0))
+        textSize = 10f
+        includeFontPadding = false
+        contentDescription = "Open Privacy Policy"
+        isClickable = true
+        isFocusable = true
+        setOnClickListener {
+            context.startActivity(WebPageActivity.intent(context, "/app-privacy-policy"))
         }
     }
 

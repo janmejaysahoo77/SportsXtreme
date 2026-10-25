@@ -76,10 +76,14 @@ class AuthRepositoryImpl(
         )
     }
 
-    override suspend fun signInWithGoogle(idToken: String): Resource<AuthSession> {
+    override suspend fun signInWithGoogle(idToken: String, existingAccountOnly: Boolean): Resource<AuthSession> {
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         return authDataSource.signInWithCredential(credential, AuthProvider.GOOGLE).fold(
             onSuccess = { session ->
+                if (existingAccountOnly && session.isNewUser) {
+                    authDataSource.deleteCurrentUserAndSignOut()
+                    return@fold Resource.Error("No account found. Please register first.")
+                }
                 when (val seedResult = seedFirestoreProfile(session.user, "Google sign-in")) {
                     is Resource.Success -> Resource.Success(session)
                     is Resource.Error -> Resource.Error(seedResult.message ?: "Firestore profile setup failed")

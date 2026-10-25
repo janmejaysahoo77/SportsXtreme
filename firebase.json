@@ -6,10 +6,40 @@
     }
   ],
   "hosting": {
-    "public": "public"
+    "public": "public",
+    "headers": [
+      {
+        "source": "/.well-known/assetlinks.json",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json; charset=utf-8"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=300"
+          }
+        ]
+      }
+    ],
+    "rewrites": [
+      { "source": "/join", "destination": "/app-link-fallback.html" },
+      { "source": "/team-invite", "destination": "/app-link-fallback.html" },
+      { "source": "/tournament-invite", "destination": "/app-link-fallback.html" },
+      { "source": "/scorecard", "destination": "/app-link-fallback.html" }
+    ]
   },
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "emulators": {
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8580
+    },
+    "ui": {
+      "enabled": false
+    }
   }
 }

@@ -13,7 +13,6 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.QuerySnapshot
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -35,14 +34,15 @@ class MatchInviteRepositoryImpl @Inject constructor(
         require(matchId.isNotBlank()) { "Match id is missing" }
         val organiserId = requireNotNull(auth.currentUser?.uid) { "Sign in before creating an invitation" }
         val inviteId = "$matchId-${teamSlot.name.lowercase()}"
-        val rawToken = newToken()
+        val secret = newToken()
+        val rawToken = "$inviteId.$secret"
         val now = System.currentTimeMillis()
         val invite = MatchInvite(
             inviteId = inviteId,
             matchId = matchId,
             teamSlot = teamSlot,
             organiserId = organiserId,
-            tokenHash = sha256(rawToken),
+            tokenHash = sha256(secret),
             status = MatchInviteStatus.OPEN,
             createdAtEpochMs = now,
             expiresAtEpochMs = now + INVITE_TTL_MILLIS
@@ -69,16 +69,23 @@ class MatchInviteRepositoryImpl @Inject constructor(
     override suspend fun claimInvite(rawToken: String): Resource<com.example.sportsxtreme.domain.model.ClaimedMatchInvite> = runCatching {
         require(rawToken.isNotBlank()) { "Invalid invitation" }
         val uid = requireNotNull(auth.currentUser?.uid) { "Sign in before accepting an invitation" }
-        val tokenHash = sha256(rawToken)
-        val inviteSnapshot: QuerySnapshot = awaitTask {
-            firestore.collection(INVITES_COLLECTION).whereEqualTo("tokenHash", tokenHash).limit(2).get()
-        }
-        require(inviteSnapshot.size() == 1) { "Invalid invitation" }
-        val inviteRef = inviteSnapshot.documents.single().reference
+        val inviteId = if (rawToken.contains('.')) rawToken.substringBefore('.') else ""
+        val secret = if (rawToken.contains('.')) rawToken.substringAfter('.') else rawToken
+        val tokenHash = sha256(secret)
+
         val result: com.example.sportsxtreme.domain.model.ClaimedMatchInvite = awaitTask {
             firestore.runTransaction { transaction ->
+                val inviteRef = if (inviteId.isNotBlank()) {
+                    firestore.collection(INVITES_COLLECTION).document(inviteId)
+                } else {
+                    val query = firestore.collection(INVITES_COLLECTION).whereEqualTo("tokenHash", tokenHash).limit(1).get()
+                    val snap = com.google.android.gms.tasks.Tasks.await(query)
+                    require(!snap.isEmpty) { "Invalid invitation" }
+                    snap.documents.first().reference
+                }
                 val invite = transaction.get(inviteRef)
                 require(invite.exists()) { "Invalid invitation" }
+                require(invite.getString("tokenHash") == tokenHash || invite.getString("tokenHash") == sha256(rawToken)) { "Invalid invitation" }
                 require(invite.getString("status") == MatchInviteStatus.OPEN.name) { "Invitation already claimed" }
                 require((invite.getTimestamp("expiresAt")?.toDate()?.time ?: 0L) > System.currentTimeMillis()) { "Invitation expired" }
                 val matchId = invite.getString("matchId").orEmpty()

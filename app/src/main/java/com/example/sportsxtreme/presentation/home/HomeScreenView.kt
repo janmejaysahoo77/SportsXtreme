@@ -36,6 +36,9 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.Editable
@@ -72,6 +75,13 @@ import androidx.lifecycle.lifecycleScope
 import com.example.sportsxtreme.common.NestedHorizontalScrollHelper
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.Timestamp
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.DocumentReference
+import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageReference
 import coil3.load
 import com.example.sportsxtreme.domain.model.Tournament
 import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
@@ -80,6 +90,9 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -90,7 +103,8 @@ class HomeScreenView @JvmOverloads constructor(
     private val liveMatchViewModel: LiveMatchViewModel? = null,
     private val hostTournamentsViewModel: HostTournamentsViewModel? = null,
     private val startInMyCricketTeams: Boolean = false,
-    private val startInQuickScoringTab: Boolean = false
+    private val startInQuickScoringTab: Boolean = false,
+    sharedPostId: String? = null
 ) : FrameLayout(context, attrs) {
 
     enum class TopMode { SPORTS, MEDIA, CART }
@@ -127,6 +141,7 @@ class HomeScreenView @JvmOverloads constructor(
         NavItem("Leaderboard", NavIconView.Icon.TROPHY)
     )
     private var selectedIndex = if (startInMyCricketTeams) 1 else 0
+    private var requestedFeedPostId: String? = sharedPostId
     private lateinit var contentHolder: FrameLayout
     private lateinit var navRow: LinearLayout
     private val cachedTabs = mutableMapOf<Int, View>()
@@ -186,39 +201,86 @@ class HomeScreenView @JvmOverloads constructor(
             action()
             return
         }
-        val content = LinearLayout(context).apply {
+        lateinit var dialog: AlertDialog
+        val content = object : FrameLayout(context) {
+            private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+            init { setWillNotDraw(false) }
+
+            override fun onDraw(canvas: Canvas) {
+                super.onDraw(canvas)
+                glowPaint.shader = RadialGradient(
+                    width / 2f, 0f, height * 0.82f,
+                    intArrayOf(Color.argb(48, 193, 255, 0), Color.TRANSPARENT),
+                    floatArrayOf(0f, 1f), Shader.TileMode.CLAMP
+                )
+                canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), glowPaint)
+                glowPaint.shader = null
+            }
+        }.apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(12).toFloat()
+                setColor(Color.rgb(11, 18, 30))
+                setStroke(dp(1), Color.rgb(38, 57, 75))
+            }
+            clipToOutline = true
+        }
+        val dialogContent = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(24), dp(12), dp(24), dp(8))
+            setPadding(dp(20), dp(18), dp(20), dp(8))
+            addView(TextView(context).apply {
+                text = "Account required"
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                textSize = 18f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(10)
+            })
             addView(ImageView(context).apply {
                 setImageResource(R.drawable.whiteuser)
                 scaleType = ImageView.ScaleType.FIT_CENTER
-            }, LinearLayout.LayoutParams(dp(76), dp(76)))
+            }, LinearLayout.LayoutParams(dp(64), dp(64)))
             addView(TextView(context).apply {
                 text = detail
                 gravity = Gravity.CENTER
-                setTextColor(Color.WHITE)
-                textSize = 15f
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, dp(12), 0, 0)
-            })
+                setTextColor(Color.rgb(218, 229, 240))
+                textSize = 13f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                setPadding(0, dp(12), 0, dp(10))
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                fun dialogButton(label: String, onClick: () -> Unit): TextView = TextView(context).apply {
+                    text = label
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.rgb(193, 255, 0))
+                    textSize = 12f
+                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    isAllCaps = true
+                    setPadding(dp(8), dp(12), dp(8), dp(12))
+                    setOnClickListener { onClick() }
+                }
+                addView(dialogButton("Login") {
+                    dialog.dismiss()
+                    (context as? MainActivity)?.showLoginScreen()
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(dialogButton("Cancel") { dialog.dismiss() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(dialogButton("Sign up") {
+                    dialog.dismiss()
+                    (context as? MainActivity)?.showSignupScreen()
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        val dialog = AlertDialog.Builder(context)
-            .setTitle("Account required")
+        content.addView(dialogContent, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        dialog = AlertDialog.Builder(context)
             .setView(content)
-            .setPositiveButton("Sign up", null)
-            .setNeutralButton("Login", null)
-            .setNegativeButton("Cancel", null)
             .create()
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
-                dialog.dismiss()
-                (context as? MainActivity)?.showSignupScreen()
-            }
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
-                dialog.dismiss()
-                (context as? MainActivity)?.showLoginScreen()
-            }
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
         }
         dialog.show()
     }
@@ -511,8 +573,8 @@ class HomeScreenView @JvmOverloads constructor(
                         DrawerItem("Start A Match", DrawerIconView.Icon.BAT, badge = "FREE", action = DrawerAction.START_MATCH),
                         DrawerItem("Create Your Team", drawableRes = R.drawable.outline_groups_24, action = DrawerAction.CREATE_TEAM),
                         DrawerItem("My Cricket", DrawerIconView.Icon.STADIUM, action = DrawerAction.MY_CRICKET),
-                        DrawerItem("SportsXtreme Awards", DrawerIconView.Icon.TROPHY),
-                        DrawerItem("Contact", DrawerIconView.Icon.HELP),
+                        DrawerItem("SportsXtreme Awards", DrawerIconView.Icon.TROPHY, webPath = "/awards"),
+                        DrawerItem("Contact", DrawerIconView.Icon.HELP, webPath = "/contact"),
                         DrawerItem("Share the app", DrawerIconView.Icon.SHARE),
                         DrawerItem("Rate us", DrawerIconView.Icon.STAR),
                         DrawerItem("More", DrawerIconView.Icon.MORE, isExpandable = true)
@@ -528,15 +590,28 @@ class HomeScreenView @JvmOverloads constructor(
                         addView(LinearLayout(context).apply {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.CENTER_VERTICAL
-                            addView(DrawerIconView(context, DrawerIconView.Icon.SOCIAL_IG).apply { setTint(Color.LTGRAY) }, LinearLayout.LayoutParams(dp(20), dp(20)))
+                            addView(DrawerIconView(context, DrawerIconView.Icon.SOCIAL_IG).apply {
+                                setTint(Color.LTGRAY)
+                                contentDescription = "Instagram"
+                                isClickable = true
+                                isFocusable = true
+                                setOnClickListener { openExternalLink(context, "https://www.instagram.com/sportsxtreme_app/") }
+                            }, LinearLayout.LayoutParams(dp(20), dp(20)))
                             addView(DrawerIconView(context, DrawerIconView.Icon.SOCIAL_FB).apply { setTint(Color.LTGRAY) }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { leftMargin = dp(16) })
-                            addView(DrawerIconView(context, DrawerIconView.Icon.SOCIAL_X).apply { setTint(Color.LTGRAY) }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { leftMargin = dp(16) })
+                            addView(DrawerIconView(context, DrawerIconView.Icon.SOCIAL_X).apply {
+                                setTint(Color.LTGRAY)
+                                contentDescription = "X"
+                                isClickable = true
+                                isFocusable = true
+                                setOnClickListener { openExternalLink(context, "https://x.com/sportsxtreme07") }
+                            }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { leftMargin = dp(16) })
                             addView(DrawerIconView(context, DrawerIconView.Icon.SOCIAL_YT).apply { setTint(Color.LTGRAY) }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { leftMargin = dp(16) })
                         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)))
 
-                        addView(createFooterLinkView(context, "About Us"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
-                        addView(createFooterLinkView(context, "Help / FAQs"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
-                        addView(createFooterLinkView(context, "Privacy Policy"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
+                        addView(createFooterLinkView(context, "About Us", "/about"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
+                        addView(createFooterLinkView(context, "Help & Support", "/help-support"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
+                        addView(createFooterLinkView(context, "FAQs", "/faqs"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
+                        addView(createFooterLinkView(context, "Privacy Policy", "/app-privacy-policy"), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32)))
                     }
 
                     items.forEach { item ->
@@ -575,7 +650,8 @@ class HomeScreenView @JvmOverloads constructor(
         val isExpandable: Boolean = false,
         val isFeatured: Boolean = false,
         val hasChevron: Boolean = false,
-        val action: DrawerAction? = null
+        val action: DrawerAction? = null,
+        val webPath: String? = null
     )
 
     private fun createDrawerItemView(context: Context, item: DrawerItem): View {
@@ -601,8 +677,14 @@ class HomeScreenView @JvmOverloads constructor(
                 }
                 setPadding(dp(15), 0, dp(15), 0)
             }
-            isClickable = item.action != null || item.isExpandable
-            isFocusable = item.action != null || item.isExpandable
+            isClickable = item.action != null || item.webPath != null || item.isExpandable
+            isFocusable = item.action != null || item.webPath != null || item.isExpandable
+            item.webPath?.let { path ->
+                setOnClickListener {
+                    drawerLayout.closeDrawer(GravityCompat.START)
+                    context.startActivity(WebPageActivity.intent(context, path))
+                }
+            }
             item.action?.let { action ->
                 setOnClickListener {
                     drawerLayout.closeDrawer(GravityCompat.START)
@@ -704,14 +786,24 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 
-    private fun createFooterLinkView(context: Context, label: String): View {
+    private fun createFooterLinkView(context: Context, label: String, webPath: String): View {
         return TextView(context).apply {
             text = label
             setTextColor(Color.rgb(180, 190, 195))
             textSize = 12f
             includeFontPadding = false
             gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                drawerLayout.closeDrawer(GravityCompat.START)
+                context.startActivity(WebPageActivity.intent(context, webPath))
+            }
         }
+    }
+
+    private fun openExternalLink(context: Context, url: String) {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 
     private fun createShell(context: Context): View {
@@ -720,12 +812,28 @@ class HomeScreenView @JvmOverloads constructor(
             clipToPadding = false
 
             contentHolder = FrameLayout(context).apply {
-                // Content flows behind the floating dock for a truly integrated look.
-                // We remove all padding to eliminate the "horizontal cutout" completely.
+                // Keep content full-bleed behind the floating dock.
                 setPadding(0, 0, 0, 0)
                 clipToPadding = false
             }
             addView(contentHolder, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
+            // Darken the background beneath the floating dock and toward the
+            // bottom edge, like Telegram's subtle bottom scrim.
+            addView(View(context).apply {
+                isClickable = false
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(
+                        Color.TRANSPARENT,
+                        Color.argb(28, 0, 0, 0),
+                        Color.argb(112, 0, 0, 0),
+                        Color.argb(190, 0, 0, 0)
+                    )
+                )
+            }, LayoutParams(LayoutParams.MATCH_PARENT, dp(150)).apply {
+                gravity = Gravity.BOTTOM
+            })
 
             // Professional Minimalist Floating Dock
             // WRAP_CONTENT creates a "floating pill" instead of a "container bar"
@@ -752,7 +860,7 @@ class HomeScreenView @JvmOverloads constructor(
             // Centered floating position with optimized height
             val navParams = LayoutParams(LayoutParams.WRAP_CONTENT, dp(74)).apply {
                 gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                bottomMargin = dp(28) // Slightly more clearance for the taller dock
+                bottomMargin = dp(12)
             }
             addView(navRow, navParams)
 
@@ -823,6 +931,11 @@ class HomeScreenView @JvmOverloads constructor(
             }
         }
         contentHolder.addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    fun openFeedPost(postId: String) {
+        requestedFeedPostId = postId
+        showTab(0)
     }
 
     private fun createCommunityContent(context: Context): View {
@@ -1002,8 +1115,9 @@ class HomeScreenView @JvmOverloads constructor(
                     TopMode.SPORTS -> {
                         content.addView(locationRow(context))
                         content.addView(liveMatchesSection(), blockParams(top = 6))
+                        content.addView(appBannersSection(context), blockParams(top = 10))
                         // The complete implementations are retained in com.sportsxtreme.v2features.
-                        content.addView(sectionHeader(context, "Sports Feed", null), blockParams(top = 14))
+                        content.addView(sectionHeader(context, "Sports Feed", null), blockParams(top = 4))
                         content.addView(feedCard(context), blockParams(top = 8))
                     }
                     TopMode.MEDIA -> {
@@ -1013,7 +1127,8 @@ class HomeScreenView @JvmOverloads constructor(
                         content.addView(simpleTopModeScreen(context, context.getString(R.string.str_xtremecart)))
                     }
                 }
-                content.addView(View(context), LinearLayout.LayoutParams(1, dp(100)))
+                // Let the final content scroll fully above the overlaid bottom dock.
+                content.addView(View(context), LinearLayout.LayoutParams(1, dp(110)))
 
                 addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             }
@@ -2517,6 +2632,189 @@ class HomeScreenView @JvmOverloads constructor(
         }
     }
 
+    /** Shows published app banners in the slot between live scorecards and the feed. */
+    private fun appBannersSection(context: Context): View = AppBannersSectionView(context)
+
+    private inner class AppBannersSectionView(context: Context) : LinearLayout(context) {
+        private val bannerStrip = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+        }
+        private val bannerDots = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        private val autoAdvanceHandler = Handler(Looper.getMainLooper())
+        private val dotViews = mutableListOf<View>()
+        private var bannerListener: ListenerRegistration? = null
+        private var bannerCount = 0
+        private var currentBannerIndex = 0
+        private var pageStridePx = 0
+        private lateinit var bannerScroller: HorizontalScrollView
+        private val autoAdvance = object : Runnable {
+            override fun run() {
+                if (!isAttachedToWindow || bannerCount < 2) return
+                currentBannerIndex = (currentBannerIndex + 1) % bannerCount
+                bannerScroller.smoothScrollTo(currentBannerIndex * pageStridePx, 0)
+                autoAdvanceHandler.postDelayed(this, 4_500L)
+            }
+        }
+
+        init {
+            orientation = VERTICAL
+            visibility = GONE
+            bannerScroller = configureHorizontalScroll(HorizontalScrollView(context)).apply {
+                isHorizontalScrollBarEnabled = false
+                clipToPadding = false
+                setOnTouchListener { _, event ->
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> autoAdvanceHandler.removeCallbacks(autoAdvance)
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            if (bannerCount > 1) autoAdvanceHandler.postDelayed(autoAdvance, 5_000L)
+                        }
+                    }
+                    false
+                }
+                addView(bannerStrip, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                setOnScrollChangeListener { _, scrollX, _, _, _ ->
+                    if (pageStridePx > 0 && bannerCount > 0) {
+                        setSelectedBanner(((scrollX + pageStridePx / 2) / pageStridePx).coerceIn(0, bannerCount - 1))
+                    }
+                }
+            }
+            addView(bannerScroller, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(bannerDots, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(10)))
+        }
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            if (bannerListener != null) return
+            bannerListener = FirebaseFirestore.getInstance().collection("appBanners")
+                .whereEqualTo("status", "Published")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w("HomeBanners", "Unable to load published app banners", error)
+                        return@addSnapshotListener
+                    }
+                    if (snapshot == null) return@addSnapshotListener
+                    val banners = snapshot.documents
+                        .sortedBy { document ->
+                            ((document.get("order") as? Number) ?: (document.get("sortOrder") as? Number))?.toLong()
+                                ?: Long.MAX_VALUE
+                        }
+                        .mapNotNull { document ->
+                            val imageValue = listOf(
+                                "imageUrl", "imageURL", "bannerUrl", "bannerImageUrl", "bannerImage",
+                                "imageUri", "assetUrl", "fileUrl", "image", "banner", "imagePath",
+                                "storagePath", "downloadUrl", "url"
+                            ).firstNotNullOfOrNull { field ->
+                                when (val value = document.get(field)) {
+                                    is String -> value.takeIf(String::isNotBlank)
+                                    is Map<*, *> -> listOf("url", "downloadUrl", "imageUrl", "imageURL", "path", "storagePath")
+                                        .firstNotNullOfOrNull { key -> (value[key] as? String)?.takeIf(String::isNotBlank) }
+                                    else -> null
+                                }
+                            }
+                            val targetUrl = listOf("targetUrl", "actionUrl", "link", "redirectUrl", "deeplink", "url")
+                                .firstNotNullOfOrNull { field -> document.getString(field)?.takeIf(String::isNotBlank) }
+                            imageValue?.let { Triple(document.id, it, targetUrl) }
+                        }
+                    bannerStrip.removeAllViews()
+                    val screenWidth = context.resources.displayMetrics.widthPixels
+                    val availableWidth = (screenWidth - dp(28)).coerceAtLeast(dp(280))
+                    val cardWidth = availableWidth
+                    val cardHeight = cardWidth * 9 / 16
+                    pageStridePx = cardWidth + dp(10)
+                    bannerCount = banners.size
+                    currentBannerIndex = 0
+                    autoAdvanceHandler.removeCallbacks(autoAdvance)
+                    bannerDots.removeAllViews()
+                    dotViews.clear()
+                    banners.forEachIndexed { index, (bannerId, imageValue, targetUrl) ->
+                        val card = FrameLayout(context).apply {
+                            background = GradientDrawable().apply {
+                                cornerRadius = dp(14).toFloat()
+                                setColor(Color.rgb(14, 31, 48))
+                            }
+                            clipToOutline = true
+                            val imageView = ImageView(context).apply {
+                                scaleType = ImageView.ScaleType.CENTER_CROP
+                                contentDescription = "SportsXtreme banner"
+                            }
+                            addView(imageView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                            val storageRef: StorageReference? = if (
+                                imageValue.startsWith("gs://") ||
+                                (!imageValue.startsWith("http://", true) && !imageValue.startsWith("https://", true))
+                            ) {
+                                runCatching { FirebaseStorage.getInstance().getReferenceFromUrl(imageValue) }
+                                    .getOrElse { FirebaseStorage.getInstance().reference.child(imageValue.removePrefix("/")) }
+                            } else null
+                            if (storageRef == null) {
+                                imageView.load(imageValue)
+                            } else {
+                                storageRef.downloadUrl
+                                    .addOnSuccessListener { uri -> imageView.load(uri) }
+                                    .addOnFailureListener { failure ->
+                                        Log.w("HomeBanners", "Unable to resolve image for app banner $bannerId", failure)
+                                        imageView.load(imageValue)
+                                    }
+                            }
+                            if (!targetUrl.isNullOrBlank()) {
+                                isClickable = true
+                                setOnClickListener {
+                                    runCatching {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
+                                        context.startActivity(intent)
+                                    }
+                                }
+                            }
+                        }
+                        bannerStrip.addView(card, LayoutParams(cardWidth, cardHeight).apply {
+                            if (index > 0) leftMargin = dp(10)
+                        })
+                        val dot = View(context).apply {
+                            isClickable = true
+                            isFocusable = true
+                            contentDescription = "Show banner ${index + 1}"
+                            setOnClickListener {
+                                currentBannerIndex = index
+                                bannerScroller.smoothScrollTo(index * pageStridePx, 0)
+                                setSelectedBanner(index)
+                                autoAdvanceHandler.removeCallbacks(autoAdvance)
+                                if (bannerCount > 1) autoAdvanceHandler.postDelayed(autoAdvance, 4_500L)
+                            }
+                        }
+                        dotViews += dot
+                        bannerDots.addView(dot, LayoutParams(dp(6), dp(6)).apply {
+                            leftMargin = dp(4)
+                            rightMargin = dp(4)
+                        })
+                    }
+                    bannerScroller.scrollTo(0, 0)
+                    setSelectedBanner(0)
+                    if (bannerCount > 1 && isAttachedToWindow) autoAdvanceHandler.postDelayed(autoAdvance, 4_500L)
+                    Log.d("HomeBanners", "Loaded ${banners.size} published app banner(s)")
+                    visibility = if (banners.isEmpty()) GONE else VISIBLE
+                }
+        }
+
+        private fun setSelectedBanner(index: Int) {
+            currentBannerIndex = index
+            dotViews.forEachIndexed { dotIndex, dot ->
+                dot.background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(if (dotIndex == index) primary else Color.rgb(100, 113, 128))
+                }
+            }
+        }
+
+        override fun onDetachedFromWindow() {
+            autoAdvanceHandler.removeCallbacks(autoAdvance)
+            bannerListener?.remove()
+            bannerListener = null
+            super.onDetachedFromWindow()
+        }
+    }
+
     private fun scoreCardsSection(context: Context): View {
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -3511,6 +3809,19 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun feedCard(context: Context): View {
+        var titleView: TextView? = null
+        var captionView: TextView? = null
+        var postTimeView: TextView? = null
+        var posterView: ImageView? = null
+        var likeCountView: TextView? = null
+        var likeButtonIcon: ImageView? = null
+        var postListener: ListenerRegistration? = null
+        var likesListener: ListenerRegistration? = null
+        var currentPostRef: DocumentReference? = null
+        var isCurrentUserLiked = false
+        var currentLikeCount = 0
+        var isLikeRequestInFlight = false
+        var currentPostShareText: String? = null
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(12), dp(12), dp(10))
@@ -3522,19 +3833,9 @@ class HomeScreenView @JvmOverloads constructor(
 
             addView(LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(TextView(context).apply {
-                    text = context.getString(R.string.str_sx)
-                    gravity = Gravity.CENTER
-                    setTextColor(Color.WHITE)
-                    textSize = 12f
-                    typeface = Typeface.DEFAULT_BOLD
-                    includeFontPadding = false
-                    background = GradientDrawable(
-                        GradientDrawable.Orientation.TL_BR,
-                        intArrayOf(primary, Color.rgb(0, 126, 255))
-                    ).apply {
-                        cornerRadius = dp(5).toFloat()
-                    }
+                addView(ImageView(context).apply {
+                    setImageResource(R.drawable.appicon2)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
                 }, LinearLayout.LayoutParams(dp(36), dp(36)))
 
                 addView(LinearLayout(context).apply {
@@ -3548,20 +3849,28 @@ class HomeScreenView @JvmOverloads constructor(
                             typeface = Typeface.DEFAULT_BOLD
                             includeFontPadding = false
                         })
-                        addView(View(context).apply {
+                        addView(TextView(context).apply {
+                            text = "✓"
+                            gravity = Gravity.CENTER
+                            setTextColor(Color.rgb(8, 24, 36))
+                            textSize = 8f
+                            typeface = Typeface.DEFAULT_BOLD
+                            includeFontPadding = false
                             background = GradientDrawable().apply {
                                 shape = GradientDrawable.OVAL
                                 setColor(primary)
                             }
-                        }, LinearLayout.LayoutParams(dp(8), dp(8)).apply { leftMargin = dp(4) })
+                        }, LinearLayout.LayoutParams(dp(13), dp(13)).apply { leftMargin = dp(4) })
                     })
-                    addView(TextView(context).apply {
-                        text = context.getString(R.string.str_23_may_2024__1208_pm)
+                    postTimeView = TextView(context).apply {
+                        text = ""
                         setTextColor(Color.rgb(135, 150, 158))
                         textSize = 7.2f
                         typeface = Typeface.DEFAULT_BOLD
                         includeFontPadding = false
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        visibility = View.GONE
+                    }
+                    addView(postTimeView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                         topMargin = dp(3)
                     })
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(9) })
@@ -3571,70 +3880,47 @@ class HomeScreenView @JvmOverloads constructor(
                 }, LinearLayout.LayoutParams(dp(22), dp(22)))
             })
 
-            addView(TextView(context).apply {
-                text = context.getString(R.string.str_sailing_through_life)
+            titleView = TextView(context).apply {
+                text = ""
                 setTextColor(Color.WHITE)
                 textSize = 22f
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
                 includeFontPadding = false
                 setLineSpacing(0f, 0.92f)
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
+            }
+            addView(titleView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
 
-            addView(TextView(context).apply {
-                text = context.getString(R.string.str_on_and_off_the_field)
+            captionView = TextView(context).apply {
+                text = ""
                 setTextColor(Color.WHITE)
                 textSize = 10.3f
                 typeface = Typeface.DEFAULT_BOLD
                 includeFontPadding = false
                 setLineSpacing(0f, 1.08f)
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) })
+            }
+            addView(captionView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) })
 
-            addView(LinearLayout(context).apply {
-                gravity = Gravity.CENTER
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(15).toFloat()
-                    setColor(Color.rgb(7, 15, 22))
-                    setStroke(1, Color.argb(80, 193, 255, 0))
-                }
-                addView(TextView(context).apply {
-                    text = context.getString(R.string.str_check_his_insights)
-                    setTextColor(primary)
-                    textSize = 8.5f
-                    typeface = Typeface.DEFAULT_BOLD
-                    includeFontPadding = false
-                })
-                addView(ProIconView(context, ProIconView.Icon.ARROW).apply {
-                    setTint(primary)
-                }, LinearLayout.LayoutParams(dp(12), dp(12)).apply { leftMargin = dp(8) })
-            }, LinearLayout.LayoutParams(dp(142), dp(32)).apply { topMargin = dp(16) })
-
-            addView(ImageView(context).apply {
-                setImageResource(R.drawable.feeduploadsample)
+            posterView = ImageView(context).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(260)).apply { topMargin = dp(18) })
+                visibility = View.GONE
+            }
+            addView(posterView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(260)).apply { topMargin = dp(18) })
 
             addView(LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(reactionBubble(context, Color.rgb(20, 100, 255), "C"))
-                addView(reactionBubble(context, Color.rgb(255, 92, 35), "❤"), LinearLayout.LayoutParams(dp(20), dp(20)).apply { leftMargin = dp(-5) })
-                addView(reactionBubble(context, Color.rgb(255, 132, 25), "⚡"), LinearLayout.LayoutParams(dp(20), dp(20)).apply { leftMargin = dp(-5) })
-                addView(TextView(context).apply {
-                    text = context.getString(R.string.str_150_reactions)
+                addView(ImageView(context).apply {
+                    setImageResource(R.drawable.ic_heart)
+                    imageTintList = android.content.res.ColorStateList.valueOf(Color.rgb(255, 75, 105))
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                }, LinearLayout.LayoutParams(dp(18), dp(18)))
+                likeCountView = TextView(context).apply {
+                    text = "0 likes"
                     setTextColor(Color.WHITE)
                     textSize = 8.2f
                     typeface = Typeface.DEFAULT_BOLD
                     includeFontPadding = false
-                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
-                addView(TextView(context).apply {
-                    text = context.getString(R.string.str_34_comments)
-                    setTextColor(Color.WHITE)
-                    textSize = 8.2f
-                    typeface = Typeface.DEFAULT_BOLD
-                    includeFontPadding = false
-                })
-                addView(FeedIconView(context, FeedIconView.Icon.COMMENT).apply {
-                    setTint(Color.WHITE)
-                }, LinearLayout.LayoutParams(dp(13), dp(13)).apply { leftMargin = dp(5) })
+                }
+                addView(likeCountView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(6) })
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
 
             addView(View(context).apply {
@@ -3643,10 +3929,185 @@ class HomeScreenView @JvmOverloads constructor(
 
             addView(LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(feedAction(context, FeedIconView.Icon.LIKE, "Like"), LinearLayout.LayoutParams(0, dp(42), 1f))
-                addView(feedAction(context, FeedIconView.Icon.COMMENT, "Comment"), LinearLayout.LayoutParams(0, dp(42), 1f))
-                addView(feedAction(context, FeedIconView.Icon.SHARE, "Share"), LinearLayout.LayoutParams(0, dp(42), 1f))
+                addView(LinearLayout(context).apply {
+                    gravity = Gravity.CENTER
+                    isClickable = true
+                    isFocusable = true
+                    likeButtonIcon = ImageView(context).apply {
+                        setImageResource(R.drawable.ic_heart)
+                        imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                    }
+                    addView(likeButtonIcon, LinearLayout.LayoutParams(dp(18), dp(18)))
+                    addView(TextView(context).apply {
+                        text = "Like"
+                        setTextColor(Color.WHITE)
+                        textSize = 8.2f
+                        typeface = Typeface.DEFAULT_BOLD
+                        includeFontPadding = false
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(6) })
+                    setOnClickListener {
+                        val userId = FirebaseAuth.getInstance().currentUser?.uid
+                        val postRef = currentPostRef
+                        if (userId == null) {
+                            Toast.makeText(context, "Sign in to like this post", Toast.LENGTH_SHORT).show()
+                        } else if (postRef != null && !isLikeRequestInFlight) {
+                            isLikeRequestInFlight = true
+                            isEnabled = false
+                            val likeRef = postRef.collection("likes").document(userId)
+                            val operation = if (isCurrentUserLiked) likeRef.delete() else likeRef.set(
+                                mapOf("uid" to userId, "createdAt" to FieldValue.serverTimestamp())
+                            )
+                            operation.addOnSuccessListener {
+                                isLikeRequestInFlight = false
+                                isEnabled = true
+                            }.addOnFailureListener { error ->
+                                isLikeRequestInFlight = false
+                                isEnabled = true
+                                Log.w("HomeScreenView", "Unable to update social post like", error)
+                                val message = if (error is FirebaseFirestoreException && error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                    "Likes are blocked by Firestore rules. Deploy firestore.rules and try again."
+                                } else {
+                                    "Could not update like: ${error.localizedMessage ?: "Please try again."}"
+                                }
+                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                }, LinearLayout.LayoutParams(0, dp(42), 1f))
+                addView(LinearLayout(context).apply {
+                    gravity = Gravity.CENTER
+                    isClickable = true
+                    isFocusable = true
+                    addView(ImageView(context).apply {
+                        setImageResource(R.drawable.ic_share)
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                    }, LinearLayout.LayoutParams(dp(18), dp(18)))
+                    addView(TextView(context).apply {
+                        text = "Share"
+                        setTextColor(Color.WHITE)
+                        textSize = 8.2f
+                        typeface = Typeface.DEFAULT_BOLD
+                        includeFontPadding = false
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(6) })
+                    setOnClickListener {
+                        val shareText = currentPostShareText
+                        if (shareText.isNullOrBlank()) {
+                            Toast.makeText(context, "Post is still loading", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, shareText)
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share SportsXtreme post"))
+                        }
+                    }
+                }, LinearLayout.LayoutParams(0, dp(42), 1f))
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+            addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    if (postListener != null) return
+                    postListener = FirebaseFirestore.getInstance().collection("socialPosts")
+                        .whereEqualTo("status", "Published")
+                        .whereArrayContains("destinations", "SportsXtreme App")
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null || snapshot == null || !isAttachedToWindow) return@addSnapshotListener
+                            val post = requestedFeedPostId?.let { requestedId ->
+                                snapshot.documents.firstOrNull { it.id == requestedId }
+                                    ?: return@addSnapshotListener
+                            } ?: snapshot.documents.maxByOrNull { doc ->
+                                listOf("publishedAt", "createdAt", "updatedAt", "timestamp")
+                                    .firstNotNullOfOrNull { key ->
+                                        when (val value = doc.get(key)) {
+                                            is Timestamp -> value.toDate().time
+                                            is Number -> value.toLong()
+                                            else -> null
+                                        }
+                                    } ?: 0L
+                            } ?: return@addSnapshotListener
+                            val postRef = post.reference
+                            if (currentPostRef?.id != postRef.id) {
+                                likesListener?.remove()
+                                currentPostRef = postRef
+                                isCurrentUserLiked = false
+                                currentLikeCount = 0
+                                likeCountView?.text = "0 likes"
+                                likeButtonIcon?.imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+                                likesListener = postRef.collection("likes").addSnapshotListener { likes, likesError ->
+                                    if (likesError != null) {
+                                        Log.w("HomeScreenView", "Unable to load social post likes", likesError)
+                                        return@addSnapshotListener
+                                    }
+                                    if (likes == null || !isAttachedToWindow || currentPostRef?.id != postRef.id) return@addSnapshotListener
+                                    currentLikeCount = likes.documents.size
+                                    val userId = FirebaseAuth.getInstance().currentUser?.uid
+                                    isCurrentUserLiked = userId != null && likes.documents.any { it.id == userId }
+                                    likeCountView?.text = "$currentLikeCount ${if (currentLikeCount == 1) "like" else "likes"}"
+                                    likeButtonIcon?.imageTintList = android.content.res.ColorStateList.valueOf(
+                                        if (isCurrentUserLiked) Color.rgb(255, 75, 105) else Color.WHITE
+                                    )
+                                }
+                            }
+                            val postDate = listOf("publishedAt", "createdAt", "updatedAt", "timestamp")
+                                .firstNotNullOfOrNull { key ->
+                                    when (val value = post.get(key)) {
+                                        is Timestamp -> value.toDate()
+                                        is Number -> Date(value.toLong().let { if (it < 100_000_000_000L) it * 1_000L else it })
+                                        else -> null
+                                    }
+                                }
+                            postTimeView?.apply {
+                                text = postDate?.let { SimpleDateFormat("d MMM yyyy, h:mm a", Locale.getDefault()).format(it) }.orEmpty()
+                                visibility = if (postDate == null) View.GONE else View.VISIBLE
+                            }
+                            val title = (post.getString("title") ?: post.getString("tittle"))?.trim().orEmpty()
+                            if (title.isNotEmpty()) titleView?.text = title
+                            val caption = post.getString("caption")?.trim().orEmpty()
+                            captionView?.apply {
+                                text = caption
+                                visibility = if (caption.isEmpty()) View.GONE else View.VISIBLE
+                            }
+                            val shareDescription = buildString {
+                                if (title.isNotEmpty()) append(title)
+                                if (caption.isNotEmpty()) {
+                                    if (isNotEmpty()) append("\n\n")
+                                    append(caption)
+                                }
+                                if (isNotEmpty()) append("\n\n")
+                                append("Open this post in SportsXtreme:")
+                            }
+                            currentPostShareText = "$shareDescription\n${context.getString(R.string.social_post_share_base_url)}/${post.id}"
+                            val imageValue = listOf("imageUrl", "imageURL", "image", "imagePath", "storagePath")
+                                .firstNotNullOfOrNull { key -> post.getString(key)?.trim()?.takeIf(String::isNotEmpty) }
+                                ?: return@addSnapshotListener
+                            val image = posterView ?: return@addSnapshotListener
+                            val storageRef: StorageReference? = if (imageValue.startsWith("gs://") || (!imageValue.startsWith("http://") && !imageValue.startsWith("https://"))) {
+                                runCatching<StorageReference> { FirebaseStorage.getInstance().getReferenceFromUrl(imageValue) }
+                                    .getOrElse { _: Throwable -> FirebaseStorage.getInstance().reference.child(imageValue.removePrefix("/")) }
+                            } else null
+                            if (storageRef == null) {
+                                image.visibility = View.VISIBLE
+                                image.load(imageValue)
+                            } else {
+                                storageRef.downloadUrl.addOnSuccessListener { uri: Uri ->
+                                    if (isAttachedToWindow) {
+                                        image.visibility = View.VISIBLE
+                                        image.load(uri)
+                                    }
+                                }.addOnFailureListener { error: Exception -> Log.w("HomeScreenView", "Unable to load social post image", error) }
+                            }
+                        }
+                }
+
+                override fun onViewDetachedFromWindow(view: View) {
+                    postListener?.remove()
+                    postListener = null
+                    likesListener?.remove()
+                    likesListener = null
+                    currentPostRef = null
+                }
+            })
         }
     }
 

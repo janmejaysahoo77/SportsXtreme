@@ -127,6 +127,7 @@ class MainActivity : ComponentActivity() {
     private var homeLocationLabel by mutableStateOf("Finding your location…")
     private var returnToHomeAfterAuthCancel = false
     private var currentScreen by mutableStateOf(Screen.Splash)
+    private var pendingSharedFeedPostId: String? = null
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -159,6 +160,7 @@ class MainActivity : ComponentActivity() {
 
         super.onCreate(savedInstanceState)
         receiveIncomingInviteToken(intent)
+        pendingSharedFeedPostId = extractSharedFeedPostId(intent)
         val hasIncomingAuthLink = handleIncomingAuthLink(intent)
         val forceLogin = intent.getBooleanExtra(EXTRA_FORCE_LOGIN, false)
         val forceSignup = intent.getBooleanExtra(EXTRA_FORCE_SIGNUP, false)
@@ -396,10 +398,12 @@ class MainActivity : ComponentActivity() {
                             liveMatchViewModel = liveMatchViewModel,
                             hostTournamentsViewModel = hostTournamentsViewModel,
                             startInMyCricketTeams = openMyCricketTeamsAfterInvite,
-                            startInQuickScoringTab = openHostQuickScoringAfterReturn
+                            startInQuickScoringTab = openHostQuickScoringAfterReturn,
+                            sharedPostId = pendingSharedFeedPostId
                         ).also {
                             it.updateLocationLabel(homeLocationLabel)
                             homeScreenView = it
+                            pendingSharedFeedPostId = null
                         }
                     }
                 )
@@ -557,6 +561,16 @@ class MainActivity : ComponentActivity() {
             showSignupScreen()
             return
         }
+        extractSharedFeedPostId(intent)?.let { postId ->
+            pendingSharedFeedPostId = postId
+            if (currentScreen == Screen.Home && homeScreenView != null) {
+                homeScreenView?.openFeedPost(postId)
+                pendingSharedFeedPostId = null
+            } else {
+                showHomeScreen()
+            }
+            return
+        }
         receiveIncomingInviteToken(intent)
         if (handleIncomingAuthLink(intent)) {
             showLoginScreen()
@@ -603,6 +617,17 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIncomingAuthLink(intent: Intent?): Boolean {
         return authViewModel.handleIncomingEmailLink(intent?.dataString)
+    }
+
+    private fun extractSharedFeedPostId(intent: Intent?): String? {
+        val uri = intent?.data ?: return null
+        if (intent.action != Intent.ACTION_VIEW ||
+            uri.scheme != INVITE_SCHEME ||
+            uri.host != INVITE_HOST ||
+            uri.pathSegments.size != 2 ||
+            uri.pathSegments[0] != SHARED_POST_PATH_SEGMENT
+        ) return null
+        return uri.pathSegments[1].takeIf { it.matches(SOCIAL_POST_ID_PATTERN) }
     }
 
     private fun requestLocationPermissionAndUpdate() {
@@ -804,6 +829,8 @@ class MainActivity : ComponentActivity() {
         private const val INVITE_QUERY_PARAMETER = "invite"
         private const val TEAM_INVITE_PATH = "/team-invite"
         private const val TOURNAMENT_INVITE_PATH = "/tournament-invite"
+        private const val SHARED_POST_PATH_SEGMENT = "post"
+        private val SOCIAL_POST_ID_PATTERN = Regex("^[A-Za-z0-9_-]{1,150}$")
         private const val TEAM_INVITE_QUERY_PARAMETER = "token"
         private val TEAM_INVITE_TOKEN_PATTERN = Regex("^[A-Za-z0-9_-]{43}$")
         private const val LOCATION_FETCH_TIMEOUT_MS = 12000L

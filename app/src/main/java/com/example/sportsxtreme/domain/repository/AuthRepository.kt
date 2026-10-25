@@ -19,7 +19,7 @@ interface AuthRepository {
     suspend fun sendEmailChangeVerification(newEmail: String): Resource<Unit>
     suspend fun checkEmailVerification(): Resource<Boolean>
     suspend fun signInWithEmailAndPassword(email: String, password: String): Resource<AuthSession>
-    suspend fun signInWithGoogle(idToken: String): Resource<AuthSession>
+    suspend fun signInWithGoogle(idToken: String, existingAccountOnly: Boolean = false): Resource<AuthSession>
     suspend fun sendLoginEmailLink(email: String): Resource<Unit>
     fun isEmailSignInLink(link: String): Boolean
     fun storePendingEmailSignInLink(link: String)

@@ -209,6 +209,7 @@ private fun ProfileScreen(
     var showNameDialog by remember { mutableStateOf(false) }
     var nameDraft by remember { mutableStateOf("") }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showProfilePhotoActions by remember { mutableStateOf(false) }
     var draftProfile by remember { mutableStateOf(uiState.profile) }
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -414,7 +415,7 @@ private fun ProfileScreen(
                         profilePhotoPreviewUri = uiState.profilePhotoPreviewUri,
                         profilePhotoRefreshKey = uiState.profilePhotoRefreshKey,
                         editEnabled = isOwnProfile && !uiState.isSaving,
-                        onEditAvatar = onPickPhoto,
+                        onEditAvatar = { showProfilePhotoActions = true },
                         onEditName = {
                             nameDraft = uiState.profile.name
                             showNameDialog = true
@@ -467,7 +468,18 @@ private fun ProfileScreen(
                     )
                     Spacer(Modifier.height(18.dp))
                     if (isOwnProfile) {
-                        SettingsCard(onLogout, onDeleteAccount = { showDeleteConfirmation = true })
+                        SettingsCard(
+                            onLogout = onLogout,
+                            onDeleteAccount = { showDeleteConfirmation = true },
+                            onPrivacyPolicy = {
+                                context.startActivity(
+                                    com.example.sportsxtreme.presentation.home.WebPageActivity.intent(
+                                        context,
+                                        "/app-privacy-policy"
+                                    )
+                                )
+                            }
+                        )
                         Text(
                             "Version 1.0.0",
                             color = SoftText,
@@ -570,6 +582,56 @@ private fun ProfileScreen(
                 }
             }
 
+            if (showProfilePhotoActions) {
+                ModalBottomSheet(
+                    onDismissRequest = { showProfilePhotoActions = false },
+                    sheetState = bottomSheetState,
+                    containerColor = Color(0xFF081014),
+                    contentColor = Platinum
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        ProfilePhotoAction(
+                            icon = R.drawable.baseline_edit_24,
+                            label = "Edit Profile Pic",
+                            tint = Lime
+                        ) {
+                            showProfilePhotoActions = false
+                            onPickPhoto()
+                        }
+                        ProfilePhotoAction(
+                            icon = R.drawable.outline_delete_24,
+                            label = "Remove pic",
+                            tint = Color(0xFFFF7777),
+                            enabled = !uiState.isSaving
+                        ) {
+                            showProfilePhotoActions = false
+                            val updatedProfile = uiState.profile.copy(profilePhotoUrl = "")
+                            uiState = uiState.copy(isSaving = true, errorMessage = null, infoMessage = null)
+                            scope.launch {
+                                uiState = when (useCases.updateUserProfile(updatedProfile)) {
+                                    is Resource.Success -> uiState.copy(
+                                        profile = updatedProfile,
+                                        profilePhotoPreviewUri = null,
+                                        profilePhotoRefreshKey = System.currentTimeMillis(),
+                                        isSaving = false,
+                                        infoMessage = "Profile photo removed.",
+                                        errorMessage = null
+                                    )
+                                    is Resource.Error -> uiState.copy(
+                                        isSaving = false,
+                                        errorMessage = "Could not remove profile photo."
+                                    )
+                                    is Resource.Loading -> uiState.copy(isSaving = true)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if (showNameDialog) {
                 AlertDialog(
                     onDismissRequest = { if (!uiState.isSaving) showNameDialog = false },
@@ -631,6 +693,18 @@ private fun ProfileScreen(
                     text = {
                         Column {
                             Text("This permanently deletes your account and the data you own. This cannot be undone.", color = SoftText)
+                            TextButton(
+                                onClick = {
+                                    context.startActivity(
+                                        com.example.sportsxtreme.presentation.home.WebPageActivity.intent(
+                                            context,
+                                            "/app-privacy-policy"
+                                        )
+                                    )
+                                }
+                            ) {
+                                Text("Privacy Policy", color = Lime)
+                            }
                             uiState.errorMessage?.let {
                                 Text(it, color = Color(0xFFFF8D8D), modifier = Modifier.padding(top = 10.dp))
                             }
@@ -1343,14 +1417,14 @@ private fun HostedTile(value: String, label: String, accent: Color, modifier: Mo
 @Composable
 private fun ProfileStats(profile: UserProfile) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        StatTile(profile.followers.toString(), "Followers", Lime, Modifier.weight(1f))
-        StatTile(profile.following.toString(), "Following", Aqua, Modifier.weight(1f))
+        StatTile(profile.followers.toString(), "Followers", Lime, Modifier.weight(1f), comingSoon = true)
+        StatTile(profile.following.toString(), "Following", Aqua, Modifier.weight(1f), comingSoon = true)
         StatTile("Profile", "QR", Gold, Modifier.weight(1f), showQr = true)
     }
 }
 
 @Composable
-private fun StatTile(value: String, label: String, accent: Color, modifier: Modifier, showQr: Boolean = false) {
+private fun StatTile(value: String, label: String, accent: Color, modifier: Modifier, showQr: Boolean = false, comingSoon: Boolean = false) {
     Column(
         modifier
             .shadow(12.dp, RoundedCornerShape(15.dp), clip = false)
@@ -1372,6 +1446,48 @@ private fun StatTile(value: String, label: String, accent: Color, modifier: Modi
             Spacer(Modifier.height(4.dp))
         }
         Text(if (showQr) "$value $label" else label, color = SoftText, fontSize = 11.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        if (comingSoon) {
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "Coming soon",
+                color = accent,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(accent.copy(alpha = 0.12f))
+                    .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfilePhotoAction(
+    icon: Int,
+    label: String,
+    tint: Color,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Image(
+            painter = painterResource(icon),
+            contentDescription = null,
+            colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(tint),
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(Modifier.width(14.dp))
+        Text(label, color = if (enabled) Platinum else SoftText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -1433,7 +1549,11 @@ private fun DetailCard(label: String, value: String) {
 }
 
 @Composable
-private fun SettingsCard(onLogout: () -> Unit, onDeleteAccount: () -> Unit) {
+private fun SettingsCard(
+    onLogout: () -> Unit,
+    onDeleteAccount: () -> Unit,
+    onPrivacyPolicy: () -> Unit
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -1443,6 +1563,13 @@ private fun SettingsCard(onLogout: () -> Unit, onDeleteAccount: () -> Unit) {
             .border(1.dp, Color(0xFF344249), RoundedCornerShape(14.dp))
             .padding(16.dp)
     ) {
+        Row(
+            Modifier.fillMaxWidth().height(34.dp).clickable(onClick = onPrivacyPolicy),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Privacy & Data", color = Lime, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
         Row(
             Modifier.fillMaxWidth().height(34.dp).clickable(onClick = onLogout),
             verticalAlignment = Alignment.CenterVertically

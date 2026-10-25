@@ -77,6 +77,29 @@ exports.createTournamentLogoUploadSignature = onCall({
   return { cloudName, apiKey, folder, publicId, timestamp, signature };
 });
 
+/** Writes the caller's contact fields from Firebase Auth to the private profile document. */
+exports.syncPrivateUserAccount = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in before syncing private account details.");
+
+  const authUser = await getAuth().getUser(uid);
+  const providers = new Set((authUser.providerData || []).map((provider) => provider.providerId));
+  const authProvider = providers.has("google.com")
+    ? "GOOGLE"
+    : providers.has("phone") ? "PHONE" : "EMAIL_PASSWORD";
+  await db.collection("users").doc(uid).collection("private").doc("account").set({
+    id: uid,
+    email: authUser.email || "",
+    phoneNumber: authUser.phoneNumber || "",
+    authProvider,
+    isEmailVerified: authUser.emailVerified === true,
+    isPhoneVerified: Boolean(authUser.phoneNumber),
+    updatedAt: FieldValue.serverTimestamp()
+  }, { merge: true });
+
+  return { synced: true };
+});
+
 function memberRoles(member) {
   if (Array.isArray(member?.roles)) return member.roles.filter((role) => Object.values(ROLES).includes(role));
   if (member?.role === "OWNER") return [ROLES.ADMIN, ROLES.CAPTAIN]; // legacy teams
@@ -102,10 +125,9 @@ function isGoogleAccountPhotoUrl(value) {
 }
 function storedMember(member, roles = memberRoles(member), playingRole = member?.playingRole || "PLAYER") {
   const stored = { userId: member.userId, roles: [...new Set(roles)], playingRole, joinedAtEpochMs: member.joinedAtEpochMs || Date.now() };
-  // Keep manually added, not-yet-registered roster entries intact when other
-  // team operations normalize the members array. Their phone is used later,
-  // after ownership is verified, to connect the player to an account.
-  for (const field of ["displayName", "phoneNumber", "isRegistered"]) {
+  // Contact numbers live in privateMemberContacts and are never copied back
+  // into the client-readable team roster.
+  for (const field of ["displayName", "isRegistered"]) {
     if (member[field] !== undefined) stored[field] = member[field];
   }
   return stored;
@@ -246,7 +268,16 @@ exports.addTeamPlayersByMobile = onCall(async (request) => {
     if (!isManager(actor) && !hasRole(actor, ROLES.VICE_CAPTAIN)) {
       throw new HttpsError("permission-denied", "Only a team admin, captain, or vice-captain can add players.");
     }
-    const existingPhones = new Set(members.map((member) => normalizeIndianMobile(member.phoneNumber)).filter(Boolean));
+    const privateContacts = new Map();
+    for (const member of members) {
+      if (typeof member.userId !== "string" || !member.userId || member.userId.includes("/")) continue;
+      const contactRef = ref.collection("privateMemberContacts").doc(member.userId);
+      privateContacts.set(member.userId, await transaction.get(contactRef));
+    }
+    const existingPhones = new Set(members.map((member) => {
+      const privatePhone = privateContacts.get(member.userId)?.get("phoneNumber");
+      return normalizeIndianMobile(privatePhone || member.phoneNumber);
+    }).filter(Boolean));
     if (players.some((player) => existingPhones.has(player.phoneNumber))) {
       throw new HttpsError("already-exists", "A player with this mobile number is already on the team.");
     }
@@ -254,15 +285,27 @@ exports.addTeamPlayersByMobile = onCall(async (request) => {
       throw new HttpsError("failed-precondition", `A team can have at most ${MAX_TEAM_MEMBERS} players.`);
     }
 
-    const addedMembers = players.map(({ displayName, phoneNumber }) => ({
-      userId: `pending_${crypto.createHash("sha256").update(`${teamId}:${phoneNumber}`).digest("hex").slice(0, 32)}`,
+    const addedMembers = players.map(({ displayName }) => ({
+      // Avoid publishing a deterministic identifier derived from a phone number.
+      userId: `pending_${crypto.randomBytes(16).toString("hex")}`,
       displayName,
-      phoneNumber,
       isRegistered: false,
       roles: [],
       playingRole: "PLAYER",
       joinedAtEpochMs: Date.now()
     }));
+    // Also move any legacy inline contacts observed for this team in the same
+    // transaction before the public roster is rewritten without those fields.
+    members.forEach((member) => {
+      const phoneNumber = normalizeIndianMobile(member.phoneNumber);
+      const contactSnapshot = privateContacts.get(member.userId);
+      if (!phoneNumber || contactSnapshot?.exists) return;
+      transaction.set(ref.collection("privateMemberContacts").doc(member.userId), { phoneNumber });
+    });
+    players.forEach((player, index) => {
+      const contactRef = ref.collection("privateMemberContacts").doc(addedMembers[index].userId);
+      transaction.create(contactRef, { phoneNumber: player.phoneNumber });
+    });
     const updated = [...members.map((member) => storedMember(member)), ...addedMembers];
     transaction.update(ref, { members: updated, memberIds: updated.map((member) => member.userId), updatedAtEpochMs: Date.now() });
     return { teamId, addedCount: addedMembers.length };
@@ -422,13 +465,52 @@ exports.deleteMatch = onCall(async (request) => {
 });
 
 /** Deletes the caller's account data with Admin privileges, then removes Auth. */
-exports.deleteAccount = onCall(async (request) => {
+exports.deleteAccount = onCall({
+  secrets: [cloudinaryCloudName, cloudinaryApiKey, cloudinaryApiSecret],
+}, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in to delete your account.");
 
   const authTimeSeconds = Number(request.auth.token.auth_time || 0);
   if (!authTimeSeconds || Date.now() / 1000 - authTimeSeconds > 5 * 60) {
     throw new HttpsError("failed-precondition", "Please sign in again before deleting your account.");
+  }
+
+  const cloudName = String(cloudinaryCloudName.value() || "").trim();
+  const apiKey = String(cloudinaryApiKey.value() || "").trim();
+  const apiSecret = String(cloudinaryApiSecret.value() || "").trim();
+  if (!cloudName || !apiKey || !apiSecret) {
+    throw new HttpsError("failed-precondition", "Cloudinary is not configured on the server.");
+  }
+
+  const publicId = `profile_photos/${uid}`;
+  const timestamp = Math.floor(Date.now() / 1000);
+  const invalidate = "true";
+  const signature = crypto.createHash("sha1")
+    .update(`invalidate=${invalidate}&public_id=${publicId}&timestamp=${timestamp}${apiSecret}`)
+    .digest("hex");
+  let cloudinaryResponse;
+  try {
+    const body = new URLSearchParams({ public_id: publicId, timestamp: String(timestamp), invalidate, api_key: apiKey, signature });
+    cloudinaryResponse = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+  } catch (error) {
+    console.error("Cloudinary profile-photo deletion request failed", error);
+    throw new HttpsError("unavailable", "Could not remove the profile photo. Account deletion was not completed.");
+  }
+  let cloudinaryResult;
+  try {
+    cloudinaryResult = await cloudinaryResponse.json();
+  } catch (error) {
+    console.error("Cloudinary returned an invalid profile-photo deletion response", error);
+    throw new HttpsError("unavailable", "Could not verify profile-photo removal. Account deletion was not completed.");
+  }
+  if (!cloudinaryResponse.ok || !["ok", "not found"].includes(cloudinaryResult.result)) {
+    console.error("Cloudinary profile-photo deletion failed", cloudinaryResult);
+    throw new HttpsError("unavailable", "Could not remove the profile photo. Account deletion was not completed.");
   }
 
   const ownedQueries = [

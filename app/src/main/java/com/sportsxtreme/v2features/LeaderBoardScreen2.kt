@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
@@ -39,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
@@ -58,10 +60,13 @@ import androidx.compose.ui.unit.sp
 import java.util.Locale
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.presentation.components.SportsXtremeAppBar
+import com.example.sportsxtreme.presentation.profile.ProfileActivity
+import com.example.sportsxtreme.presentation.team.TeamProfileActivity
 import com.example.sportsxtreme.presentation.profile.Lime
 import coil3.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FieldPath
+import android.content.Intent
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -78,7 +83,7 @@ private val TrendUpColor = Color(0xFF28D158)
 private val TrendDownColor = Color(0xFFFF3B30)
 
 enum class LeaderboardTab {
-    PLAYER, TEAMS, CLUBS
+    PLAYER, TEAMS
 }
 
 enum class TrendType {
@@ -100,7 +105,8 @@ data class PlayerRank(
     val points: Int,
     val avatarBorderColor: Color,
     val photoUrl: String = "",
-    val statistics: String = ""
+    val statistics: String = "",
+    val userId: String = ""
 )
 
 data class ClubRank(
@@ -111,7 +117,8 @@ data class ClubRank(
     val points: Int,
     val logoUrl: String = "",
     val statistics: String = "",
-    val tieBreakValue: Double = 0.0
+    val tieBreakValue: Double = 0.0,
+    val teamId: String = ""
 )
 
 @Composable
@@ -119,6 +126,8 @@ fun LeaderBoardScreen2(
     onMenuClick: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableStateOf(LeaderboardTab.PLAYER) }
+    var isSearchExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     
     // Filter states
     var selectedSkill by remember { mutableStateOf("Batting") }
@@ -142,6 +151,7 @@ fun LeaderBoardScreen2(
     var leaderboardError by remember { mutableStateOf<String?>(null) }
     val firestore = remember { FirebaseFirestore.getInstance() }
     val leaderboardScope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     DisposableEffect(firestore) {
         val registration = firestore.collection("tournaments").addSnapshotListener { snapshot, _ ->
@@ -159,6 +169,7 @@ fun LeaderBoardScreen2(
         val registrations = mutableListOf<com.google.firebase.firestore.ListenerRegistration>()
         var effectActive = true
         var playerSnapshotRevision = 0L
+        var teamSnapshotRevision = 0L
         if (selectedTab == LeaderboardTab.PLAYER) {
             val registration = firestore.collection("leaderboards").document("playerAggregates").collection("entries")
                 .whereEqualTo("sport", "CRICKET")
@@ -222,7 +233,7 @@ fun LeaderBoardScreen2(
                         Triple(value, id, PlayerRank(0, Trend(TrendType.SAME), name.initials(), name,
                             "", doc.getString("teamShortName").orEmpty().ifBlank { doc.getString("teamName").orEmpty() },
                             value.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), CyanAccent,
-                            doc.getString("profilePhotoUrl").orEmpty(), displayStats))
+                            doc.getString("profilePhotoUrl").orEmpty(), displayStats, id))
                         }
                             .filter { it.second.isNotBlank() }
                             .filterNot { row -> row.second in missingLinkedAccounts }
@@ -251,19 +262,48 @@ fun LeaderBoardScreen2(
                             doc.getString("format") == formatKey &&
                             doc.getString("tournamentId").orEmpty() == activeTournamentId
                     }
-                    val records = documents.map { doc ->
-                        val id = doc.getString("teamId").orEmpty()
+                    val revision = ++teamSnapshotRevision
+                    leaderboardScope.launch {
+                        val records = documents.map { doc ->
+                        val id = doc.getString("teamId").orEmpty().ifBlank { doc.id }
                         val points = doc.getLong("points") ?: 0L
                         val wins = doc.getLong("wins") ?: 0L
                         val nrr = doc.getDouble("netRunRate") ?: 0.0
                         val stats = "M ${doc.getLong("matchesPlayed") ?: 0} • W $wins • L ${doc.getLong("losses") ?: 0} • T ${doc.getLong("ties") ?: 0}"
+                        val logoUrl = listOf("logoUrl", "teamLogoUrl", "photoUrl")
+                            .firstNotNullOfOrNull { key -> doc.getString(key)?.takeIf(String::isNotBlank) }.orEmpty()
                         Triple(points, wins, ClubRank(0, Trend(TrendType.SAME), doc.getString("shortName").orEmpty().ifBlank { id.take(3) },
-                            doc.getString("name").orEmpty().ifBlank { id }, points.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), doc.getString("logoUrl").orEmpty(), "$stats • NRR ${rate(nrr)}", nrr) to id)
-                    }.sortedWith(compareByDescending<Triple<Long, Long, Pair<ClubRank, String>>> { it.first }
-                        .thenByDescending { it.second }
-                        .thenByDescending { if (selectedTournamentId.isNotBlank() && formatKey != "TEST") it.third.first.tieBreakValue else 0.0 }
-                        .thenBy { it.third.second })
-                    teamRows.addAll(records.mapIndexed { index, row -> row.third.first.copy(rank = index + 1) })
+                            doc.getString("name").orEmpty(), points.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), logoUrl, "$stats • NRR ${rate(nrr)}", nrr, id) to id)
+                        }.sortedWith(compareByDescending<Triple<Long, Long, Pair<ClubRank, String>>> { it.first }
+                            .thenByDescending { it.second }
+                            .thenByDescending { if (selectedTournamentId.isNotBlank() && formatKey != "TEST") it.third.first.tieBreakValue else 0.0 }
+                            .thenBy { it.third.second })
+                        val missingProfileIds = records.mapNotNull { row ->
+                            row.third.first.teamId.takeIf {
+                                it.isNotBlank() && (row.third.first.logoUrl.isBlank() || row.third.first.fullName.isBlank())
+                            }
+                        }.distinct()
+                        val teamProfiles = runCatching {
+                            missingProfileIds.chunked(30).flatMap { ids ->
+                                firestore.collection("teams").whereIn(FieldPath.documentId(), ids).get().await().documents
+                            }.associateBy { it.id }
+                        }.getOrDefault(emptyMap())
+                        if (!effectActive || revision != teamSnapshotRevision) return@launch
+                        teamRows.addAll(records.mapIndexed { index, row ->
+                            val rank = row.third.first
+                            val profile = teamProfiles[rank.teamId]
+                            val logo = rank.logoUrl.ifBlank {
+                                listOf("logoUrl", "teamLogoUrl", "photoUrl")
+                                    .firstNotNullOfOrNull { key -> profile?.getString(key)?.takeIf(String::isNotBlank) }.orEmpty()
+                            }
+                            val name = rank.fullName.ifBlank {
+                                profile?.getString("teamName")?.takeIf(String::isNotBlank)
+                                    ?: profile?.getString("name")?.takeIf(String::isNotBlank)
+                                    ?: rank.teamId
+                            }
+                            rank.copy(rank = index + 1, fullName = name, logoUrl = logo)
+                        })
+                    }
                 }
             registrations += registration
         }
@@ -303,10 +343,36 @@ fun LeaderBoardScreen2(
             modifier = Modifier.fillMaxSize()
         ) {
             // 1. Top Header Bar
-            SportsXtremeAppBar(onMenuClick = onMenuClick, showSearch = true)
+            SportsXtremeAppBar(
+                onMenuClick = onMenuClick,
+                showSearch = true,
+                onSearchClick = { isSearchExpanded = true },
+                searchExpanded = isSearchExpanded,
+                searchQuery = searchQuery,
+                searchPlaceholder = if (selectedTab == LeaderboardTab.PLAYER) "Search player name" else "Search team name",
+                onSearchQueryChange = { searchQuery = it },
+                onSearchClose = {
+                    searchQuery = ""
+                    isSearchExpanded = false
+                }
+            )
 
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().pointerInput(selectedTab, isSearchExpanded) {
+                    var horizontalDrag = 0f
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            if (!isSearchExpanded) horizontalDrag += dragAmount
+                        },
+                        onDragEnd = {
+                            if (!isSearchExpanded && horizontalDrag < -72f) selectedTab = LeaderboardTab.TEAMS
+                            if (!isSearchExpanded && horizontalDrag > 72f) selectedTab = LeaderboardTab.PLAYER
+                            horizontalDrag = 0f
+                        },
+                        onDragCancel = { horizontalDrag = 0f }
+                    )
+                },
                 contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 114.dp)
             ) {
                 // 2. Title & Subtitle
@@ -328,7 +394,7 @@ fun LeaderBoardScreen2(
                     }
                 }
 
-                // 3. Navigation Tabs (Player / Teams / Clubs)
+                // 3. Navigation Tabs (Player / Teams)
                 item {
                     Spacer(modifier = Modifier.height(12.dp))
                     TabsRow(
@@ -423,21 +489,50 @@ fun LeaderBoardScreen2(
                 // 6. Ranking Rows
                 when (selectedTab) {
                     LeaderboardTab.PLAYER -> {
-                        items(playerRows) { player ->
-                            PlayerRankingRow(player = player)
+                        items(playerRows.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }) { player ->
+                            PlayerRankingRow(player = player, onClick = {
+                                if (player.userId.isNotBlank()) {
+                                    context.startActivity(
+                                        Intent(context, ProfileActivity::class.java)
+                                            .putExtra(ProfileActivity.EXTRA_USER_ID, player.userId)
+                                            .putExtra(ProfileActivity.EXTRA_DISPLAY_NAME, player.name)
+                                            .putExtra(ProfileActivity.EXTRA_PROFILE_PHOTO_URL, player.photoUrl)
+                                    )
+                                }
+                            })
                         }
                     }
-                    LeaderboardTab.TEAMS, LeaderboardTab.CLUBS -> {
-                        items(teamRows) { club ->
-                            ClubRankingRow(club = club)
+                    LeaderboardTab.TEAMS -> {
+                        items(teamRows.filter {
+                            it.fullName.contains(searchQuery.trim(), ignoreCase = true) ||
+                                it.code.contains(searchQuery.trim(), ignoreCase = true)
+                        }) { team ->
+                            ClubRankingRow(club = team, onClick = {
+                                if (team.teamId.isNotBlank()) {
+                                    context.startActivity(
+                                        Intent(context, TeamProfileActivity::class.java)
+                                            .putExtra(TeamProfileActivity.EXTRA_TEAM_ID, team.teamId)
+                                    )
+                                }
+                            })
                         }
                     }
                 }
 
-                if (leaderboardError == null && ((selectedTab == LeaderboardTab.PLAYER && playerRows.isEmpty()) ||
-                    (selectedTab != LeaderboardTab.PLAYER && teamRows.isEmpty()))) {
+                val hasSearchResults = when (selectedTab) {
+                    LeaderboardTab.PLAYER -> playerRows.any { it.name.contains(searchQuery.trim(), ignoreCase = true) }
+                    else -> teamRows.any {
+                        it.fullName.contains(searchQuery.trim(), ignoreCase = true) ||
+                            it.code.contains(searchQuery.trim(), ignoreCase = true)
+                    }
+                }
+                if (leaderboardError == null && !hasSearchResults) {
                     item {
-                        Text("No finalized match rankings for these filters yet.", color = MutedText, fontSize = 12.sp,
+                        Text(
+                            if (searchQuery.isBlank()) "No finalized match rankings for these filters yet."
+                            else if (selectedTab == LeaderboardTab.PLAYER) "No players match this search."
+                            else "No teams match this search.",
+                            color = MutedText, fontSize = 12.sp,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), textAlign = TextAlign.Center)
                     }
                 }
@@ -574,7 +669,6 @@ private fun TabsRow(
             val tabName = when (tab) {
                 LeaderboardTab.PLAYER -> "Player"
                 LeaderboardTab.TEAMS -> "Teams"
-                LeaderboardTab.CLUBS -> "Clubs"
             }
 
             Column(
@@ -943,7 +1037,6 @@ private fun TableHeader(tab: LeaderboardTab) {
         val col2Text = when (tab) {
             LeaderboardTab.PLAYER -> "PLAYER"
             LeaderboardTab.TEAMS -> "TEAM"
-            LeaderboardTab.CLUBS -> "CLUB"
         }
 
         // Keep the heading aligned with the player name / team row content.
@@ -969,7 +1062,7 @@ private fun TableHeader(tab: LeaderboardTab) {
 }
 
 @Composable
-private fun PlayerRankingRow(player: PlayerRank) {
+private fun PlayerRankingRow(player: PlayerRank, onClick: () -> Unit) {
     val isTopThree = player.rank in 1..3
     val rankColor = if (isTopThree) GoldAccent else Color.White
     val rowShape = RoundedCornerShape(10.dp)
@@ -990,6 +1083,7 @@ private fun PlayerRankingRow(player: PlayerRank) {
         modifier = Modifier
             .fillMaxWidth()
             .height(76.dp)
+            .clickable(onClick = onClick)
             .shadow(
                 elevation = if (isTopThree) 5.dp else 0.dp,
                 shape = rowShape,
@@ -1123,11 +1217,12 @@ private fun PlayerLeaderboardAvatar(player: PlayerRank) {
 }
 
 @Composable
-private fun ClubRankingRow(club: ClubRank) {
+private fun ClubRankingRow(club: ClubRank, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(68.dp)
+            .clickable(onClick = onClick)
             .background(CardBg)
             .border(0.5.dp, TableBorder)
             .padding(horizontal = 10.dp),

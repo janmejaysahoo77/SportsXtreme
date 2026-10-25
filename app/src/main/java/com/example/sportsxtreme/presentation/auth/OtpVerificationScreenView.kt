@@ -82,7 +82,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                 if (status?.statusCode == CommonStatusCodes.SUCCESS) {
                     val message = extras?.getString(SmsRetriever.EXTRA_SMS_MESSAGE)
                     if (message != null) {
-                        Log.d("OTP_AUTOFILL", "SMS received: $message")
+                        Log.d("OTP_AUTOFILL", "SMS message received")
                         extractOtpAndFill(message)
                     } else {
                         Log.w("OTP_AUTOFILL", "SMS retrieved but message is null. Extras: ${extras?.keySet()}")
@@ -127,7 +127,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         otpScope.launch {
             authViewModel.state.collect { state ->
                 state.smsMessage?.let { message ->
-                    Log.d("OTP_AUTOFILL", "SMS message from shared state: $message")
+                    Log.d("OTP_AUTOFILL", "SMS message received from shared state")
                     extractOtpAndFill(message)
                     authViewModel.clearSmsMessage()
                 }
@@ -135,7 +135,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                 state.pendingPhoneSession?.let { session ->
                     if (session.isAutoVerified) {
                         session.autoFilledCode?.let { code ->
-                            Log.d("OTP_AUTOFILL", "Firebase auto-retrieved code: $code")
+                            Log.d("OTP_AUTOFILL", "Firebase auto-retrieved code received")
                             fillOtp(code)
                         } ?: run {
                             verifyAutomaticallyIfReady(context)
@@ -170,12 +170,12 @@ class OtpVerificationScreenView @JvmOverloads constructor(
         val matcher = pattern.matcher(message)
         if (matcher.find()) {
             val otp = matcher.group(1)
-            Log.d("OTP_AUTOFILL", "Extracted OTP: $otp")
+            Log.d("OTP_AUTOFILL", "6-digit OTP extracted")
             if (otp != null && otp.length == 6) {
                 fillOtp(otp)
             }
         } else {
-            Log.d("OTP_AUTOFILL", "No 6-digit OTP found in message: $message")
+            Log.d("OTP_AUTOFILL", "No 6-digit OTP found in SMS")
         }
     }
 
@@ -204,7 +204,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                 
                 Log.i("OTP_AUTOFILL", "---------------------------------------------------")
                 Log.i("OTP_AUTOFILL", "YOUR APP HASH: $hash")
-                Log.i("OTP_AUTOFILL", "FORMAT: <#> Your SportsXtreme OTP is 123456. $hash")
+                Log.i("OTP_AUTOFILL", "FORMAT: <#> Your SportsXtreme OTP is XXXXXX. $hash")
                 Log.i("OTP_AUTOFILL", "---------------------------------------------------")
             }
         } catch (e: Exception) {
