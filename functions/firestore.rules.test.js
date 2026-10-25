@@ -10,6 +10,7 @@ const {
 const {
   collection,
   doc,
+  deleteDoc,
   getDocs,
   getDoc,
   query,
@@ -20,6 +21,7 @@ const {
 } = require("firebase/firestore");
 
 const projectId = "demo-sportsxtreme-firestore-rules-test";
+process.env.GCLOUD_PROJECT ||= projectId;
 let testEnvironment;
 
 before(async () => {
@@ -84,6 +86,25 @@ beforeEach(async () => {
     });
     await setDoc(doc(db, "teams/harbor/privateMemberContacts/pending_random_member"), {
       phoneNumber: "+919123456789"
+    });
+    await setDoc(doc(db, "teams/harbor/internalMetadata/private-note"), {
+      note: "Server-only team metadata"
+    });
+    await setDoc(doc(db, "matches/live"), {
+      ownerId: "alice",
+      status: "IN_PROGRESS",
+      finalization: { state: "" },
+      innings: []
+    });
+    await setDoc(doc(db, "matches/live/deliveries/delivery-1"), { runs: 1 });
+    for (const scorecardType of ["batting", "bowling", "summary"]) {
+      await setDoc(doc(db, `matches/live/scorecard/${scorecardType}/entries/innings-1`), { inningsId: "innings-1" });
+    }
+    await setDoc(doc(db, "matches/live/correctionAudit/1"), {
+      revision: 1,
+      reason: "Audit reason",
+      requestedBy: "alice",
+      state: "OPEN"
     });
   });
 });
@@ -220,6 +241,7 @@ test("team rosters and captain contact remain readable while private member cont
   await assertFails(getDoc(doc(anonymousDb, "teams/harbor")));
 
   const memberContact = "teams/harbor/privateMemberContacts/pending_random_member";
+  await assertFails(getDoc(doc(otherDb, "teams/harbor/internalMetadata/private-note")));
   await assertFails(getDoc(doc(otherDb, memberContact)));
   await assertFails(getDoc(doc(managerDb, memberContact)));
   await assertFails(getDocs(collection(otherDb, "teams/harbor/privateMemberContacts")));
@@ -228,4 +250,145 @@ test("team rosters and captain contact remain readable while private member cont
 
   const managerTeams = query(collection(managerDb, "teams"), where("memberIds", "array-contains", "alice"));
   await assertSucceeds(getDocs(managerTeams));
+});
+
+test("match roots, deliveries, and required scorecard entries remain publicly readable", async () => {
+  const anonymousDb = testEnvironment.unauthenticatedContext().firestore();
+  await assertSucceeds(getDoc(doc(anonymousDb, "matches/live")));
+  await assertSucceeds(getDoc(doc(anonymousDb, "matches/live/deliveries/delivery-1")));
+  await assertSucceeds(getDocs(collection(anonymousDb, "matches/live/deliveries")));
+  for (const scorecardType of ["batting", "bowling", "summary"]) {
+    await assertSucceeds(getDoc(doc(anonymousDb, `matches/live/scorecard/${scorecardType}/entries/innings-1`)));
+    await assertSucceeds(getDocs(collection(anonymousDb, `matches/live/scorecard/${scorecardType}/entries`)));
+  }
+});
+
+test("only the match owner may write deliveries and required scorecard entries before finalization", async () => {
+  const ownerDb = testEnvironment.authenticatedContext("alice").firestore();
+  const otherDb = testEnvironment.authenticatedContext("bob").firestore();
+
+  await assertSucceeds(setDoc(doc(ownerDb, "matches/live/deliveries/delivery-2"), { runs: 4 }));
+  await assertSucceeds(updateDoc(doc(ownerDb, "matches/live/deliveries/delivery-1"), { runs: 2 }));
+  for (const scorecardType of ["batting", "bowling", "summary"]) {
+    const entry = doc(ownerDb, `matches/live/scorecard/${scorecardType}/entries/innings-1`);
+    await assertSucceeds(updateDoc(entry, { updated: true }));
+  }
+
+  await assertFails(setDoc(doc(otherDb, "matches/live/deliveries/attacker"), { runs: 999 }));
+  await assertFails(updateDoc(doc(otherDb, "matches/live/deliveries/delivery-1"), { runs: 999 }));
+  await assertFails(setDoc(doc(otherDb, "matches/live/scorecard/batting/entries/attacker"), { runs: 999 }));
+});
+
+test("correction audit records deny client reads and writes for every client role", async () => {
+  const contexts = [
+    testEnvironment.unauthenticatedContext(),
+    testEnvironment.authenticatedContext("bob"),
+    testEnvironment.authenticatedContext("alice")
+  ];
+
+  for (const context of contexts) {
+    const db = context.firestore();
+    const auditRef = doc(db, "matches/live/correctionAudit/1");
+    await assertFails(getDoc(auditRef));
+    await assertFails(getDocs(collection(db, "matches/live/correctionAudit")));
+    await assertFails(setDoc(doc(db, "matches/live/correctionAudit/2"), { state: "FORGED" }));
+    await assertFails(updateDoc(auditRef, { state: "FORGED" }));
+    await assertFails(deleteDoc(auditRef));
+  }
+});
+
+test("unrecognized match paths and scorecard types are denied", async () => {
+  const anonymousDb = testEnvironment.unauthenticatedContext().firestore();
+  const ownerDb = testEnvironment.authenticatedContext("alice").firestore();
+
+  await assertFails(getDoc(doc(anonymousDb, "matches/live/privateNotes/note-1")));
+  await assertFails(setDoc(doc(ownerDb, "matches/live/privateNotes/note-1"), { secret: true }));
+  await assertFails(getDoc(doc(anonymousDb, "matches/live/scorecard/fielding/entries/innings-1")));
+  await assertFails(setDoc(doc(ownerDb, "matches/live/scorecard/fielding/entries/innings-1"), { runs: 1 }));
+});
+
+test("scoring writes stop after the parent match is finalized", async () => {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await updateDoc(doc(context.firestore(), "matches/live"), {
+      status: "COMPLETED",
+      finalization: { state: "FINALIZED" }
+    });
+  });
+
+  const ownerDb = testEnvironment.authenticatedContext("alice").firestore();
+  await assertFails(setDoc(doc(ownerDb, "matches/live/deliveries/late-delivery"), { runs: 6 }));
+  await assertFails(updateDoc(doc(ownerDb, "matches/live/deliveries/delivery-1"), { runs: 6 }));
+  await assertFails(setDoc(doc(ownerDb, "matches/live/scorecard/batting/entries/innings-1"), { runs: 99 }));
+});
+
+test("requestMatchCorrection stores its reason only in the trusted audit record", {
+  skip: !process.env.FIRESTORE_EMULATOR_HOST
+}, async () => {
+  const { requestMatchCorrection } = require("./index");
+  const { getFirestore: getAdminFirestore } = require("firebase-admin/firestore");
+  const adminDb = getAdminFirestore();
+  const matchRef = adminDb.collection("matches").doc("correction-private");
+  const previousFinalizedAt = new Date("2026-01-01T00:00:00.000Z");
+  await matchRef.set({
+    ownerId: "alice",
+    status: "COMPLETED",
+    finalization: { state: "FINALIZED", revision: 2, finalizedAt: previousFinalizedAt }
+  });
+
+  await requestMatchCorrection.run({
+    auth: { uid: "alice" },
+    data: { matchId: "correction-private", reason: "Correct the recorded score" }
+  });
+
+  const updatedMatch = await matchRef.get();
+  assert.equal(updatedMatch.get("finalization.state"), "CORRECTION_OPEN");
+  assert.equal(updatedMatch.get("finalization.revision"), 3);
+  assert.equal(updatedMatch.get("finalization.correctionReason"), undefined);
+  assert.equal(updatedMatch.get("finalization.correctionBy"), undefined);
+  assert.equal(updatedMatch.get("finalization.correctionRequestedAt"), undefined);
+
+  const audit = await matchRef.collection("correctionAudit").doc("3").get();
+  assert.equal(audit.get("reason"), "Correct the recorded score");
+  assert.equal(audit.get("requestedBy"), "alice");
+  assert.equal(audit.get("state"), "OPEN");
+  assert.ok(audit.get("requestedAt"));
+
+  await matchRef.update({
+    matchId: "correction-private",
+    matchType: "FRIENDLY",
+    sport: "CRICKET",
+    format: "T20",
+    ballType: "LEATHER",
+    overs: 20,
+    teamA: { teamId: "team-a", name: "Team A", shortName: "A" },
+    teamB: { teamId: "team-b", name: "Team B", shortName: "B" },
+    playingXI: {
+      TEAM_A: { teamId: "team-a", side: "TEAM_A", selectedByUserId: "alice", playerIds: ["a-player"] },
+      TEAM_B: { teamId: "team-b", side: "TEAM_B", selectedByUserId: "alice", playerIds: ["b-player"] }
+    },
+    innings: [
+      { inningsId: "innings-1", number: 1, battingTeamId: "team-a", bowlingTeamId: "team-b", status: "COMPLETED", score: 0, wickets: 0, legalBalls: 0 },
+      { inningsId: "innings-2", number: 2, battingTeamId: "team-b", bowlingTeamId: "team-a", status: "COMPLETED", score: 0, wickets: 0, legalBalls: 0 }
+    ]
+  });
+  for (const [inningsId, inningsNumber] of [["innings-1", 1], ["innings-2", 2]]) {
+    await matchRef.collection("scorecard").doc("summary").collection("entries").doc(inningsId).set({
+      inningsId,
+      innings: inningsNumber,
+      totalScore: 0,
+      wickets: 0,
+      legalBalls: 0
+    });
+  }
+  const { finalizeMatch } = require("./index");
+  await finalizeMatch.run({ auth: { uid: "alice" }, data: { matchId: "correction-private" } });
+
+  const finalizedMatch = await matchRef.get();
+  assert.equal(finalizedMatch.get("status"), "COMPLETED");
+  assert.equal(finalizedMatch.get("finalization.state"), "FINALIZED");
+  assert.equal(finalizedMatch.get("finalization.correctionReason"), undefined);
+  const finalizedAudit = await matchRef.collection("correctionAudit").doc("3").get();
+  assert.equal(finalizedAudit.get("reason"), "Correct the recorded score");
+  assert.equal(finalizedAudit.get("state"), "FINALIZED");
+  assert.ok(finalizedAudit.get("finalizedAt"));
 });

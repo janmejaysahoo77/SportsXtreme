@@ -44,6 +44,14 @@ service cloud.firestore {
         && claim.replacedDummyPlayerId is string
         && claim.claimedAt == request.time;
     }
+    function canWriteMatchScore(matchId) {
+      let matchData = get(/databases/$(database)/documents/matches/$(matchId)).data;
+      return isSignedIn()
+        && matchData.ownerId == request.auth.uid
+        && matchData.get('status', '') != 'COMPLETED'
+        && matchData.get('finalization', {}).get('state', '') != 'FINALIZING'
+        && matchData.get('finalization', {}).get('state', '') != 'FINALIZED';
+    }
 
     // ---------- Matches: public scorecard read, owner write ----------
     // Public Home scorecards use a collection listener, so match score data is
@@ -99,14 +107,19 @@ service cloud.firestore {
         && resource.data.get('finalization', {}).get('state', '') != 'FINALIZED';
     }
 
-    // Subcollections under a match (deliveries, scorecard, entries, …)
-    match /matches/{matchId}/{document=**} {
+    // Public score data is explicitly readable. Only the match owner may
+    // write it while the parent match remains in an eligible scoring state.
+    match /matches/{matchId}/deliveries/{deliveryId} {
       allow read: if true;
-      allow create, update, delete: if request.auth != null
-        && get(/databases/$(database)/documents/matches/$(matchId)).data.ownerId == request.auth.uid
-        && get(/databases/$(database)/documents/matches/$(matchId)).data.get('status', '') != 'COMPLETED'
-        && get(/databases/$(database)/documents/matches/$(matchId)).data.get('finalization', {}).get('state', '') != 'FINALIZING'
-        && get(/databases/$(database)/documents/matches/$(matchId)).data.get('finalization', {}).get('state', '') != 'FINALIZED';
+      allow create, update, delete: if canWriteMatchScore(matchId);
+    }
+    match /matches/{matchId}/scorecard/{scorecardType}/entries/{entryId} {
+      allow read: if scorecardType in ['batting', 'bowling', 'summary'];
+      allow create, update, delete: if scorecardType in ['batting', 'bowling', 'summary']
+        && canWriteMatchScore(matchId);
+    }
+    match /matches/{matchId}/correctionAudit/{revision} {
+      allow read, write: if false;
     }
 
     // Official statistics and leaderboard aggregates are public read models.
@@ -192,8 +205,7 @@ service cloud.firestore {
       allow update, delete: if false;
     }
     match /teams/{teamId}/{document=**} {
-      allow read: if request.auth != null;
-      allow write: if false;
+      allow read, write: if false;
     }
 
     // ---------- Team invites: only Cloud Functions may create or inspect them ----------

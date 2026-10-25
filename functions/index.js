@@ -1003,7 +1003,7 @@ exports.requestMatchCorrection = onCall(async (request) => {
     const revision = asNumber(current.get("finalization.revision")) + 1;
     const contributionRef = db.collection("leaderboards").doc("matchContributions").collection("entries").doc(matchId);
     await replaceLeaderboardContribution(transaction, contributionRef, null);
-    transaction.update(matchRef, { finalization: { state: "CORRECTION_OPEN", revision, correctionReason: reason, correctionBy: request.auth.uid, correctionRequestedAt: FieldValue.serverTimestamp(), previousFinalizedAt: current.get("finalization.finalizedAt") }, status: "IN_PROGRESS" });
+    transaction.update(matchRef, { finalization: { state: "CORRECTION_OPEN", revision, previousFinalizedAt: current.get("finalization.finalizedAt") }, status: "IN_PROGRESS" });
     transaction.create(matchRef.collection("correctionAudit").doc(String(revision)), { revision, reason, requestedBy: request.auth.uid, requestedAt: FieldValue.serverTimestamp(), state: "OPEN" });
   });
   return { matchId, correctionOpen: true };
