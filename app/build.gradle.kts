@@ -63,6 +63,7 @@ dependencies {
     implementation(libs.firebase.database)
     implementation(libs.firebase.firestore)
     implementation("com.google.firebase:firebase-functions")
+    implementation(libs.firebase.messaging)
     implementation(libs.firebase.storage)
     implementation(libs.google.play.services.auth.api.phone)
     implementation(libs.google.play.services.location)
