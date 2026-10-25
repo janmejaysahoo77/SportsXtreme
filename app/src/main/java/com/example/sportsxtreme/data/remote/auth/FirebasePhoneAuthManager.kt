@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.data.remote.auth
 
 import android.app.Activity
+import android.util.Log
 import com.example.sportsxtreme.domain.model.PhoneAuthSession
 import com.google.firebase.FirebaseException
 import com.google.firebase.auth.FirebaseAuth
@@ -22,28 +23,38 @@ class FirebasePhoneAuthManager(
     private val resendTokens = ConcurrentHashMap<String, PhoneAuthProvider.ForceResendingToken>()
 
     fun bindActivity(activity: Activity) {
+        Log.d(TAG, "[OTP_SYSTEM] Binding activity for Phone Auth: ${activity.javaClass.simpleName}")
         activityRef = WeakReference(activity)
     }
 
     override suspend fun sendOtp(phoneNumber: String): Result<PhoneAuthSession> {
+        Log.d(TAG, "[OTP_SYSTEM] sendOtp requested for phoneNumber: $phoneNumber")
         return startPhoneVerification(phoneNumber = phoneNumber, resendToken = null)
     }
 
     override suspend fun resendOtp(session: PhoneAuthSession): Result<PhoneAuthSession> {
+        Log.d(TAG, "[OTP_SYSTEM] resendOtp requested for verificationId: ${session.verificationId}, phone: ${session.phoneNumber}")
         val token = resendTokens[session.verificationId]
-            ?: return Result.failure(IllegalStateException("OTP resend is not available for this verification session."))
+            if (token == null) {
+                Log.e(TAG, "[OTP_SYSTEM] resendOtp failed: Resend token not found for verificationId=${session.verificationId}")
+                return Result.failure(IllegalStateException("OTP resend is not available for this verification session."))
+            }
         return startPhoneVerification(phoneNumber = session.phoneNumber, resendToken = token)
     }
 
     override suspend fun verifyOtp(verificationId: String, otpCode: String): Result<Boolean> {
+        Log.d(TAG, "[OTP_SYSTEM] verifyOtp requested - verificationId: '$verificationId', code length: ${otpCode.length}")
         if (verificationId.isBlank()) {
+            Log.e(TAG, "[OTP_SYSTEM] verifyOtp failed: Missing verificationId")
             return Result.failure(FirebaseAuthInvalidCredentialsException("missing-verification-id", "OTP session has expired. Request a new code."))
         }
         if (otpCode.length != OTP_LENGTH || otpCode.any { !it.isDigit() }) {
+            Log.e(TAG, "[OTP_SYSTEM] verifyOtp failed: Invalid code format (length=${otpCode.length})")
             return Result.failure(FirebaseAuthInvalidCredentialsException("invalid-verification-code", "Enter a valid 6 digit OTP."))
         }
 
         val credential = PhoneAuthProvider.getCredential(verificationId, otpCode)
+        Log.d(TAG, "[OTP_SYSTEM] PhoneAuthProvider credential generated successfully for verificationId: $verificationId")
         return signInOrLinkWithPhoneCredential(credential)
     }
 
@@ -53,6 +64,7 @@ class FirebasePhoneAuthManager(
     ): Result<PhoneAuthSession> {
         val normalizedPhoneNumber = normalizePhoneNumber(phoneNumber)
         if (normalizedPhoneNumber == null) {
+            Log.e(TAG, "[OTP_SYSTEM] Failed to normalize phone number: '$phoneNumber'")
             return Result.failure(
                 FirebaseAuthInvalidCredentialsException(
                     "invalid-phone-number",
@@ -60,9 +72,13 @@ class FirebasePhoneAuthManager(
                 )
             )
         }
+        Log.d(TAG, "[OTP_SYSTEM] Starting phone verification for normalized number: '$normalizedPhoneNumber' (isResend=${resendToken != null})")
 
         val activity = activityRef?.get()
-            ?: return Result.failure(IllegalStateException("Phone authentication needs an active Activity."))
+        if (activity == null) {
+            Log.e(TAG, "[OTP_SYSTEM] Cannot start phone verification: Activity reference is null")
+            return Result.failure(IllegalStateException("Phone authentication needs an active Activity."))
+        }
 
         return suspendCancellableCoroutine { continuation ->
             var resumed = false
@@ -75,10 +91,12 @@ class FirebasePhoneAuthManager(
 
             val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
                 override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+                    Log.i(TAG, "[OTP_SYSTEM] OnVerificationStateChangedCallbacks: Instant/auto verification completed (codeAvailable=${!credential.smsCode.isNullOrBlank()})")
                     signInOrLinkWithPhoneCredential(credential) { result ->
                         resumeOnce(
                             result.fold(
                                 onSuccess = { isNew ->
+                                    Log.i(TAG, "[OTP_SYSTEM] Auto-verification sign-in succeeded. isNewUser=$isNew")
                                     Result.success(
                                         PhoneAuthSession(
                                             verificationId = "",
@@ -90,13 +108,17 @@ class FirebasePhoneAuthManager(
                                         )
                                     )
                                 },
-                                onFailure = { error -> Result.failure(error) }
+                                onFailure = { error ->
+                                    Log.e(TAG, "[OTP_SYSTEM] Auto-verification sign-in failed: ${error.message}", error)
+                                    Result.failure(error)
+                                }
                             )
                         )
                     }
                 }
 
                 override fun onVerificationFailed(exception: FirebaseException) {
+                    Log.e(TAG, "[OTP_SYSTEM] OnVerificationStateChangedCallbacks: Verification failed. Exception: ${exception.message}", exception)
                     resumeOnce(Result.failure(mapFirebasePhoneException(exception)))
                 }
 
@@ -104,6 +126,7 @@ class FirebasePhoneAuthManager(
                     verificationId: String,
                     token: PhoneAuthProvider.ForceResendingToken
                 ) {
+                    Log.i(TAG, "[OTP_SYSTEM] OnVerificationStateChangedCallbacks: Code sent successfully! verificationId: '$verificationId'")
                     resendTokens[verificationId] = token
                     resumeOnce(
                         Result.success(
@@ -117,7 +140,7 @@ class FirebasePhoneAuthManager(
                 }
 
                 override fun onCodeAutoRetrievalTimeOut(verificationId: String) {
-                    // Manual verification can continue after auto-retrieval times out.
+                    Log.w(TAG, "[OTP_SYSTEM] OnVerificationStateChangedCallbacks: Code auto retrieval timed out for verificationId: '$verificationId'")
                 }
             }
 
@@ -131,6 +154,7 @@ class FirebasePhoneAuthManager(
                 optionsBuilder.setForceResendingToken(resendToken)
             }
 
+            Log.d(TAG, "[OTP_SYSTEM] Invoking PhoneAuthProvider.verifyPhoneNumber...")
             PhoneAuthProvider.verifyPhoneNumber(optionsBuilder.build())
         }
     }
@@ -150,10 +174,15 @@ class FirebasePhoneAuthManager(
         onResult: (Result<Boolean>) -> Unit
     ) {
         val currentUser = firebaseAuth.currentUser
+        val isLink = currentUser != null
+        Log.d(TAG, "[OTP_SYSTEM] Executing ${if (isLink) "linkWithCredential" else "signInWithCredential"} for UID=${currentUser?.uid}")
         val task = currentUser?.linkWithCredential(credential) ?: firebaseAuth.signInWithCredential(credential)
         task.addOnSuccessListener {
-            onResult(Result.success(task.result?.additionalUserInfo?.isNewUser == true))
+            val isNew = task.result?.additionalUserInfo?.isNewUser == true
+            Log.i(TAG, "[OTP_SYSTEM] Phone credential authentication SUCCESS! isNewUser=$isNew, UID=${firebaseAuth.currentUser?.uid}")
+            onResult(Result.success(isNew))
         }.addOnFailureListener { exception ->
+            Log.e(TAG, "[OTP_SYSTEM] Phone credential authentication FAILED: ${exception.message}", exception)
             onResult(Result.failure(mapFirebasePhoneException(exception)))
         }
     }
@@ -202,6 +231,7 @@ class FirebasePhoneAuthManager(
     }
 
     private companion object {
+        private const val TAG = "FirebasePhoneAuthManager"
         const val OTP_LENGTH = 6
         const val OTP_TIMEOUT_SECONDS = 60L
         const val MIN_PHONE_DIGITS = 10

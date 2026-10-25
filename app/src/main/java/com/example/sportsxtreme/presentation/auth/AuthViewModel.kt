@@ -1,5 +1,6 @@
 package com.example.sportsxtreme.presentation.auth
 
+import android.util.Log
 import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.domain.model.AuthSession
 import com.example.sportsxtreme.domain.model.EmailSignupRequest
@@ -202,31 +203,43 @@ class AuthViewModel(
     }
 
     suspend fun sendPhoneOtp(phoneNumber: String): Resource<PhoneAuthSession> {
+        Log.d(TAG, "[OTP_SYSTEM] AuthViewModel.sendPhoneOtp requested for $phoneNumber")
         _state.value = state.value.copy(
             isLoading = true,
             phoneVerificationStatus = PhoneVerificationStatus.SendingOtp,
             errorMessage = null
         )
         val result = useCases.sendPhoneOtp(phoneNumber)
+        Log.d(TAG, "[OTP_SYSTEM] AuthViewModel.sendPhoneOtp result: $result")
         return result.also { updatePhoneSession(it) }
     }
 
     suspend fun resendPhoneOtp(): Resource<PhoneAuthSession> {
         val currentSession = state.value.pendingPhoneSession
-            ?: return Resource.Error("No phone verification session is active.")
+            if (currentSession == null) {
+                Log.e(TAG, "[OTP_SYSTEM] AuthViewModel.resendPhoneOtp failed: No pendingPhoneSession in state")
+                return Resource.Error("No phone verification session is active.")
+            }
+        Log.d(TAG, "[OTP_SYSTEM] AuthViewModel.resendPhoneOtp requested for verificationId: ${currentSession.verificationId}")
         _state.value = state.value.copy(
             isLoading = true,
             phoneVerificationStatus = PhoneVerificationStatus.SendingOtp,
             errorMessage = null
         )
         val result = useCases.resendPhoneOtp(currentSession)
+        Log.d(TAG, "[OTP_SYSTEM] AuthViewModel.resendPhoneOtp result: $result")
         return result.also { updatePhoneSession(it) }
     }
 
     suspend fun verifyPhoneOtp(otpCode: String): Resource<Boolean> {
         val phoneSession = state.value.pendingPhoneSession
-            ?: return Resource.Error("No phone verification session is active.")
+            if (phoneSession == null) {
+                Log.e(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp failed: No pendingPhoneSession in state")
+                return Resource.Error("No phone verification session is active.")
+            }
+        Log.d(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp for verificationId: '${phoneSession.verificationId}', isAutoVerified: ${phoneSession.isAutoVerified}, code length: ${otpCode.length}")
         if (phoneSession.isAutoVerified) {
+            Log.i(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp processing auto-verified session")
             return when (val completion = markPhoneVerified(
                 phoneSession.phoneNumber,
                 PhoneVerificationStatus.AutoVerified,
@@ -243,8 +256,10 @@ class AuthViewModel(
             errorMessage = null
         )
         val result = useCases.verifyPhoneOtp(phoneSession.verificationId, otpCode)
+        Log.d(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp result from useCase: $result")
         return when (result) {
             is Resource.Success -> {
+                Log.i(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp SUCCESS! Marking phone verified.")
                 when (val completion = markPhoneVerified(
                     phoneSession.phoneNumber,
                     PhoneVerificationStatus.VerificationSuccess,
@@ -257,6 +272,7 @@ class AuthViewModel(
             }
             is Resource.Error -> {
                 val message = result.message ?: "OTP verification failed"
+                Log.e(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp FAILED: $message")
                 _state.value = state.value.copy(
                     isLoading = false,
                     phoneVerificationStatus = PhoneVerificationStatus.VerificationFailure,
@@ -454,6 +470,7 @@ class AuthViewModel(
     }
 
     private companion object {
+        private const val TAG = "AuthViewModel"
         const val PROFILE_WRITE_TIMEOUT_MS = 3000L
     }
 }

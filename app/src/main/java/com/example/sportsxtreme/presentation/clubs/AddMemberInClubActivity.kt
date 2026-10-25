@@ -107,10 +107,11 @@ fun AddMemberScreen(onBack: () -> Unit) {
 
             // 3. Select User
             SectionTitle(number = "3", title = "Select User")
+            val activeUser = remember { com.example.sportsxtreme.data.di.AuthDependencies.authViewModel().state.value.authenticatedUser }
             SelectUserSection(
-                name = if (selectedRole == "Captain") "Rahul Kumar" else "Suresh Nayak",
-                email = if (selectedRole == "Captain") "rahul.kumar@sportsxtreme.com" else "suresh.nayak@sportsxtreme.com",
-                phone = if (selectedRole == "Captain") "+91 9876543211" else "+91 9876543210"
+                name = activeUser?.name.orEmpty().ifBlank { if (selectedRole == "Captain") "Team Captain" else "Club Member" },
+                email = activeUser?.email.orEmpty().ifBlank { if (selectedRole == "Captain") "captain@sportsxtreme.com" else "member@sportsxtreme.com" },
+                phone = activeUser?.mobileNumber.orEmpty().ifBlank { "Mobile Number" }
             )
 
             Spacer(modifier = Modifier.height(20.dp))

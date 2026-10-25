@@ -34,110 +34,157 @@ class AuthRepositoryImpl(
     private val pendingEmailLinkStore: PendingEmailLinkStore = PendingEmailLinkStore(context.applicationContext)
 ) : AuthRepository {
     override fun currentUser(): User? {
-        return authDataSource.currentUser()
+        val user = authDataSource.currentUser()
+        Log.d(TAG, "[AUTH] currentUser() check: ${if (user != null) "User logged in (UID=${user.id}, email=${user.email})" else "No current user"}")
+        return user
     }
 
     override suspend fun createEmailAccount(request: EmailSignupRequest): Resource<AuthSession> {
+        Log.d(TAG, "[AUTH] createEmailAccount requested for email: ${request.email}, name: ${request.name}")
         return authDataSource.createEmailAccount(request).fold(
             onSuccess = { session ->
+                Log.i(TAG, "[AUTH] createEmailAccount SUCCESS! User UID: ${session.user.id}, isNewUser: ${session.isNewUser}")
                 when (val seedResult = seedFirestoreProfile(session.user, "email signup")) {
                     is Resource.Success -> Resource.Success(session)
-                    is Resource.Error -> Resource.Error(seedResult.message ?: "Firestore profile setup failed")
+                    is Resource.Error -> {
+                        Log.e(TAG, "[AUTH] Firestore profile seed failed during createEmailAccount: ${seedResult.message}")
+                        Resource.Error(seedResult.message ?: "Firestore profile setup failed")
+                    }
                     is Resource.Loading -> Resource.Loading()
                 }
             },
-            onFailure = { error -> Resource.Error(error.toAuthMessage("Signup failed")) }
+            onFailure = { error ->
+                Log.e(TAG, "[AUTH] createEmailAccount FAILED: ${error.message}", error)
+                Resource.Error(error.toAuthMessage("Signup failed"))
+            }
         )
     }
 
     override suspend fun resendEmailVerification(): Resource<Unit> {
-        return authDataSource.resendEmailVerification().toResource("Could not resend verification email")
+        Log.d(TAG, "[AUTH] resendEmailVerification requested")
+        val result = authDataSource.resendEmailVerification().toResource("Could not resend verification email")
+        Log.d(TAG, "[AUTH] resendEmailVerification result: $result")
+        return result
     }
 
     override suspend fun sendEmailChangeVerification(newEmail: String): Resource<Unit> {
-        return authDataSource.sendEmailChangeVerification(newEmail).toResource("Could not send verification email")
+        Log.d(TAG, "[AUTH] sendEmailChangeVerification requested for newEmail: $newEmail")
+        val result = authDataSource.sendEmailChangeVerification(newEmail).toResource("Could not send verification email")
+        Log.d(TAG, "[AUTH] sendEmailChangeVerification result: $result")
+        return result
     }
 
     override suspend fun checkEmailVerification(): Resource<Boolean> {
-        return authDataSource.reloadAndCheckEmailVerified().toResource("Could not check email verification")
+        Log.d(TAG, "[AUTH] checkEmailVerification requested")
+        val result = authDataSource.reloadAndCheckEmailVerified().toResource("Could not check email verification")
+        Log.d(TAG, "[AUTH] checkEmailVerification result: $result")
+        return result
     }
 
     override suspend fun signInWithEmailAndPassword(email: String, password: String): Resource<AuthSession> {
+        Log.d(TAG, "[AUTH] signInWithEmailAndPassword requested for email: $email")
         return authDataSource.signInWithEmailAndPassword(email, password).fold(
             onSuccess = { session ->
+                Log.i(TAG, "[AUTH] signInWithEmailAndPassword SUCCESS! User UID: ${session.user.id}, isEmailVerified: ${session.user.isEmailVerified}")
                 if (!session.user.isEmailVerified) {
+                    Log.w(TAG, "[AUTH] User email is NOT verified. Signing out.")
                     authDataSource.signOut()
                     Resource.Error("Please verify your email before logging in.")
                 } else {
                     Resource.Success(session)
                 }
             },
-            onFailure = { error -> Resource.Error(error.toAuthMessage("Login failed")) }
+            onFailure = { error ->
+                Log.e(TAG, "[AUTH] signInWithEmailAndPassword FAILED: ${error.message}", error)
+                Resource.Error(error.toAuthMessage("Login failed"))
+            }
         )
     }
 
     override suspend fun signInWithGoogle(idToken: String, existingAccountOnly: Boolean): Resource<AuthSession> {
+        Log.d(TAG, "[AUTH] signInWithGoogle requested (idToken length: ${idToken.length})")
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         return authDataSource.signInWithCredential(credential, AuthProvider.GOOGLE).fold(
             onSuccess = { session ->
+                Log.i(TAG, "[AUTH] signInWithGoogle SUCCESS! User UID: ${session.user.id}, email: ${session.user.email}")
                 if (existingAccountOnly && session.isNewUser) {
                     authDataSource.deleteCurrentUserAndSignOut()
                     return@fold Resource.Error("No account found. Please register first.")
                 }
                 when (val seedResult = seedFirestoreProfile(session.user, "Google sign-in")) {
                     is Resource.Success -> Resource.Success(session)
-                    is Resource.Error -> Resource.Error(seedResult.message ?: "Firestore profile setup failed")
+                    is Resource.Error -> {
+                        Log.e(TAG, "[AUTH] Firestore profile seed failed during Google sign-in: ${seedResult.message}")
+                        Resource.Error(seedResult.message ?: "Firestore profile setup failed")
+                    }
                     is Resource.Loading -> Resource.Loading()
                 }
             },
-            onFailure = { error -> Resource.Error(error.toAuthMessage("Google signup failed")) }
+            onFailure = { error ->
+                Log.e(TAG, "[AUTH] signInWithGoogle FAILED: ${error.message}", error)
+                Resource.Error(error.toAuthMessage("Google signup failed"))
+            }
         )
     }
 
     override suspend fun sendLoginEmailLink(email: String): Resource<Unit> {
+        Log.d(TAG, "[AUTH] sendLoginEmailLink requested for email: $email")
         return authDataSource.sendEmailSignInLink(email).fold(
             onSuccess = {
+                Log.i(TAG, "[AUTH] sendLoginEmailLink SUCCESS for email: $email")
                 pendingEmailLinkStore.saveEmail(email)
                 Resource.Success(Unit)
             },
             onFailure = { error ->
+                Log.e(TAG, "[AUTH] sendLoginEmailLink FAILED: ${error.message}", error)
                 Resource.Error(error.toAuthMessage("Could not send login link"))
             }
         )
     }
 
     override fun isEmailSignInLink(link: String): Boolean {
-        return authDataSource.isSignInWithEmailLink(link)
+        val result = authDataSource.isSignInWithEmailLink(link)
+        Log.d(TAG, "[AUTH] isEmailSignInLink check result: $result")
+        return result
     }
 
     override fun storePendingEmailSignInLink(link: String) {
+        Log.d(TAG, "[AUTH] storePendingEmailSignInLink called")
         pendingEmailLinkStore.saveLink(link)
     }
 
     override fun hasPendingEmailSignInLink(): Boolean {
-        return pendingEmailLinkStore.getLink() != null
+        val hasLink = pendingEmailLinkStore.getLink() != null
+        Log.d(TAG, "[AUTH] hasPendingEmailSignInLink: $hasLink")
+        return hasLink
     }
 
     override suspend fun completeEmailLinkLogin(email: String, link: String?): Resource<AuthSession> {
+        Log.d(TAG, "[AUTH] completeEmailLinkLogin requested for email: $email")
         val emailLink = link ?: pendingEmailLinkStore.getLink()
         if (emailLink.isNullOrBlank()) {
+            Log.e(TAG, "[AUTH] completeEmailLinkLogin failed: Email link is null or blank")
             return Resource.Error("Open the latest login email link, then try again.")
         }
         if (!authDataSource.isSignInWithEmailLink(emailLink)) {
+            Log.e(TAG, "[AUTH] completeEmailLinkLogin failed: Link is invalid or modified")
             pendingEmailLinkStore.clearLink()
             return Resource.Error("This login link is invalid or has been changed. Request a new login link.")
         }
 
         return authDataSource.signInWithEmailLink(email, emailLink).fold(
             onSuccess = { session ->
+                Log.i(TAG, "[AUTH] completeEmailLinkLogin SUCCESS! User UID: ${session.user.id}, isNewUser: ${session.isNewUser}")
                 pendingEmailLinkStore.clearAll()
                 if (session.isNewUser) {
+                    Log.w(TAG, "[AUTH] completeEmailLinkLogin: New user detected via link login. Deleting unverified user.")
                     authDataSource.deleteCurrentUserAndSignOut()
                     return Resource.Error("No account found with this email. Please sign up first.")
                 }
                 Resource.Success(session)
             },
             onFailure = { error ->
+                Log.e(TAG, "[AUTH] completeEmailLinkLogin FAILED: ${error.message}", error)
                 Resource.Error(error.toAuthMessage("Login failed"))
             }
         )
@@ -203,20 +250,61 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun sendPhoneOtp(phoneNumber: String): Resource<PhoneAuthSession> {
+        Log.d(TAG, "[OTP_SYSTEM] sendPhoneOtp requested for phone: ${phoneNumber.maskPhone()}")
         return phoneAuthManager.sendOtp(phoneNumber).toResource("Could not send OTP")
     }
 
     override suspend fun resendPhoneOtp(session: PhoneAuthSession): Resource<PhoneAuthSession> {
+        Log.d(TAG, "[OTP_SYSTEM] resendPhoneOtp requested for session")
         return phoneAuthManager.resendOtp(session).toResource("Could not resend OTP")
     }
 
     override suspend fun verifyPhoneOtp(verificationId: String, otpCode: String): Resource<Boolean> {
+        Log.d(TAG, "[OTP_SYSTEM] verifyPhoneOtp requested (code length: ${otpCode.length})")
         return phoneAuthManager.verifyOtp(verificationId, otpCode).toResource("OTP verification failed")
     }
 
     override suspend fun login(mobileNumber: String): Resource<User> {
-        // TODO: Implement network/local call
-        return Resource.Success(User("1", "Dummy User", mobileNumber))
+        val cleanPhone = mobileNumber.trim()
+        Log.d(TAG, "[AUTH] login requested for phone: ${cleanPhone.maskPhone()}")
+
+        val current = authDataSource.currentUser()
+        if (current != null && (current.mobileNumber == cleanPhone || cleanPhone.isBlank())) {
+            Log.i(TAG, "[AUTH] Login successful via active user session (UID=${current.id})")
+            return Resource.Success(current)
+        }
+
+        return firestoreUserDataSource.getUserProfileByPhone(cleanPhone).fold(
+            onSuccess = { profile ->
+                if (profile != null) {
+                    val user = User(
+                        id = profile.id,
+                        name = profile.name,
+                        mobileNumber = profile.phoneNumber,
+                        email = profile.email,
+                        profilePhotoUrl = profile.profilePhotoUrl,
+                        authProvider = profile.authProvider,
+                        isEmailVerified = profile.isEmailVerified,
+                        isPhoneVerified = profile.isPhoneVerified
+                    )
+                    Log.i(TAG, "[AUTH] Login successful via Firestore record: UID=${user.id}")
+                    Resource.Success(user)
+                } else {
+                    Log.w(TAG, "[AUTH] Login failed: No registered account for phone ${cleanPhone.maskPhone()}")
+                    Resource.Error("No user account found for phone ${cleanPhone.maskPhone()}. Please sign up or verify OTP.")
+                }
+            },
+            onFailure = { error ->
+                Log.e(TAG, "[AUTH] Login lookup failed: ${error.message}", error)
+                Resource.Error(error.message ?: "Could not verify user account for phone number.")
+            }
+        )
+    }
+
+    private fun String.maskPhone(): String {
+        val digits = filter { it.isDigit() }
+        if (digits.length <= 4) return "****"
+        return "******" + digits.takeLast(4)
     }
 
     override suspend fun signup(name: String, email: String, password: String): Resource<User> {

@@ -16,9 +16,20 @@ class PendingFirestoreUserDataSource : FirestoreUserDataSource {
         return Result.success(
             UserProfile(
                 id = userId,
-                name = "Siddheshwar Sahoo",
-                email = "siddhesh900s7@gmail.com",
-                phoneNumber = "+91 7428 5145 4312"
+                name = "",
+                email = "",
+                phoneNumber = ""
+            )
+        )
+    }
+
+    override suspend fun getUserProfileByPhone(phoneNumber: String): Result<UserProfile?> {
+        return Result.success(
+            UserProfile(
+                id = "user_${phoneNumber.filter { it.isDigit() }}",
+                name = "",
+                email = "",
+                phoneNumber = phoneNumber
             )
         )
     }

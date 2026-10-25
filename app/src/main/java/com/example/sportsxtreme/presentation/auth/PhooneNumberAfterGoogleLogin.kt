@@ -205,7 +205,7 @@ private class PhooneNumberAfterGoogleLoginView(
 
     private fun phoneField(context: Context): EditText {
         return EditText(context).apply {
-            hint = "+91 98765 43210"
+            hint = "+91 Mobile Number"
             inputType = InputType.TYPE_CLASS_PHONE
             setSingleLine(true)
             setTextColor(Color.WHITE)

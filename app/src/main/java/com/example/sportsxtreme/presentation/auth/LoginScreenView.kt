@@ -15,6 +15,7 @@ import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
 import com.example.sportsxtreme.presentation.store.*
 import android.content.Context
+import android.util.Log
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -209,20 +210,27 @@ class LoginScreenView @JvmOverloads constructor(
 
         val email = emailInput.text.toString().trim()
         val password = passwordInput.text.toString()
+        Log.d("LoginScreenView", "[AUTH] handleLogin triggered for email: '$email'")
         val validationError = validateLogin(email, password)
         if (validationError != null) {
+            Log.w("LoginScreenView", "[AUTH] handleLogin validation error: $validationError")
             showError(validationError)
             return
         }
 
         setLoading(true)
         loginScope.launch {
+            Log.d("LoginScreenView", "[AUTH] Calling authViewModel.signInWithEmailAndPassword...")
             when (val result = authViewModel.signInWithEmailAndPassword(email, password)) {
                 is Resource.Success -> {
+                    Log.i("LoginScreenView", "[AUTH] handleLogin SUCCESS! User UID: ${result.data?.id}, name: ${result.data?.name}")
                     showError(null)
                     (context as? MainActivity)?.showHomeScreen()
                 }
-                is Resource.Error -> showError(result.message ?: "Login failed")
+                is Resource.Error -> {
+                    Log.e("LoginScreenView", "[AUTH] handleLogin FAILED: ${result.message}")
+                    showError(result.message ?: "Login failed")
+                }
                 is Resource.Loading -> Unit
             }
             setLoading(false)
@@ -300,8 +308,10 @@ class LoginScreenView @JvmOverloads constructor(
     private fun handleGoogleLogin(context: Context) {
         if (isLoginLoading) return
 
+        Log.d("LoginScreenView", "[AUTH] handleGoogleLogin triggered")
         val serverClientId = googleServerClientId(context)
         if (serverClientId.isNullOrBlank()) {
+            Log.e("LoginScreenView", "[AUTH] handleGoogleLogin error: serverClientId is null/blank")
             showError("Google login needs a Firebase web client ID. Add SHA keys in Firebase, download google-services.json again, then rebuild.")
             return
         }
@@ -324,11 +334,13 @@ class LoginScreenView @JvmOverloads constructor(
                     credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
                 ) {
                     val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                    Log.d("LoginScreenView", "[AUTH] Google ID token received. Calling signInWithGoogle...")
                     when (val authResult = authViewModel.signInWithGoogle(
                         googleCredential.idToken,
                         existingAccountOnly = true
                     )) {
                         is Resource.Success -> {
+                            Log.i("LoginScreenView", "[AUTH] signInWithGoogle SUCCESS! User UID: ${authResult.data?.user?.id}")
                             showError(null)
                             when (val profileResult = authViewModel.completePendingAuthentication()) {
                                 is Resource.Success -> (context as? MainActivity)?.showHomeScreen()
@@ -336,17 +348,24 @@ class LoginScreenView @JvmOverloads constructor(
                                 is Resource.Loading -> Unit
                             }
                         }
-                        is Resource.Error -> showError(authResult.message ?: "Google login failed")
+                        is Resource.Error -> {
+                            Log.e("LoginScreenView", "[AUTH] signInWithGoogle FAILED: ${authResult.message}")
+                            showError(authResult.message ?: "Google login failed")
+                        }
                         is Resource.Loading -> Unit
                     }
                 } else {
+                    Log.e("LoginScreenView", "[AUTH] handleGoogleLogin failed: Credential is not GoogleIdTokenCredential")
                     showError("Google login did not return a valid account.")
                 }
             } catch (error: GetCredentialCancellationException) {
+                Log.d("LoginScreenView", "[AUTH] handleGoogleLogin cancelled by user")
                 showError(null)
             } catch (error: GetCredentialException) {
+                Log.e("LoginScreenView", "[AUTH] handleGoogleLogin GetCredentialException: ${error.message}", error)
                 showError(error.message ?: "Google login failed")
             } catch (error: GoogleIdTokenParsingException) {
+                Log.e("LoginScreenView", "[AUTH] handleGoogleLogin GoogleIdTokenParsingException: ${error.message}", error)
                 showError("Google login response could not be read.")
             } finally {
                 setLoading(false)
