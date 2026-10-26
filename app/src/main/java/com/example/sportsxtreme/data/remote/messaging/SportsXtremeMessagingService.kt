@@ -24,7 +24,7 @@ class SportsXtremeMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         Log.d(TAG, "New FCM Registration Token generated")
-        PushNotificationHelper.syncFcmTokenWithFirestore(token)
+        PushNotificationHelper.subscribeToAllUsersTopic()
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {

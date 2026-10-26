@@ -87,9 +87,8 @@ class NotificationActivity : ComponentActivity() {
         window.statusBarColor = android.graphics.Color.rgb(10, 16, 28)
         window.navigationBarColor = android.graphics.Color.rgb(10, 16, 28)
 
-        // Initialize notification channel & sync FCM token
+        // Initialize the channel for incoming push alerts.
         PushNotificationHelper.createNotificationChannel(this)
-        PushNotificationHelper.fetchAndLogFcmToken(this)
 
         checkNotificationPermission()
 

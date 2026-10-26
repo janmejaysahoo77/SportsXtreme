@@ -135,8 +135,9 @@ service cloud.firestore {
 
     // ---------- Match invites: organiser-owned, creation-only in Phase 3A ----------
     match /matchInvites/{inviteId} {
-      // Temporary Spark-plan lookup permission. Replace with callable Function lookup in production.
-      allow get, list: if isSignedIn();
+      // Clients create new invites but use getMatchInviteForOrganiser for re-sharing.
+      // Claims are performed by the Admin SDK callable, never by client writes.
+      allow get, list: if false;
       allow create: if request.auth != null
         && request.resource.data.keys().hasOnly([
           'inviteId', 'matchId', 'teamSlot', 'organiserId', 'tokenHash', 'status',
@@ -153,17 +154,7 @@ service cloud.firestore {
         && request.resource.data.createdAt <= request.time
         && request.resource.data.expiresAt > request.time
         && get(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.ownerId == request.auth.uid;
-      allow update: if isSignedIn()
-        && resource.data.status == 'OPEN'
-        && resource.data.expiresAt > request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claimedByUserId', 'claimedAt'])
-        && request.resource.data.status == 'CLAIMED'
-        && request.resource.data.claimedByUserId == request.auth.uid
-        && request.resource.data.claimedAt == request.time
-        && ((resource.data.teamSlot == 'TEAM_A'
-          && getAfter(/databases/$(database)/documents/matches/$(resource.data.matchId)).data.teamAClaim.userId == request.auth.uid)
-          || (resource.data.teamSlot == 'TEAM_B'
-          && getAfter(/databases/$(database)/documents/matches/$(resource.data.matchId)).data.teamBClaim.userId == request.auth.uid));
+      allow update: if false;
       allow delete: if false;
     }
 

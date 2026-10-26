@@ -3,11 +3,12 @@
   "private": true,
   "main": "index.js",
   "scripts": {
-    "test": "node --test",
+    "test": "firebase --config ../firebase.json emulators:exec --project demo-sportsxtreme-test --only firestore \"node --test\"",
+    "test:callables": "firebase --config ../firebase.json emulators:exec --project demo-sportsxtreme-match-invite-test --only firestore \"node --test matchInviteCallable.test.js\"",
     "test:rules": "firebase --config ../firebase.json emulators:exec --project demo-sportsxtreme-firestore-rules-test --only firestore \"node --test firestore.rules.test.js\""
   },
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0",

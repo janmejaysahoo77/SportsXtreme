@@ -10,11 +10,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.sportsxtreme.R
 import com.example.sportsxtreme.presentation.notifications.NotificationActivity
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.SetOptions
-import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
 
 object PushNotificationHelper {
@@ -77,78 +72,15 @@ object PushNotificationHelper {
         Log.d(TAG, "Push notification displayed: ID=$notificationId, title=$title")
     }
 
-    fun fetchAndLogFcmToken(context: Context? = null, onTokenRetrieved: ((String) -> Unit)? = null) {
-        // Fetch FCM Registration Token
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                val token = task.result.orEmpty()
-                Log.i(TAG, "\n====================================================================")
-                Log.i(TAG, "FCM REGISTRATION TOKEN (Copy & paste into Firebase Console 'Send Test Message'):")
-                Log.i(TAG, token)
-                Log.i(TAG, "====================================================================\n")
-
-                if (token.isNotBlank()) {
-                    onTokenRetrieved?.invoke(token)
-
-                    // Sync token to Firestore if user is authenticated
-                    val currentUser = FirebaseAuth.getInstance().currentUser
-                    if (currentUser != null) {
-                        updateUserFcmTokenInFirestore(currentUser.uid, token)
-                    }
-                }
-            } else {
-                Log.e(TAG, "Failed to retrieve FCM token: ${task.exception?.message}")
-            }
-        }
-
-        // Fetch Firebase Installation ID
-        FirebaseInstallations.getInstance().id.addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                val installationId = task.result.orEmpty()
-                Log.i(TAG, "FIREBASE INSTALLATION ID: $installationId")
-            }
-        }
-
-        // Subscribe to global topic
+    fun subscribeToAllUsersTopic() {
         FirebaseMessaging.getInstance().subscribeToTopic("all_users")
             .addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     Log.d(TAG, "Subscribed to FCM topic: all_users")
+                } else {
+                    Log.e(TAG, "Failed to subscribe to FCM topic: ${task.exception?.message}")
                 }
             }
     }
 
-    fun syncFcmTokenWithFirestore(token: String? = null) {
-        if (!token.isNullOrBlank()) {
-            Log.i(TAG, "\n====================================================================")
-            Log.i(TAG, "NEW FCM REGISTRATION TOKEN:")
-            Log.i(TAG, token)
-            Log.i(TAG, "====================================================================\n")
-
-            val currentUser = FirebaseAuth.getInstance().currentUser
-            if (currentUser != null) {
-                updateUserFcmTokenInFirestore(currentUser.uid, token)
-            }
-        } else {
-            fetchAndLogFcmToken()
-        }
-    }
-
-    private fun updateUserFcmTokenInFirestore(uid: String, token: String) {
-        val payload = mapOf(
-            "fcmToken" to token,
-            "fcmTokens" to FieldValue.arrayUnion(token),
-            "updatedAt" to FieldValue.serverTimestamp()
-        )
-        FirebaseFirestore.getInstance()
-            .collection("users")
-            .document(uid)
-            .set(payload, SetOptions.merge())
-            .addOnSuccessListener {
-                Log.d(TAG, "FCM token synced to Firestore for UID=$uid")
-            }
-            .addOnFailureListener { e ->
-                Log.e(TAG, "Failed to sync FCM token to Firestore: ${e.message}")
-            }
-    }
 }

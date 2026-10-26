@@ -2,9 +2,13 @@ const crypto = require("crypto");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { getMessaging } = require("firebase-admin/messaging");
 const { HttpsError, onCall } = require("firebase-functions/v2/https");
+const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const leaderboardScoring = require("./leaderboardScoring");
+const { parseMatchInviteToken, hashMatchInviteSecret, matchInviteUnavailableReason } = require("./matchInviteToken");
 
 initializeApp();
 
@@ -13,12 +17,91 @@ const INVITE_URL_PREFIX = "https://sportsxtreme-95fbb.web.app/team-invite?token=
 const TOURNAMENT_INVITE_URL_PREFIX = "https://sportsxtreme-95fbb.web.app/tournament-invite?token=";
 const TEAM_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TOURNAMENT_INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const ADMIN_NOTIFICATION_TOPIC = "all_users";
 const MAX_TEAM_MEMBERS = 18;
 const FINALIZED = "FINALIZED";
 const ROLES = Object.freeze({ ADMIN: "ADMIN", CAPTAIN: "CAPTAIN", VICE_CAPTAIN: "VICE_CAPTAIN" });
 const cloudinaryCloudName = defineSecret("CLOUDINARY_CLOUD_NAME");
 const cloudinaryApiKey = defineSecret("CLOUDINARY_API_KEY");
 const cloudinaryApiSecret = defineSecret("CLOUDINARY_API_SECRET");
+
+/** Claims and sends one published admin notification. FCM data-only messages
+ * ensure Android's FirebaseMessagingService can persist them while backgrounded. */
+async function deliverAdminNotification(notificationRef, expectedStatus) {
+  const claimed = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(notificationRef);
+    if (!snapshot.exists || snapshot.get("status") !== expectedStatus) return null;
+    transaction.update(notificationRef, {
+      status: "Sending",
+      sendingAt: FieldValue.serverTimestamp()
+    });
+    return snapshot.data();
+  });
+  if (!claimed) return false;
+
+  const title = String(claimed.title || "SportsXtreme Update").trim();
+  const body = String(claimed.message || "").trim();
+  const data = {
+    title,
+    body,
+    category: "UPDATES",
+    iconType: "SPORTS",
+    notificationId: notificationRef.id
+  };
+  if (typeof claimed.targetUrl === "string" && claimed.targetUrl.trim()) {
+    data.targetUrl = claimed.targetUrl.trim();
+  }
+
+  try {
+    const messageId = await getMessaging().send({
+      topic: ADMIN_NOTIFICATION_TOPIC,
+      data,
+      android: { priority: "high", ttl: 60 * 60 * 1000 }
+    });
+    await notificationRef.update({
+      status: "Sent",
+      sentAt: FieldValue.serverTimestamp(),
+      fcmMessageId: messageId
+    });
+    return true;
+  } catch (error) {
+    await notificationRef.update({
+      status: "Failed",
+      failedAt: FieldValue.serverTimestamp(),
+      sendError: String(error?.message || error).slice(0, 500)
+    });
+    console.error(`Admin notification ${notificationRef.id} failed to send`, error);
+    return false;
+  }
+}
+
+/** Sends immediately when an admin creates or changes a notification to Published. */
+exports.sendAdminNotification = onDocumentWritten("notifications/{notificationId}", async (event) => {
+  const before = event.data?.before;
+  const after = event.data?.after;
+  if (!after?.exists || after.get("status") !== "Published") return;
+  if (before?.exists && before.get("status") === "Published") return;
+  await deliverAdminNotification(after.ref, "Published");
+});
+
+/** Publishes scheduled admin notifications once their ISO-8601 time is due. */
+exports.sendScheduledAdminNotifications = onSchedule("every 1 minutes", async () => {
+  const now = Date.now();
+  const scheduled = await db.collection("notifications").where("status", "==", "Scheduled").get();
+  for (const notification of scheduled.docs) {
+    const scheduledAtValue = notification.get("scheduledAt");
+    const scheduledAt = typeof scheduledAtValue === "string" ? Date.parse(scheduledAtValue) : NaN;
+    if (!Number.isFinite(scheduledAt)) {
+      await notification.ref.update({
+        status: "Failed",
+        failedAt: FieldValue.serverTimestamp(),
+        sendError: "scheduledAt must be a valid ISO-8601 date/time."
+      });
+    } else if (scheduledAt <= now) {
+      await deliverAdminNotification(notification.ref, "Scheduled");
+    }
+  }
+});
 
 /**
  * Signs one deterministic Cloudinary profile-photo upload for the calling user.
@@ -1049,14 +1132,15 @@ exports.joinTournamentInvite = onCall(async (request) => {
 /** Resolves a match invitation without claiming the slot, so the captain can choose a team first. */
 exports.resolveMatchInvite = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before joining a match.");
-  const token = typeof request.data?.token === "string" ? request.data.token.trim() : "";
-  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError("invalid-argument", "Invalid match invitation.");
-  const tokenHash = crypto.createHash("sha256").update(token, "utf8").digest("hex");
-  const matches = await db.collection("matchInvites").where("tokenHash", "==", tokenHash).limit(2).get();
-  if (matches.size !== 1) throw new HttpsError("not-found", "This match invitation is invalid.");
-  const invite = matches.docs[0];
-  if (invite.get("status") !== "OPEN") throw new HttpsError("failed-precondition", "This match slot is no longer available.");
-  if (!invite.get("expiresAt") || invite.get("expiresAt").toDate() <= new Date()) {
+  const parsedToken = parseMatchInviteToken(request.data?.token);
+  if (!parsedToken) throw new HttpsError("invalid-argument", "Invalid match invitation.");
+  const invite = await db.collection("matchInvites").doc(parsedToken.inviteId).get();
+  if (!invite.exists || invite.get("tokenHash") !== hashMatchInviteSecret(parsedToken.secret)) {
+    throw new HttpsError("not-found", "This match invitation is invalid.");
+  }
+  const unavailableReason = matchInviteUnavailableReason(invite.get("status"), invite.get("expiresAt")?.toMillis());
+  if (unavailableReason === "closed") throw new HttpsError("failed-precondition", "This match slot is no longer available.");
+  if (unavailableReason === "expired") {
     throw new HttpsError("deadline-exceeded", "This match invitation has expired.");
   }
   const teamSlot = invite.get("teamSlot");
@@ -1069,20 +1153,24 @@ exports.resolveMatchInvite = onCall(async (request) => {
 /** A captain selects one of their teams and atomically fills the organiser's invited slot. */
 exports.claimMatchInviteForTeam = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before joining a match.");
-  const token = typeof request.data?.token === "string" ? request.data.token.trim() : "";
-  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError("invalid-argument", "Invalid match invitation.");
+  const parsedToken = parseMatchInviteToken(request.data?.token);
+  if (!parsedToken) throw new HttpsError("invalid-argument", "Invalid match invitation.");
   const teamId = requireTeamId(request.data?.teamId);
   const uid = request.auth.uid;
-  const tokenHash = crypto.createHash("sha256").update(token, "utf8").digest("hex");
-  const matches = await db.collection("matchInvites").where("tokenHash", "==", tokenHash).limit(2).get();
-  if (matches.size !== 1) throw new HttpsError("not-found", "This match invitation is invalid.");
-  const inviteRef = matches.docs[0].ref;
+  const tokenHash = hashMatchInviteSecret(parsedToken.secret);
+  const inviteRef = db.collection("matchInvites").doc(parsedToken.inviteId);
+  const initialInvite = await inviteRef.get();
+  if (!initialInvite.exists || initialInvite.get("tokenHash") !== tokenHash) {
+    throw new HttpsError("not-found", "This match invitation is invalid.");
+  }
 
   return db.runTransaction(async (transaction) => {
     const invite = await transaction.get(inviteRef);
-    if (!invite.exists || invite.get("status") !== "OPEN") throw new HttpsError("failed-precondition", "This match slot is no longer available.");
-    const expiresAt = invite.get("expiresAt");
-    if (!expiresAt || expiresAt.toDate() <= new Date()) throw new HttpsError("deadline-exceeded", "This match invitation has expired.");
+    if (!invite.exists) throw new HttpsError("not-found", "This match invitation is invalid.");
+    if (invite.get("tokenHash") !== tokenHash) throw new HttpsError("not-found", "This match invitation is invalid.");
+    const unavailableReason = matchInviteUnavailableReason(invite.get("status"), invite.get("expiresAt")?.toMillis());
+    if (unavailableReason === "closed") throw new HttpsError("failed-precondition", "This match slot is no longer available.");
+    if (unavailableReason === "expired") throw new HttpsError("deadline-exceeded", "This match invitation has expired.");
     const matchId = String(invite.get("matchId") || "");
     const teamSlot = invite.get("teamSlot");
     if (!["TEAM_A", "TEAM_B"].includes(teamSlot)) throw new HttpsError("data-loss", "The invitation has an invalid team slot.");
@@ -1126,6 +1214,27 @@ exports.claimMatchInviteForTeam = onCall(async (request) => {
     });
     return { matchId, teamSlot, teamId, teamName };
   });
+});
+
+/** Returns only organiser-safe fields for re-sharing an existing invite. */
+exports.getMatchInviteForOrganiser = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before managing match invitations.");
+  const inviteId = typeof request.data?.inviteId === "string" ? request.data.inviteId.trim() : "";
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(inviteId)) throw new HttpsError("invalid-argument", "Invalid match invitation.");
+  const invite = await db.collection("matchInvites").doc(inviteId).get();
+  if (!invite.exists) throw new HttpsError("not-found", "Match invitation not found.");
+  if (invite.get("organiserId") !== request.auth.uid) {
+    throw new HttpsError("permission-denied", "Only the organiser can view this invitation.");
+  }
+  return {
+    inviteId: invite.id,
+    matchId: String(invite.get("matchId") || ""),
+    teamSlot: String(invite.get("teamSlot") || ""),
+    organiserId: request.auth.uid,
+    status: String(invite.get("status") || ""),
+    createdAtEpochMs: invite.get("createdAt")?.toMillis() || 0,
+    expiresAtEpochMs: invite.get("expiresAt")?.toMillis() || 0
+  };
 });
 
 exports.updateTeamMemberRole = onCall(async (request) => {

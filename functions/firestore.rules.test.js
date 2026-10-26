@@ -96,6 +96,18 @@ beforeEach(async () => {
       finalization: { state: "" },
       innings: []
     });
+    await setDoc(doc(db, "matchInvites/live-team_a"), {
+      inviteId: "live-team_a",
+      matchId: "live",
+      teamSlot: "TEAM_A",
+      organiserId: "alice",
+      tokenHash: "a".repeat(64),
+      status: "OPEN",
+      createdAt: new Date(Date.now() - 1000),
+      expiresAt: new Date(Date.now() + 60_000),
+      claimedByUserId: null,
+      claimedAt: null
+    });
     await setDoc(doc(db, "matches/live/deliveries/delivery-1"), { runs: 1 });
     for (const scorecardType of ["batting", "bowling", "summary"]) {
       await setDoc(doc(db, `matches/live/scorecard/${scorecardType}/entries/innings-1`), { inningsId: "innings-1" });
@@ -295,6 +307,39 @@ test("correction audit records deny client reads and writes for every client rol
     await assertFails(updateDoc(auditRef, { state: "FORGED" }));
     await assertFails(deleteDoc(auditRef));
   }
+});
+
+test("match invites deny all direct client reads and lists", async () => {
+  const organiserDb = testEnvironment.authenticatedContext("alice").firestore();
+  const otherDb = testEnvironment.authenticatedContext("bob").firestore();
+  const anonymousDb = testEnvironment.unauthenticatedContext().firestore();
+
+  for (const db of [organiserDb, otherDb, anonymousDb]) {
+    await assertFails(getDoc(doc(db, "matchInvites/live-team_a")));
+    await assertFails(getDocs(collection(db, "matchInvites")));
+  }
+});
+
+test("match invite creation is organiser-only and existing invites cannot be updated", async () => {
+  const organiserDb = testEnvironment.authenticatedContext("alice").firestore();
+  const otherDb = testEnvironment.authenticatedContext("bob").firestore();
+  const freshInvite = {
+    inviteId: "live-team_b",
+    matchId: "live",
+    teamSlot: "TEAM_B",
+    organiserId: "alice",
+    tokenHash: "b".repeat(64),
+    status: "OPEN",
+    createdAt: serverTimestamp(),
+    expiresAt: new Date(Date.now() + 60_000),
+    claimedByUserId: null,
+    claimedAt: null
+  };
+
+  await assertSucceeds(setDoc(doc(organiserDb, "matchInvites/live-team_b"), freshInvite));
+  await assertFails(setDoc(doc(otherDb, "matchInvites/forged"), { ...freshInvite, inviteId: "forged", organiserId: "bob" }));
+  await assertFails(updateDoc(doc(organiserDb, "matchInvites/live-team_a"), { status: "CLAIMED", claimedByUserId: "alice" }));
+  await assertFails(updateDoc(doc(otherDb, "matchInvites/live-team_a"), { status: "CLAIMED", claimedByUserId: "bob" }));
 });
 
 test("unrecognized match paths and scorecard types are denied", async () => {

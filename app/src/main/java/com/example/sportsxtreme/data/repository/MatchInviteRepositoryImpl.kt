@@ -13,6 +13,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.functions.FirebaseFunctions
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -26,6 +27,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 class MatchInviteRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val auth: FirebaseAuth,
+    private val functions: FirebaseFunctions,
     @ApplicationContext context: Context
 ) : MatchInviteRepository {
     private val tokenPreferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -53,7 +55,7 @@ class MatchInviteRepositoryImpl @Inject constructor(
                 Resource.Success(CreatedMatchInvite(invite, invitationUrl(rawToken)))
             }
             InviteCreateResult.ALREADY_EXISTS -> {
-                val existing = requireNotNull(getInvite(inviteId)) { "Existing invitation could not be loaded" }
+                val existing = requireNotNull(getInviteForOrganiser(inviteId)) { "Existing invitation could not be loaded" }
                 require(existing.status == MatchInviteStatus.OPEN && existing.expiresAtEpochMs > System.currentTimeMillis()) {
                     "The existing invitation is no longer open"
                 }
@@ -120,12 +122,27 @@ class MatchInviteRepositoryImpl @Inject constructor(
         }
     }
 
-    private suspend fun getInvite(inviteId: String): MatchInvite? = suspendCancellableCoroutine { continuation ->
-        firestore.collection(INVITES_COLLECTION).document(inviteId).get()
-            .addOnSuccessListener { snapshot ->
-                continuation.resume(if (snapshot.exists()) snapshot.toInvite() else null)
+    private suspend fun getInviteForOrganiser(inviteId: String): MatchInvite? = suspendCancellableCoroutine { continuation ->
+        functions.getHttpsCallable("getMatchInviteForOrganiser").call(mapOf("inviteId" to inviteId))
+            .addOnSuccessListener { result ->
+                @Suppress("UNCHECKED_CAST")
+                val data = result.data as? Map<String, Any?>
+                if (continuation.isActive) continuation.resume(data?.let { values ->
+                    MatchInvite(
+                        inviteId = values["inviteId"] as? String ?: inviteId,
+                        matchId = values["matchId"] as? String ?: "",
+                        teamSlot = TeamSide.valueOf(values["teamSlot"] as? String ?: ""),
+                        organiserId = values["organiserId"] as? String ?: "",
+                        tokenHash = "",
+                        status = MatchInviteStatus.valueOf(values["status"] as? String ?: ""),
+                        createdAtEpochMs = (values["createdAtEpochMs"] as? Number)?.toLong() ?: 0L,
+                        expiresAtEpochMs = (values["expiresAtEpochMs"] as? Number)?.toLong() ?: 0L,
+                        claimedByUserId = null,
+                        claimedAtEpochMs = null
+                    )
+                })
             }
-            .addOnFailureListener { continuation.resumeWith(Result.failure(it)) }
+            .addOnFailureListener { if (continuation.isActive) continuation.resumeWith(Result.failure(it)) }
     }
 
     private suspend fun createInvite(invite: MatchInvite) = suspendCancellableCoroutine<InviteCreateResult> { continuation ->
