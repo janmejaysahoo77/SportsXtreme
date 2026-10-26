@@ -3,6 +3,7 @@ package com.example.sportsxtreme.presentation.auth
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.location.Geocoder
@@ -77,6 +78,7 @@ import com.example.sportsxtreme.presentation.store.ShoppingActivity
 import com.example.sportsxtreme.presentation.tournament.HostTournamentsViewModel
 import com.example.sportsxtreme.presentation.clubs.AddMemberInClubActivity
 import com.example.sportsxtreme.presentation.clubs.MembersScreen
+import com.example.sportsxtreme.presentation.notifications.NotificationActivity
 import com.example.sportsxtreme.presentation.tournament.TournamentTeamInviteActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -245,6 +247,27 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+                    com.example.sportsxtreme.presentation.components.GlobalInAppMessageOverlay(
+                        onPrimaryAction = { message ->
+                            message.targetUrl?.let { url ->
+                                if (url.isNotBlank()) {
+                                    runCatching {
+                                        if (url.startsWith("http://") || url.startsWith("https://")) {
+                                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                        } else if (url.contains("notification", ignoreCase = true)) {
+                                            startActivity(Intent(this@MainActivity, NotificationActivity::class.java))
+                                        } else if (url.contains("store", ignoreCase = true) || url.contains("shop", ignoreCase = true)) {
+                                            startActivity(Intent(this@MainActivity, ShoppingActivity::class.java))
+                                        } else if (url.contains("score", ignoreCase = true)) {
+                                            startActivity(Intent(this@MainActivity, com.example.sportsxtreme.presentation.scoring.ViewAllScoreCardActivity::class.java))
+                                        } else {
+                                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    )
                 }
             }
         }
