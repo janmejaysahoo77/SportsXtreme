@@ -3,6 +3,7 @@ package com.example.sportsxtreme
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.example.sportsxtreme.common.FirebaseInAppMessagingHelper
 import com.example.sportsxtreme.common.PushNotificationHelper
 import com.example.sportsxtreme.data.sync.DeliverySyncScheduler
 import com.example.sportsxtreme.data.di.AuthDependencies
@@ -18,6 +19,7 @@ class SportsXtremeApplication : Application(), Configuration.Provider {
         super.onCreate()
         AuthDependencies.initialize(this)
         PushNotificationHelper.subscribeToAllUsersTopic()
+        FirebaseInAppMessagingHelper.initialize()
         deliverySyncScheduler.enqueue()
     }
 

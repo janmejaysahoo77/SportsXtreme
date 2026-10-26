@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.MarkEmailRead
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material3.Button
@@ -61,7 +62,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.example.sportsxtreme.common.FirebaseInAppMessagingHelper
+import com.example.sportsxtreme.common.InAppMessageManager
 import com.example.sportsxtreme.common.PushNotificationHelper
+import com.example.sportsxtreme.domain.model.InAppMessage
+import com.example.sportsxtreme.presentation.components.GlobalInAppMessageOverlay
 import com.example.sportsxtreme.presentation.ui.theme.XtremeLime
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -93,22 +98,47 @@ class NotificationActivity : ComponentActivity() {
         checkNotificationPermission()
 
         setContent {
-            NotificationScreen(
-                viewModel = viewModel,
-                hasNotificationPermission = hasNotificationPermission,
-                onRequestPermission = ::requestNotificationPermission,
-                onBack = ::finish,
-                onNotificationClick = { notification ->
-                    viewModel.markAsRead(notification.id)
-                    notification.targetUrl?.let { url ->
-                        if (url.isNotBlank()) {
-                            runCatching {
-                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            Box(modifier = Modifier.fillMaxSize()) {
+                NotificationScreen(
+                    viewModel = viewModel,
+                    hasNotificationPermission = hasNotificationPermission,
+                    onRequestPermission = ::requestNotificationPermission,
+                    onBack = ::finish,
+                    onTriggerInAppCampaign = {
+                        // Trigger custom Firebase In-App Messaging event & local overlay preview
+                        FirebaseInAppMessagingHelper.triggerEvent("test_campaign")
+                        InAppMessageManager.showInAppMessage(
+                            InAppMessage(
+                                title = "Firebase In-App Messaging",
+                                body = "In-App Messaging is active! Campaigns configured in Firebase Console will pop up here in real-time.",
+                                category = "CAMPAIGN ANNOUNCEMENT",
+                                primaryButtonText = "GOT IT"
+                            )
+                        )
+                    },
+                    onNotificationClick = { notification ->
+                        viewModel.markAsRead(notification.id)
+                        notification.targetUrl?.let { url ->
+                            if (url.isNotBlank()) {
+                                runCatching {
+                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                }
                             }
                         }
                     }
-                }
-            )
+                )
+                GlobalInAppMessageOverlay(
+                    onPrimaryAction = { message ->
+                        message.targetUrl?.let { url ->
+                            if (url.isNotBlank()) {
+                                runCatching {
+                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                }
+                            }
+                        }
+                    }
+                )
+            }
         }
     }
 
@@ -137,6 +167,7 @@ private fun NotificationScreen(
     hasNotificationPermission: Boolean,
     onRequestPermission: () -> Unit,
     onBack: () -> Unit,
+    onTriggerInAppCampaign: () -> Unit,
     onNotificationClick: (AppNotificationUiModel) -> Unit
 ) {
     var showUnreadOnly by remember { mutableStateOf(false) }
@@ -166,6 +197,9 @@ private fun NotificationScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onTriggerInAppCampaign) {
+                        Icon(Icons.Default.Campaign, contentDescription = "In-App Campaign", tint = XtremeLime)
+                    }
                     if (unreadCount > 0) {
                         IconButton(onClick = { viewModel.markAllAsRead() }) {
                             Icon(Icons.Default.MarkEmailRead, contentDescription = "Mark all as read", tint = XtremeLime)

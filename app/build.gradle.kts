@@ -122,6 +122,7 @@ dependencies {
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-functions")
     implementation(libs.firebase.messaging)
+    implementation(libs.firebase.inappmessaging.display)
     implementation(libs.firebase.storage)
     implementation(libs.google.play.services.auth.api.phone)
     implementation(libs.google.play.services.location)
