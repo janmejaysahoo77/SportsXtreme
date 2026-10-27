@@ -8,8 +8,8 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="com.example.sportsxtreme" />
-                  <option name="mobileSdkAppId" value="1:896267230604:android:cd478f030b84b9b1da4aa9" />
+                  <option name="appId" value="com.sportsxtreme.app" />
+                  <option name="mobileSdkAppId" value="1:896267230604:android:f45e312b6caabd7eda4aa9" />
                   <option name="projectId" value="sportsxtreme-95fbb" />
                   <option name="projectNumber" value="896267230604" />
                 </ConnectionSetting>
