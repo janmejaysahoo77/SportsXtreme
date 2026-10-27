@@ -62,7 +62,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.sportsxtreme"
+        applicationId = "com.sportsxtreme.app"
         minSdk = 28
         targetSdk = 36
         versionCode = 1

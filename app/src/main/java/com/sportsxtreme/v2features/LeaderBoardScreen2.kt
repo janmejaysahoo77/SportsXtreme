@@ -200,7 +200,7 @@ fun LeaderBoardScreen2(
                         }.distinct()
                         val existingAccountIds = runCatching {
                             linkedAccountIds.chunked(30).flatMap { accountIds ->
-                                firestore.collection("users")
+                                firestore.collection("publicProfiles")
                                     .whereIn(FieldPath.documentId(), accountIds)
                                     .get()
                                     .await()

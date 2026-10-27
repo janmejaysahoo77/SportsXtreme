@@ -1330,7 +1330,16 @@ private fun fetchTeamMemberProfiles(
                     )
                 }
                 .toMap()
-            loadMissingMemberStyles(members, profiles, onLoaded)
+            onLoaded(members.associate { member ->
+                val publicProfile = profiles[member.userId]
+                member.userId to MemberProfileData(
+                    displayName = publicProfile?.displayName?.takeIf { it.isNotBlank() } ?: member.name.ifBlank { "Team member" },
+                    playingRole = publicProfile?.playingRole?.takeIf { it.isNotBlank() } ?: member.playingRole.ifBlank { "Player" },
+                    profilePhotoUrl = publicProfile?.profilePhotoUrl?.takeIf { it.isNotBlank() } ?: member.profilePhotoUrl,
+                    battingStyle = publicProfile?.battingStyle?.takeIf { it.isNotBlank() } ?: member.battingStyle,
+                    bowlingStyle = publicProfile?.bowlingStyle?.takeIf { it.isNotBlank() } ?: member.bowlingStyle
+                )
+            })
         }
         .addOnFailureListener {
             // The roster remains usable with safe placeholders if the network
@@ -1345,66 +1354,4 @@ private fun fetchTeamMemberProfiles(
                 )
             })
         }
-}
-
-private fun loadMissingMemberStyles(
-    members: List<TeamMemberData>,
-    profiles: Map<String, MemberProfileData>,
-    onLoaded: (Map<String, MemberProfileData>) -> Unit
-) {
-    val resolvedProfiles = profiles.toMutableMap()
-    val needsLookup = members.filter { member ->
-        val profile = profiles[member.userId]
-        profile == null || profile.battingStyle.isBlank() || profile.bowlingStyle.isBlank()
-    }
-    if (needsLookup.isEmpty()) {
-        onLoaded(resolvedProfiles)
-        return
-    }
-
-    val firestore = FirebaseFirestore.getInstance()
-    var pendingLookups = needsLookup.size
-    fun finishLookup() {
-        pendingLookups--
-        if (pendingLookups == 0) onLoaded(resolvedProfiles)
-    }
-    needsLookup.forEach { member ->
-        fun mergeSnapshot(snapshot: DocumentSnapshot?) {
-            val existing = resolvedProfiles[member.userId] ?: MemberProfileData(
-                displayName = member.name.ifBlank { "Team member" },
-                playingRole = member.playingRole.ifBlank { "Player" },
-                profilePhotoUrl = member.profilePhotoUrl,
-                battingStyle = member.battingStyle,
-                bowlingStyle = member.bowlingStyle
-            )
-            if (snapshot != null && snapshot.exists()) {
-                resolvedProfiles[member.userId] = existing.copy(
-                    battingStyle = existing.battingStyle.ifBlank { snapshot.getString("battingStyle").orEmpty() },
-                    bowlingStyle = existing.bowlingStyle.ifBlank { snapshot.getString("bowlingStyle").orEmpty() }
-                )
-            }
-        }
-        fun applySnapshot(snapshot: DocumentSnapshot?) {
-            mergeSnapshot(snapshot)
-            finishLookup()
-        }
-        firestore.collection("users").document(member.userId).get()
-            .addOnSuccessListener { directProfile ->
-                val hasBothStyles = !directProfile.getString("battingStyle").isNullOrBlank() &&
-                    !directProfile.getString("bowlingStyle").isNullOrBlank()
-                if (hasBothStyles) {
-                    applySnapshot(directProfile)
-                } else {
-                    mergeSnapshot(directProfile)
-                    firestore.collection("users").whereEqualTo("id", member.userId).limit(1).get()
-                        .addOnSuccessListener { legacyProfiles -> applySnapshot(legacyProfiles.documents.firstOrNull() ?: directProfile) }
-                        .addOnFailureListener { applySnapshot(directProfile) }
-                }
-            }
-            .addOnFailureListener {
-                firestore.collection("users").whereEqualTo("id", member.userId).limit(1).get()
-                    .addOnSuccessListener { legacyProfiles -> applySnapshot(legacyProfiles.documents.firstOrNull()) }
-                    .addOnFailureListener { applySnapshot(null) }
-            }
-    }
 }

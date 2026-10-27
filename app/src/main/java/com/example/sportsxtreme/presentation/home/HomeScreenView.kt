@@ -293,7 +293,7 @@ class HomeScreenView @JvmOverloads constructor(
         drawerProfilePhotoUserId = user.uid
         val authPhotoUrl = user.photoUrl?.toString()
         val firestore = FirebaseFirestore.getInstance()
-        drawerProfilePhotoListener = firestore.collection("users")
+        drawerProfilePhotoListener = firestore.collection("publicProfiles")
             .document(user.uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -309,22 +309,8 @@ class HomeScreenView @JvmOverloads constructor(
                         firestoreUrl?.takeIf { it.isNotBlank() } ?: authPhotoUrl
                     )
                 } else {
-                    // Older accounts can have an auto-generated Firestore document ID,
-                    // with the Firebase UID stored in its `id` field.
-                    firestore.collection("users")
-                        .whereEqualTo("id", user.uid)
-                        .limit(1)
-                        .get()
-                        .addOnSuccessListener { profiles ->
-                            val legacyProfile = profiles.documents.firstOrNull()
-                            val legacyUrl = legacyProfile?.getString("profilePhotoUrl")
-                            updateDrawerProfileCompletion(legacyProfile?.data, user)
-                            showDrawerProfilePhoto(photoView, legacyUrl?.takeIf { it.isNotBlank() } ?: authPhotoUrl)
-                        }
-                        .addOnFailureListener {
-                            updateDrawerProfileCompletion(null, user)
-                            showDrawerProfilePhoto(photoView, authPhotoUrl)
-                        }
+                    updateDrawerProfileCompletion(null, user)
+                    showDrawerProfilePhoto(photoView, authPhotoUrl)
                 }
             }
     }

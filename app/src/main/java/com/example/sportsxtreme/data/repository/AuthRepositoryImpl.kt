@@ -274,31 +274,7 @@ class AuthRepositoryImpl(
             return Resource.Success(current)
         }
 
-        return firestoreUserDataSource.getUserProfileByPhone(cleanPhone).fold(
-            onSuccess = { profile ->
-                if (profile != null) {
-                    val user = User(
-                        id = profile.id,
-                        name = profile.name,
-                        mobileNumber = profile.phoneNumber,
-                        email = profile.email,
-                        profilePhotoUrl = profile.profilePhotoUrl,
-                        authProvider = profile.authProvider,
-                        isEmailVerified = profile.isEmailVerified,
-                        isPhoneVerified = profile.isPhoneVerified
-                    )
-                    Log.i(TAG, "[AUTH] Login successful via Firestore record: UID=${user.id}")
-                    Resource.Success(user)
-                } else {
-                    Log.w(TAG, "[AUTH] Login failed: No registered account for phone ${cleanPhone.maskPhone()}")
-                    Resource.Error("No user account found for phone ${cleanPhone.maskPhone()}. Please sign up or verify OTP.")
-                }
-            },
-            onFailure = { error ->
-                Log.e(TAG, "[AUTH] Login lookup failed: ${error.message}", error)
-                Resource.Error(error.message ?: "Could not verify user account for phone number.")
-            }
-        )
+        return Resource.Error("Phone login requires phone verification. Request an OTP to continue.")
     }
 
     private fun String.maskPhone(): String {

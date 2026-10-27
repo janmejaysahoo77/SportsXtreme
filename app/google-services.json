@@ -49,6 +49,43 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:896267230604:android:f45e312b6caabd7eda4aa9",
+        "android_client_info": {
+          "package_name": "com.sportsxtreme.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "896267230604-8dt96gg31fmp1cjcvropvq7sj53upn93.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sportsxtreme.app",
+            "certificate_hash": "88822a637b36d19427f07ec28bdd8638071b0872"
+          }
+        },
+        {
+          "client_id": "896267230604-egaaibb3i3ven1bs99a2to47mf29qucq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCaX-hTBiadVwPAXvXKbIHjF-jy2lmp-t8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "896267230604-egaaibb3i3ven1bs99a2to47mf29qucq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

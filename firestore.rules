@@ -341,9 +341,12 @@ service cloud.firestore {
         && data.id == userId;
     }
 
-    // ---------- User profiles: signed-in reads, owner writes public fields only ----------
+    // ---------- User account documents: owner-only reads, owner writes ----------
     match /users/{userId} {
-      allow read: if request.auth != null;
+      // Root documents may contain legacy account fields. They are never a
+      // public read model; clients can read only their own root document.
+      allow get: if request.auth != null && request.auth.uid == userId;
+      allow list: if false;
       allow create: if request.auth != null
         && request.auth.uid == userId
         && isAllowedPublicUserProfile(request.resource.data, userId)
@@ -367,6 +370,15 @@ service cloud.firestore {
         allow list: if false;
         allow create, update, delete: if isAdminUserManager();
       }
+    }
+    match /publicProfiles/{userId} {
+      // Match the previous signed-in profile visibility while separating these
+      // safe fields from legacy account data in users/{userId}.
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && isAllowedPublicUserProfile(request.resource.data, userId);
+      allow delete: if request.auth != null && request.auth.uid == userId;
     }
     match /users/{userId}/{collection}/{document=**} {
       // Stats are shown on player profiles; settings and achievements remain owner-only.
@@ -509,7 +521,18 @@ service cloud.firestore {
 
     // ---------- SportsXtreme Admin portal: own administrator profile ----------
     match /users/{userId} {
-      allow create, update, delete: if hasAdminPortalRole(['Super Admin', 'Support Agent', 'Moderator']);
+      allow create: if hasAdminPortalRole(['Super Admin', 'Support Agent', 'Moderator'])
+        && isAllowedPublicUserProfile(request.resource.data, userId)
+        && request.resource.data.get('createdAt', null) == request.time
+        && request.resource.data.get('updatedAt', null) == request.time;
+      allow update: if hasAdminPortalRole(['Super Admin', 'Support Agent', 'Moderator'])
+        && request.resource.data.id == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'id', 'name', 'updatedAt', 'profilePhotoUrl', 'location', 'joinedLabel',
+          'gender', 'role', 'battingStyle', 'bowlingStyle'
+        ])
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if hasAdminPortalRole(['Super Admin', 'Support Agent', 'Moderator']);
     }
 
     // Default deny for all other private mobile app collections

@@ -71,8 +71,17 @@ beforeEach(async () => {
       createdAt: new Date(),
       updatedAt: new Date()
     });
+    await setDoc(doc(db, "publicProfiles/alice"), {
+      id: "alice",
+      name: "Alice",
+      profilePhotoUrl: "https://example.invalid/alice.png",
+      location: "Local ground",
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
     await setDoc(doc(db, "admins/moderator"), { role: "Moderator" });
     await setDoc(doc(db, "admins/support"), { role: "Support Agent" });
+    await setDoc(doc(db, "admins/super"), { role: "Super Admin" });
     await setDoc(doc(db, "teams/harbor"), {
       teamName: "Harbor CC",
       captainName: "Alice",
@@ -130,11 +139,62 @@ test("private account contacts are readable by the owner and existing user manag
   const otherDb = testEnvironment.authenticatedContext("bob").firestore();
   const anonymousDb = testEnvironment.unauthenticatedContext().firestore();
   const moderatorDb = testEnvironment.authenticatedContext("moderator").firestore();
+  const superAdminDb = testEnvironment.authenticatedContext("super").firestore();
 
   await assertSucceeds(getDoc(doc(ownerDb, "users/alice/private/account")));
   await assertFails(getDoc(doc(otherDb, "users/alice/private/account")));
   await assertFails(getDoc(doc(anonymousDb, "users/alice/private/account")));
   await assertSucceeds(getDoc(doc(moderatorDb, "users/alice/private/account")));
+  await assertSucceeds(getDoc(doc(superAdminDb, "users/alice/private/account")));
+});
+
+test("user root documents are owner-only and cannot be queried by ordinary users", async () => {
+  const ownerDb = testEnvironment.authenticatedContext("alice").firestore();
+  const otherDb = testEnvironment.authenticatedContext("bob").firestore();
+  const anonymousDb = testEnvironment.unauthenticatedContext().firestore();
+  const moderatorDb = testEnvironment.authenticatedContext("moderator").firestore();
+
+  await assertSucceeds(getDoc(doc(ownerDb, "users/alice")));
+  await assertSucceeds(getDoc(doc(testEnvironment.authenticatedContext("ordinary").firestore(), "users/ordinary")));
+  await assertFails(getDoc(doc(otherDb, "users/alice")));
+  await assertFails(getDoc(doc(anonymousDb, "users/alice")));
+  await assertFails(getDoc(doc(moderatorDb, "users/alice")));
+  await assertFails(getDocs(collection(otherDb, "users")));
+  await assertFails(getDocs(query(collection(otherDb, "users"), where("phoneNumber", "==", "+15555550123"))));
+});
+
+test("signed-in users can read safe public profiles while anonymous reads are denied", async () => {
+  const ownerDb = testEnvironment.authenticatedContext("alice").firestore();
+  const otherDb = testEnvironment.authenticatedContext("bob").firestore();
+  const anonymousDb = testEnvironment.unauthenticatedContext().firestore();
+  const projection = doc(otherDb, "publicProfiles/alice");
+
+  await assertSucceeds(getDoc(projection));
+  await assertSucceeds(getDocs(collection(otherDb, "publicProfiles")));
+  await assertFails(getDoc(doc(anonymousDb, "publicProfiles/alice")));
+  await assertFails(getDocs(collection(anonymousDb, "publicProfiles")));
+  await assertSucceeds(updateDoc(doc(ownerDb, "publicProfiles/alice"), {
+    name: "Updated public name",
+    updatedAt: serverTimestamp()
+  }));
+  for (const [field, value] of Object.entries({
+    email: "private@example.invalid",
+    phoneNumber: "+15555550999",
+    authProvider: "PHONE",
+    isPhoneVerified: true,
+    isEmailVerified: true,
+    isPro: true
+  })) {
+    await assertFails(updateDoc(doc(ownerDb, "publicProfiles/alice"), {
+      [field]: value,
+      updatedAt: serverTimestamp()
+    }));
+  }
+  await assertFails(setDoc(doc(otherDb, "publicProfiles/forged"), {
+    id: "forged",
+    name: "Forged",
+    email: "private@example.invalid"
+  }));
 });
 
 test("ordinary clients can create only a whitelisted public profile", async () => {
@@ -228,16 +288,32 @@ test("ordinary clients cannot modify contact, verification, provider, or authori
 test("existing admin user-management roles retain verification and private-account access", async () => {
   const moderatorDb = testEnvironment.authenticatedContext("moderator").firestore();
   const supportDb = testEnvironment.authenticatedContext("support").firestore();
+  const superAdminDb = testEnvironment.authenticatedContext("super").firestore();
 
-  await assertSucceeds(updateDoc(doc(moderatorDb, "users/alice"), {
+  await assertSucceeds(updateDoc(doc(moderatorDb, "users/alice/private/account"), {
     isEmailVerified: true
   }));
-  await assertSucceeds(updateDoc(doc(supportDb, "users/alice"), {
+  await assertSucceeds(updateDoc(doc(supportDb, "users/alice/private/account"), {
     isPhoneVerified: true
+  }));
+  await assertSucceeds(updateDoc(doc(moderatorDb, "users/alice"), {
+    name: "Reviewed public name",
+    updatedAt: serverTimestamp()
+  }));
+  await assertFails(updateDoc(doc(moderatorDb, "users/alice"), {
+    isEmailVerified: false
   }));
   await assertSucceeds(updateDoc(doc(moderatorDb, "users/alice/private/account"), {
     reviewNote: "Reviewed"
   }));
+  await assertFails(getDoc(doc(moderatorDb, "users/alice")));
+  await assertFails(getDocs(collection(moderatorDb, "users")));
+  await assertFails(getDoc(doc(superAdminDb, "users/alice")));
+  await assertSucceeds(updateDoc(doc(superAdminDb, "users/alice/private/account"), {
+    isEmailVerified: false
+  }));
+  await assertSucceeds(getDoc(doc(supportDb, "users/alice/private/account")));
+  await assertFails(getDoc(doc(testEnvironment.authenticatedContext("ordinary").firestore(), "users/alice/private/account")));
 });
 
 test("team rosters and captain contact remain readable while private member contacts stay server-only", async () => {

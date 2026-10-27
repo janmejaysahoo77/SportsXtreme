@@ -235,24 +235,13 @@ fun CommunityScreen(
 
     LaunchedEffect(currentUser?.uid) {
         val uid = currentUser?.uid ?: return@LaunchedEffect
-        FirebaseFirestore.getInstance().collection("users").document(uid).get()
+        FirebaseFirestore.getInstance().collection("publicProfiles").document(uid).get()
             .addOnSuccessListener { userDocument ->
                 val photo = userDocument.getString("profilePhotoUrl")?.takeIf { it.isNotBlank() }
                 if (photo != null) {
                     accountPhotoUrl = photo
                 } else {
-                    FirebaseFirestore.getInstance().collection("users")
-                        .whereEqualTo("id", uid)
-                        .limit(1)
-                        .get()
-                        .addOnSuccessListener { querySnap ->
-                            val legacyPhoto = querySnap.documents.firstOrNull()
-                                ?.getString("profilePhotoUrl")?.takeIf { it.isNotBlank() }
-                            accountPhotoUrl = legacyPhoto ?: currentUser.photoUrl?.toString()
-                        }
-                        .addOnFailureListener {
-                            accountPhotoUrl = currentUser.photoUrl?.toString()
-                        }
+                    accountPhotoUrl = currentUser.photoUrl?.toString()
                 }
             }
             .addOnFailureListener {
@@ -281,23 +270,12 @@ fun CommunityScreen(
                             if (ownerId == currentUser?.uid && !accountPhotoUrl.isNullOrBlank()) {
                                 ownerPhotoUrls[ownerId] = accountPhotoUrl!!
                             } else {
-                                FirebaseFirestore.getInstance().collection("users").document(ownerId).get()
+                                FirebaseFirestore.getInstance().collection("publicProfiles").document(ownerId).get()
                                     .addOnSuccessListener { userDoc ->
                                         val photo = userDoc.getString("profilePhotoUrl")?.trim()?.takeIf { it.isNotBlank() }
                                         if (photo != null) {
                                             ownerPhotoUrls[ownerId] = photo
                                         } else {
-                                            FirebaseFirestore.getInstance().collection("users")
-                                                .whereEqualTo("id", ownerId)
-                                                .limit(1)
-                                                .get()
-                                                .addOnSuccessListener { querySnap ->
-                                                    val legacyPhoto = querySnap.documents.firstOrNull()
-                                                        ?.getString("profilePhotoUrl")?.trim()?.takeIf { it.isNotBlank() }
-                                                    if (legacyPhoto != null) {
-                                                        ownerPhotoUrls[ownerId] = legacyPhoto
-                                                    }
-                                                }
                                         }
                                     }
                             }
@@ -593,7 +571,7 @@ fun CommunityScreen(
 
                             val fallbackUrl = accountPhotoUrl?.takeIf { it.isNotBlank() } ?: user.photoUrl?.toString().orEmpty()
 
-                            db.collection("users").document(user.uid).get()
+                            db.collection("publicProfiles").document(user.uid).get()
                                 .addOnSuccessListener { userDocument ->
                                     val fetchedUrl = userDocument.getString("profilePhotoUrl")
                                         ?.takeIf { it.isNotBlank() }

@@ -6,7 +6,7 @@ The Android phone-auth implementation uses Firebase Authentication with `PhoneAu
 
 1. In Firebase Console, open **Authentication > Sign-in method** and enable **Phone**.
 2. In **Authentication > Settings**, allow the SMS regions used by the app, such as India (+91).
-3. In **Project settings > General > Your apps**, confirm the Android app package is exactly `com.example.sportsxtreme`, then add the SHA-1 and SHA-256 fingerprints for:
+3. In **Project settings > General > Your apps**, register the Android app package as exactly `com.sportsxtreme.app`, then add the SHA-1 and SHA-256 fingerprints for:
    - the local debug keystore;
    - the release signing keystore;
    - the Google Play App Signing certificate, if the app is distributed through Google Play.
