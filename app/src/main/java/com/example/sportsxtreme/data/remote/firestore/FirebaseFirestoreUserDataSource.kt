@@ -36,7 +36,24 @@ class FirebaseFirestoreUserDataSource(
                     if (!existingProfile.exists()) {
                         publicPayload["createdAt"] = FieldValue.serverTimestamp()
                     }
-                    document.set(publicPayload, SetOptions.merge())
+                    val publicProfile = publicProfilePayload(
+                        id = profile.id,
+                        name = profile.name.ifBlank { existingProfile.getString("name").orEmpty() },
+                        profilePhotoUrl = profile.profilePhotoUrl ?: existingProfile.getString("profilePhotoUrl"),
+                        location = existingProfile.getString("location").orEmpty(),
+                        joinedLabel = existingProfile.getString("joinedLabel").orEmpty(),
+                        gender = existingProfile.getString("gender").orEmpty(),
+                        role = existingProfile.getString("role").orEmpty(),
+                        battingStyle = existingProfile.getString("battingStyle").orEmpty(),
+                        bowlingStyle = existingProfile.getString("bowlingStyle").orEmpty()
+                    ) + mapOf(
+                        "createdAt" to (existingProfile.getTimestamp("createdAt") ?: FieldValue.serverTimestamp()),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    firestore.runBatch { batch ->
+                        batch.set(document, publicPayload, SetOptions.merge())
+                        batch.set(firestore.collection(PUBLIC_PROFILES_COLLECTION).document(profile.id), publicProfile, SetOptions.merge())
+                    }
                         .addOnSuccessListener {
                             FirebaseFunctions.getInstance()
                                 .getHttpsCallable("syncPrivateUserAccount")
@@ -173,34 +190,17 @@ class FirebaseFirestoreUserDataSource(
 
     override suspend fun getUserProfile(userId: String): Result<UserProfile> {
         return suspendCancellableCoroutine { continuation ->
-            firestore.collection(USERS_COLLECTION)
+            val isOwner = auth.currentUser?.uid == userId
+            val profileRef = firestore.collection(if (isOwner) USERS_COLLECTION else PUBLIC_PROFILES_COLLECTION)
                 .document(userId)
-                .get()
+            profileRef.get()
                 .addOnSuccessListener { snapshot ->
                     if (snapshot.exists()) {
                         val baseProfile = snapshot.toUserProfile(userId)
-                        enrichWithPrivateAccountIfOwner(userId, baseProfile, continuation)
+                        if (isOwner) enrichWithPrivateAccountIfOwner(userId, baseProfile, continuation)
+                        else continuation.resume(Result.success(baseProfile.copy(email = "", phoneNumber = "")))
                     } else {
-                        // Older profile documents were sometimes created with an
-                        // auto-generated document ID while retaining the Firebase
-                        // Auth UID in their `id` field. Scorecards always hold the
-                        // Auth UID, so support that legacy shape as well.
-                        firestore.collection(USERS_COLLECTION)
-                            .whereEqualTo("id", userId)
-                            .limit(1)
-                            .get()
-                            .addOnSuccessListener { legacyProfiles ->
-                                val legacyProfile = legacyProfiles.documents.firstOrNull()
-                                if (legacyProfile != null) {
-                                    val baseProfile = legacyProfile.toUserProfile(userId)
-                                    enrichWithPrivateAccountIfOwner(userId, baseProfile, continuation)
-                                } else {
-                                    continuation.resume(Result.failure(NoSuchElementException("User profile not found")))
-                                }
-                            }
-                            .addOnFailureListener { exception ->
-                                continuation.resume(Result.failure(exception))
-                            }
+                        continuation.resume(Result.failure(NoSuchElementException("User profile not found")))
                     }
                 }
                 .addOnFailureListener { exception ->
@@ -261,52 +261,6 @@ class FirebaseFirestoreUserDataSource(
         }
     }
 
-    override suspend fun getUserProfileByPhone(phoneNumber: String): Result<UserProfile?> {
-        return suspendCancellableCoroutine { continuation ->
-            val cleanPhone = phoneNumber.trim()
-            if (cleanPhone.isBlank()) {
-                continuation.resume(Result.success(null))
-                return@suspendCancellableCoroutine
-            }
-
-            firestore.collection(USERS_COLLECTION)
-                .whereEqualTo("phoneNumber", cleanPhone)
-                .limit(1)
-                .get()
-                .addOnSuccessListener { querySnapshot ->
-                    val doc = querySnapshot.documents.firstOrNull()
-                    if (doc != null && doc.exists()) {
-                        continuation.resume(Result.success(doc.toUserProfile(doc.id)))
-                    } else {
-                        // Retry with stripped non-digits if needed
-                        val digits = cleanPhone.filter { it.isDigit() }
-                        if (digits.isNotBlank()) {
-                            firestore.collection(USERS_COLLECTION)
-                                .whereEqualTo("phoneNumber", digits)
-                                .limit(1)
-                                .get()
-                                .addOnSuccessListener { retrySnapshot ->
-                                    val retryDoc = retrySnapshot.documents.firstOrNull()
-                                    if (retryDoc != null && retryDoc.exists()) {
-                                        continuation.resume(Result.success(retryDoc.toUserProfile(retryDoc.id)))
-                                    } else {
-                                        continuation.resume(Result.success(null))
-                                    }
-                                }
-                                .addOnFailureListener {
-                                    continuation.resume(Result.success(null))
-                                }
-                        } else {
-                            continuation.resume(Result.success(null))
-                        }
-                    }
-                }
-                .addOnFailureListener { exception ->
-                    continuation.resume(Result.failure(exception))
-                }
-        }
-    }
-
     override suspend fun updateUserProfile(profile: UserProfile): Result<UserProfile> {
         return suspendCancellableCoroutine { continuation ->
             val publicPayload = profile.toFirestorePayload() + mapOf(
@@ -314,7 +268,13 @@ class FirebaseFirestoreUserDataSource(
             )
 
             val userRef = firestore.collection(USERS_COLLECTION).document(profile.id)
-            userRef.set(publicPayload, SetOptions.merge())
+            val projection = profile.publicProjectionPayload() + mapOf(
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            firestore.runBatch { batch ->
+                batch.set(userRef, publicPayload, SetOptions.merge())
+                batch.set(firestore.collection(PUBLIC_PROFILES_COLLECTION).document(profile.id), projection, SetOptions.merge())
+            }
                 .addOnSuccessListener {
                     continuation.resume(Result.success(profile))
                 }
@@ -337,6 +297,20 @@ class FirebaseFirestoreUserDataSource(
             "bowlingStyle" to bowlingStyle
         )
     }
+
+    private fun publicProfilePayload(
+        id: String, name: String, profilePhotoUrl: String?, location: String,
+        joinedLabel: String, gender: String, role: String,
+        battingStyle: String, bowlingStyle: String
+    ): Map<String, Any?> = mapOf(
+        "id" to id, "name" to name, "profilePhotoUrl" to profilePhotoUrl,
+        "location" to location, "joinedLabel" to joinedLabel, "gender" to gender,
+        "role" to role, "battingStyle" to battingStyle, "bowlingStyle" to bowlingStyle
+    )
+
+    private fun UserProfile.publicProjectionPayload(): Map<String, Any?> = publicProfilePayload(
+        id, name, profilePhotoUrl, location, joinedLabel, gender, role, battingStyle, bowlingStyle
+    )
 
     private fun DocumentSnapshot.toUserProfile(fallbackId: String): UserProfile {
         return UserProfile(
@@ -467,6 +441,7 @@ class FirebaseFirestoreUserDataSource(
 
     private companion object {
         const val USERS_COLLECTION = "users"
+        const val PUBLIC_PROFILES_COLLECTION = "publicProfiles"
         const val PRIVATE_COLLECTION = "private"
         const val ACCOUNT_DOCUMENT = "account"
         const val STATS_COLLECTION = "stats"

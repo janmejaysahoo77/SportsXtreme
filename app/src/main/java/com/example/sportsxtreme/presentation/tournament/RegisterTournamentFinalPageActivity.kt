@@ -694,7 +694,7 @@ private fun OrganizerCard(tournament: Tournament?) {
     DisposableEffect(tournament?.hostUid) {
         val hostUid = tournament?.hostUid.orEmpty()
         if (hostUid.isBlank()) return@DisposableEffect onDispose { }
-        val registration = FirebaseFirestore.getInstance().collection("users").document(hostUid)
+        val registration = FirebaseFirestore.getInstance().collection("publicProfiles").document(hostUid)
             .addSnapshotListener { snapshot, _ ->
                 photoUrl = listOf("profilePhotoUrl", "photoUrl", "imageUrl").firstNotNullOfOrNull { snapshot?.getString(it)?.takeIf(String::isNotBlank) }.orEmpty()
             }
@@ -1256,6 +1256,8 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
     val firestore = remember { com.google.firebase.firestore.FirebaseFirestore.getInstance() }
     var isCreatingInvite by remember { mutableStateOf(false) }
     var isAddingTeamId by remember { mutableStateOf<String?>(null) }
+    var isRemovingTeamId by remember { mutableStateOf<String?>(null) }
+    var teamPendingRemoval by remember { mutableStateOf<TournamentJoinedTeam?>(null) }
     var showAddTeamsMenu by remember { mutableStateOf(false) }
     var showManualTeamPicker by remember { mutableStateOf(false) }
     var availableTeams by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
@@ -1342,6 +1344,22 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
                 Toast.makeText(context, error.message ?: "Unable to add team", Toast.LENGTH_LONG).show()
             }
     }
+    fun removeTournamentTeam(team: TournamentJoinedTeam) {
+        val tournamentId = tournament?.id.orEmpty()
+        if (!canManage || tournamentId.isBlank()) return
+        isRemovingTeamId = team.id
+        FirebaseFunctions.getInstance().getHttpsCallable("removeTournamentTeam")
+            .call(mapOf("tournamentId" to tournamentId, "teamId" to team.id))
+            .addOnSuccessListener {
+                isRemovingTeamId = null
+                teamPendingRemoval = null
+                Toast.makeText(context, "${team.name} removed from tournament", Toast.LENGTH_SHORT).show()
+            }
+            .addOnFailureListener { error ->
+                isRemovingTeamId = null
+                Toast.makeText(context, error.message ?: "Unable to remove team", Toast.LENGTH_LONG).show()
+            }
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -1393,7 +1411,7 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
             Text("REGISTERED TEAMS", color = FinalMuted, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(10.dp))
             joinedTeams.forEachIndexed { index, team ->
-                TournamentTeamCard(team, index + 1)
+                TournamentTeamCard(team, index + 1, canManage, isRemovingTeamId == team.id) { teamPendingRemoval = team }
                 Spacer(Modifier.height(10.dp))
             }
         }
@@ -1446,6 +1464,22 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
                 containerColor = FinalPanel
             )
         }
+        teamPendingRemoval?.let { team ->
+            AlertDialog(
+                onDismissRequest = { if (isRemovingTeamId == null) teamPendingRemoval = null },
+                title = { Text("REMOVE TEAM?", color = Color.White, fontWeight = FontWeight.Black) },
+                text = { Text("Remove ${team.name} from this tournament?", color = FinalMuted) },
+                confirmButton = {
+                    Text(
+                        if (isRemovingTeamId == team.id) "REMOVING…" else "REMOVE",
+                        color = Color(0xFFFF625D),
+                        modifier = Modifier.clickable(enabled = isRemovingTeamId == null) { removeTournamentTeam(team) }.padding(12.dp)
+                    )
+                },
+                dismissButton = { Text("CANCEL", color = FinalMuted, modifier = Modifier.clickable(enabled = isRemovingTeamId == null) { teamPendingRemoval = null }.padding(12.dp)) },
+                containerColor = FinalPanel
+            )
+        }
         Spacer(Modifier.height(20.dp))
         Text("You can edit teams and players anytime before\npublishing the tournament.", color = FinalMuted, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 17.sp)
     }
@@ -1454,7 +1488,7 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
 private data class TournamentJoinedTeam(val id: String, val name: String, val captainUserId: String, val logoUrl: String = "")
 
 @Composable
-private fun TournamentTeamCard(team: TournamentJoinedTeam, position: Int) {
+private fun TournamentTeamCard(team: TournamentJoinedTeam, position: Int, canManage: Boolean, isRemoving: Boolean, onRemove: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(FinalPanel).border(1.dp, FinalDivider, RoundedCornerShape(15.dp)).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1470,7 +1504,16 @@ private fun TournamentTeamCard(team: TournamentJoinedTeam, position: Int) {
             Text(team.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("REGISTERED TEAM", color = FinalAccent, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 3.dp))
         }
-        Text("✓", color = FinalAccent, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        if (canManage) {
+            Image(
+                painter = painterResource(R.drawable.outline_delete_24),
+                contentDescription = "Remove ${team.name} from tournament",
+                modifier = Modifier.size(24.dp).clickable(enabled = !isRemoving, onClick = onRemove),
+                colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(if (isRemoving) FinalMuted else Color(0xFFFF625D))
+            )
+        } else {
+            Text("✓", color = FinalAccent, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        }
     }
 }
 

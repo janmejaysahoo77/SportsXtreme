@@ -181,7 +181,7 @@ class MatchRepositoryImpl @Inject constructor(
                     .uppercase().replace(' ', '_').let { value ->
                         if (value in setOf("BATTER", "BOWLER", "ALL_ROUNDER", "WICKET_KEEPER")) value else "UNKNOWN"
                     }
-                val profile = runCatching { firestore.collection("users").document(userId).get().await() }.getOrNull()
+                val profile = runCatching { firestore.collection("publicProfiles").document(userId).get().await() }.getOrNull()
                 val displayName = (member["displayName"] as? String)?.trim().orEmpty()
                     .takeUnless { it.isBlank() || it.equals("team member", ignoreCase = true) }
                     ?: (member["name"] as? String)?.trim().orEmpty()

@@ -23,7 +23,7 @@ URL after installation.
 
 ## Signing certificate verification required
 
-The association JSON names the application ID `com.example.sportsxtreme`.
+The association JSON names the application ID `com.sportsxtreme.app`.
 It currently contains two SHA-256 fingerprints:
 
 - `99:4B:3B:AC:90:21:6E:D9:C6:DF:72:3B:FC:93:E0:1F:84:7A:54:DC:93:A4:DF:AE:B3:E5:F8:BD:A4:CF:B4:14` is documented as this workspace's debug certificate.
@@ -37,7 +37,7 @@ certificate**. Use the app signing key fingerprint, not the upload key
 fingerprint. Replace or retain the fingerprints in `assetlinks.json` only
 after confirming their certificate roles. [Google Play's App Signing help](https://support.google.com/googleplay/android-developer/answer/9842756?hl=en)
 
-The app ID in Play Console must be exactly `com.example.sportsxtreme` for this
+The app ID in Play Console must be exactly `com.sportsxtreme.app` for this
 association to apply. The Google Play install link in the fallback page uses
 that same ID; it will work once a listing for this package is available.
 

@@ -175,7 +175,7 @@ class HomeScreenViewV2 @JvmOverloads constructor(
         drawerProfilePhotoUserId = user.uid
         val authPhotoUrl = user.photoUrl?.toString()
         val firestore = FirebaseFirestore.getInstance()
-        drawerProfilePhotoListener = firestore.collection("users")
+        drawerProfilePhotoListener = firestore.collection("publicProfiles")
             .document(user.uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -191,7 +191,7 @@ class HomeScreenViewV2 @JvmOverloads constructor(
                 } else {
                     // Older accounts can have an auto-generated Firestore document ID,
                     // with the Firebase UID stored in its `id` field.
-                    firestore.collection("users")
+                    firestore.collection("publicProfiles")
                         .whereEqualTo("id", user.uid)
                         .limit(1)
                         .get()

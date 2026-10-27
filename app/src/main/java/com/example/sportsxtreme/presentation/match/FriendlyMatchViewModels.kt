@@ -526,7 +526,7 @@ class OpeningPlayersViewModel(
                 .mapNotNull { it as? Map<*, *> }
                 .forEach { member ->
                     val userId = member["userId"] as? String ?: return@forEach
-                    val profile = runCatching { firestore.collection("users").document(userId).get().await() }.getOrNull()
+                    val profile = runCatching { firestore.collection("publicProfiles").document(userId).get().await() }.getOrNull()
                     val name = (member["displayName"] as? String)
                         ?.trim()
                         ?.takeUnless { it.isBlank() || it.equals("team member", ignoreCase = true) }

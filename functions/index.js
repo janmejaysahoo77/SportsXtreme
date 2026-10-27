@@ -8,6 +8,7 @@ const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const leaderboardScoring = require("./leaderboardScoring");
+const { projectPublicProfile } = require("./userProfileProjection");
 const { parseMatchInviteToken, hashMatchInviteSecret, matchInviteUnavailableReason } = require("./matchInviteToken");
 
 initializeApp();
@@ -24,6 +25,23 @@ const ROLES = Object.freeze({ ADMIN: "ADMIN", CAPTAIN: "CAPTAIN", VICE_CAPTAIN: 
 const cloudinaryCloudName = defineSecret("CLOUDINARY_CLOUD_NAME");
 const cloudinaryApiKey = defineSecret("CLOUDINARY_API_KEY");
 const cloudinaryApiSecret = defineSecret("CLOUDINARY_API_SECRET");
+
+/** Keeps the client-readable profile projection free of account fields. */
+exports.syncPublicUserProfile = onDocumentWritten("users/{userId}", async (event) => {
+  const userId = event.params.userId;
+  const userRef = db.collection("users").doc(userId);
+  const projectionRef = db.collection("publicProfiles").doc(userId);
+  await db.runTransaction(async (transaction) => {
+    // Re-read current state in a transaction so delayed/duplicate trigger
+    // events cannot overwrite a newer profile projection.
+    const currentUser = await transaction.get(userRef);
+    if (!currentUser.exists) {
+      transaction.delete(projectionRef);
+      return;
+    }
+    transaction.set(projectionRef, projectPublicProfile(userId, currentUser.data() || {}));
+  });
+});
 
 /** Claims and sends one published admin notification. FCM data-only messages
  * ensure Android's FirebaseMessagingService can persist them while backgrounded. */
@@ -499,6 +517,29 @@ exports.addTournamentTeamManually = onCall(async (request) => {
   });
 });
 
+/** Removes one registered team after verifying the tournament organiser. */
+exports.removeTournamentTeam = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before removing a team.");
+  const tournamentId = requireTeamId(request.data?.tournamentId);
+  const teamId = requireTeamId(request.data?.teamId);
+  const tournamentRef = db.collection("tournaments").doc(tournamentId);
+  const entryRef = tournamentRef.collection("teams").doc(teamId);
+  return db.runTransaction(async (transaction) => {
+    const tournament = await transaction.get(tournamentRef);
+    const entry = await transaction.get(entryRef);
+    if (!tournament.exists) throw new HttpsError("not-found", "Tournament not found.");
+    if (tournament.get("hostUid") !== request.auth.uid) {
+      throw new HttpsError("permission-denied", "Only the tournament organiser can remove teams.");
+    }
+    if (entry.exists) transaction.delete(entryRef);
+    transaction.update(tournamentRef, {
+      teamIds: FieldValue.arrayRemove(teamId),
+      updatedAtEpochMs: Date.now()
+    });
+    return { tournamentId, teamId, removed: entry.exists };
+  });
+});
+
 /** Deletes a tournament and its nested entries after verifying the organiser. */
 exports.deleteTournament = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before deleting a tournament.");
@@ -618,6 +659,8 @@ exports.deleteAccount = onCall({
   }
   const profileRef = db.collection("users").doc(uid);
   references.set(profileRef.path, profileRef);
+  const publicProfileRef = db.collection("publicProfiles").doc(uid);
+  references.set(publicProfileRef.path, publicProfileRef);
 
   for (const reference of references.values()) {
     await db.recursiveDelete(reference);
