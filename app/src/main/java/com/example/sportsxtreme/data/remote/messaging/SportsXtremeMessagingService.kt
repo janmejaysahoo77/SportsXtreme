@@ -40,10 +40,25 @@ class SportsXtremeMessagingService : FirebaseMessagingService() {
             ?: remoteMessage.data["message"]
             ?: "You have a new update."
 
-        val category = remoteMessage.data["category"] ?: "UPDATES"
+        val category = remoteMessage.data["category"] ?: remoteMessage.data["badge"] ?: "UPDATES"
         val iconType = remoteMessage.data["iconType"] ?: "SPORTS"
-        val targetUrl = remoteMessage.data["targetUrl"]
+        val targetUrl = remoteMessage.data["targetUrl"] ?: remoteMessage.data["actionUrl"] ?: remoteMessage.data["deepLink"] ?: remoteMessage.data["url"]
         val extraData = remoteMessage.data["extraData"]
+
+        // Extract Image URLs & Button Text for In-App Dialog
+        val imageUrl = remoteMessage.notification?.imageUrl?.toString()
+            ?: remoteMessage.data["imageUrl"]
+            ?: remoteMessage.data["image"]
+
+        val landscapeImageUrl = remoteMessage.data["landscapeImageUrl"]
+            ?: remoteMessage.data["landscapeImage"]
+            ?: remoteMessage.data["banner"]
+            ?: remoteMessage.data["landscape"]
+
+        val primaryButtonText = remoteMessage.data["primaryButtonText"]
+            ?: remoteMessage.data["buttonText"]
+            ?: remoteMessage.data["actionText"]
+            ?: "VIEW NOW"
 
         val entity = NotificationEntity(
             title = title,
@@ -66,7 +81,19 @@ class SportsXtremeMessagingService : FirebaseMessagingService() {
             }
         }
 
-        // 2. Display System Notification Alert
+        // 2. Trigger In-App Message Dialog if app is in foreground or receiving FCM data
+        val inAppMessage = com.example.sportsxtreme.domain.model.InAppMessage(
+            title = title,
+            body = body,
+            imageUrl = imageUrl,
+            landscapeImageUrl = landscapeImageUrl,
+            primaryButtonText = primaryButtonText,
+            targetUrl = targetUrl,
+            category = category
+        )
+        com.example.sportsxtreme.common.InAppMessageManager.showInAppMessage(inAppMessage)
+
+        // 3. Display System Notification Alert
         PushNotificationHelper.showNotification(
             context = applicationContext,
             title = title,
