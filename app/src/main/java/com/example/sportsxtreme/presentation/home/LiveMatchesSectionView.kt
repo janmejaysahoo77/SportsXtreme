@@ -41,6 +41,7 @@ class LiveMatchesSectionView @JvmOverloads constructor(
     private val emptyColor = Color.rgb(150, 165, 162)
 
     private lateinit var recyclerView: RecyclerView
+    private lateinit var viewAllButton: TextView
     private lateinit var placeholderContainer: FrameLayout
     private lateinit var placeholderTitle: TextView
     private lateinit var placeholderSubtitle: TextView
@@ -76,6 +77,7 @@ class LiveMatchesSectionView @JvmOverloads constructor(
                 includeFontPadding = false
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             addView(TextView(context).apply {
+                viewAllButton = this
                 text = "View All"
                 setTextColor(primary)
                 textSize = 10f
@@ -240,6 +242,7 @@ class LiveMatchesSectionView @JvmOverloads constructor(
                 match.teamBShortName
             ).any { it.contains(query, ignoreCase = true) }
         }
+        viewAllButton.visibility = if (matches.size > 2) View.VISIBLE else View.GONE
 
         // Offline note: show only when we still have cached matches but Firestore failed.
         offlineNote.visibility = if (state.isOffline && matches.isNotEmpty()) View.VISIBLE else View.GONE

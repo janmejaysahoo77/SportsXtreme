@@ -206,6 +206,14 @@ class FirebasePhoneAuthManager(
 
     private fun String.toPhoneFriendlyMessage(): String {
         return when {
+            contains("missing a valid app identifier", ignoreCase = true) ||
+                contains("invalid app identifier", ignoreCase = true) ||
+                contains("app not authorized", ignoreCase = true) ->
+                "Firebase could not verify this app. In Firebase Console, check that Android app " +
+                    "com.sportsxtreme.app has the SHA-256 fingerprint for Play Integrity and the SHA-1 " +
+                    "fingerprint for reCAPTCHA registered. Also allow the Firebase Auth handler domain " +
+                    "sportsxtreme-95fbb.firebaseapp.com in API key restrictions, then rebuild with the " +
+                    "updated google-services.json."
             contains("BILLING_NOT_ENABLED", ignoreCase = true) ->
                 "Firebase cannot send real OTP SMS until billing is enabled for this project. Enable Blaze billing or use Firebase test phone numbers."
             contains("SMS unable to be sent until this region", ignoreCase = true) ->

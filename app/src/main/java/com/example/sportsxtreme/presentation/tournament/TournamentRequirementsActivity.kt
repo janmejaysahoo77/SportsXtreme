@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -43,6 +44,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.DatePicker
@@ -70,6 +72,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -119,6 +122,7 @@ class TournamentRequirementsActivity : ComponentActivity() {
                     startActivity(
                         Intent(this, RegisterTournamentFinalPageActivity::class.java)
                             .putExtra(RegisterTournamentFinalPageActivity.EXTRA_TOURNAMENT_ID, tournamentId)
+                            .putExtra(RegisterTournamentFinalPageActivity.EXTRA_JUST_REGISTERED, true)
                     )
                 },
                 onBack = { finish() },
@@ -165,7 +169,7 @@ private data class TournamentRequirementSummary(
 )
 
 private val ReqAccent = XtremeLime
-private val ReqBg = XtremeBgBlue
+private val ReqBg = Color(0xFF0A101C)
 private val ReqPanel = XtremeCardBlue
 private val ReqField = XtremeBgBlue
 private val ReqStroke = XtremeCardBorder
@@ -202,8 +206,9 @@ private fun TournamentRequirementsScreen(
         RequirementsTopBar(onBack)
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
                 .verticalScroll(rememberScrollState())
+                .imePadding()
                 .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
@@ -424,8 +429,8 @@ private fun TournamentDetailsSection(requirements: TournamentRequirements, onLoc
     ReqSection("Tournament Details", "ENTRY") {
         ReqInput("Tournament Location", "Bhubaneswar, Odisha", requirements.location, showError = showErrors && requirements.location.isBlank(), trailingIcon = { androidx.compose.material3.Icon(painterResource(R.drawable.baseline_edit_location_24), "Use current location", tint = ReqCyan, modifier = Modifier.size(20.dp).clickable { onLocationClick { onChange(requirements.copy(location = it)) } }) }) { onChange(requirements.copy(location = it)) }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ReqInput("Entry Fee", "Rs 999", requirements.entryFee, Modifier.weight(1f), showError = showErrors && requirements.entryFee.isBlank()) { onChange(requirements.copy(entryFee = it)) }
-            ReqInput("Number of Teams", "10", requirements.numberOfTeams, Modifier.weight(1f), showError = showErrors && requirements.numberOfTeams.isBlank()) { onChange(requirements.copy(numberOfTeams = it)) }
+            ReqInput("Entry Fee", "Rs 999", requirements.entryFee, Modifier.weight(1f), showError = showErrors && requirements.entryFee.isBlank(), keyboardType = KeyboardType.Number) { onChange(requirements.copy(entryFee = it)) }
+            ReqInput("Number of Teams", "10", requirements.numberOfTeams, Modifier.weight(1f), showError = showErrors && requirements.numberOfTeams.isBlank(), keyboardType = KeyboardType.Number) { onChange(requirements.copy(numberOfTeams = it)) }
         }
         RequiredDateInput("Expected End Date", requirements.expectedEndDate, showErrors && requirements.expectedEndDate.isBlank()) { onChange(requirements.copy(expectedEndDate = it)) }
     }
@@ -435,8 +440,8 @@ private fun TournamentDetailsSection(requirements: TournamentRequirements, onLoc
 private fun WinningPrizeSection(requirements: TournamentRequirements, showErrors: Boolean, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Winning Prize", "REWARDS", iconRes = R.drawable.tournamentlogo) {
         OptionalCheckLine("Trophy Included (Optional)", requirements.trophyIncluded) { onChange(requirements.copy(trophyIncluded = !requirements.trophyIncluded)) }
-        ReqInput("Prize Pool", "Rs 50,000", requirements.prizePool, showError = showErrors && requirements.prizePool.isBlank()) { onChange(requirements.copy(prizePool = it)) }
-        ReqInput("Runner-up Prize", "Rs 10,000", requirements.runnerUpPrize, showError = showErrors && requirements.runnerUpPrize.isBlank()) { onChange(requirements.copy(runnerUpPrize = it)) }
+        ReqInput("Prize Pool", "Rs 50,000", requirements.prizePool, showError = showErrors && requirements.prizePool.isBlank(), keyboardType = KeyboardType.Number) { onChange(requirements.copy(prizePool = it)) }
+        ReqInput("Runner-up Prize", "Rs 10,000", requirements.runnerUpPrize, showError = showErrors && requirements.runnerUpPrize.isBlank(), keyboardType = KeyboardType.Number) { onChange(requirements.copy(runnerUpPrize = it)) }
     }
 }
 
@@ -553,13 +558,14 @@ private fun ReqSection(
 }
 
 @Composable
-private fun ReqInput(label: String, placeholder: String, value: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp, showError: Boolean = false, trailingIcon: (@Composable (() -> Unit))? = null, onValueChange: (String) -> Unit) {
+private fun ReqInput(label: String, placeholder: String, value: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp, showError: Boolean = false, trailingIcon: (@Composable (() -> Unit))? = null, keyboardType: KeyboardType = KeyboardType.Text, onValueChange: (String) -> Unit) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
         RequiredLabel(label)
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
             textStyle = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
             singleLine = minHeight <= 56.dp,
             decorationBox = { innerTextField ->
                 Box(

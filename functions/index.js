@@ -31,6 +31,7 @@ exports.syncPublicUserProfile = onDocumentWritten("users/{userId}", async (event
   const userId = event.params.userId;
   const userRef = db.collection("users").doc(userId);
   const projectionRef = db.collection("publicProfiles").doc(userId);
+  let profileName = "";
   await db.runTransaction(async (transaction) => {
     // Re-read current state in a transaction so delayed/duplicate trigger
     // events cannot overwrite a newer profile projection.
@@ -39,8 +40,34 @@ exports.syncPublicUserProfile = onDocumentWritten("users/{userId}", async (event
       transaction.delete(projectionRef);
       return;
     }
-    transaction.set(projectionRef, projectPublicProfile(userId, currentUser.data() || {}));
+    const currentProfile = currentUser.data() || {};
+    profileName = safeName(currentProfile.name || currentProfile.displayName);
+    transaction.set(projectionRef, projectPublicProfile(userId, currentProfile));
   });
+  if (!profileName) return;
+  const previousName = safeName(event.data?.before?.data()?.name || event.data?.before?.data()?.displayName);
+  if (previousName === profileName) return;
+
+  // Names are copied into team rosters and leaderboard aggregates for fast
+  // reads. Keep those display copies aligned with the canonical user profile.
+  const [indexedTeams, leaderboardEntries] = await Promise.all([
+    db.collection("teams").where("memberIds", "array-contains", userId).get(),
+    db.collection("leaderboards").doc("playerAggregates").collection("entries")
+      .where("canonicalPlayerId", "==", userId).get()
+  ]);
+  const writes = [
+    ...indexedTeams.docs.filter((snapshot) => (snapshot.get("members") || []).some((member) => member?.userId === userId)).flatMap((snapshot) => {
+      const members = (snapshot.get("members") || []).map((member) =>
+        member?.userId === userId ? { ...member, displayName: profileName } : member);
+      return [{ ref: snapshot.ref, data: { members, updatedAtEpochMs: Date.now() } }];
+    }),
+    ...leaderboardEntries.docs.map((snapshot) => ({ ref: snapshot.ref, data: { name: profileName } }))
+  ];
+  for (let offset = 0; offset < writes.length; offset += 450) {
+    const batch = db.batch();
+    for (const write of writes.slice(offset, offset + 450)) batch.update(write.ref, write.data);
+    await batch.commit();
+  }
 });
 
 /** Claims and sends one published admin notification. FCM data-only messages
@@ -1357,15 +1384,20 @@ exports.leaveTeam = onCall(async (request) => {
 exports.updateTeamProfile = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before editing a team.");
   const teamId = requireTeamId(request.data?.teamId);
-  const allowedFields = new Set(["description", "founded", "homeGround", "captainName", "captainMobile", "coachManager", "teamMotto", "logoUrl"]);
-  const changes = request.data?.changes;
+  const allowedFields = new Set(["description", "founded", "homeGround", "captainName", "captainMobile", "coachManager", "teamMotto", "logoUrl", "teamName"]);
+  // Accept the normal `changes` object and the legacy top-level teamName
+  // shape used by older Android clients during the rollout.
+  const changes = request.data?.changes || (typeof request.data?.teamName === "string"
+    ? { teamName: request.data.teamName }
+    : null);
   if (!changes || typeof changes !== "object" || Array.isArray(changes)) throw new HttpsError("invalid-argument", "Invalid team details.");
   const keys = Object.keys(changes);
   if (keys.length !== 1 || !allowedFields.has(keys[0]) || typeof changes[keys[0]] !== "string") {
     throw new HttpsError("invalid-argument", "Invalid team detail.");
   }
   const value = changes[keys[0]].trim();
-  if (value.length > 500) throw new HttpsError("invalid-argument", "Team detail is too long.");
+  if (keys[0] === "teamName" && (!value || value.length > 30)) throw new HttpsError("invalid-argument", "Team name must be between 1 and 30 characters.");
+  if (keys[0] !== "teamName" && value.length > 500) throw new HttpsError("invalid-argument", "Team detail is too long.");
   if (keys[0] === "logoUrl") {
     let parsedUrl;
     try {
@@ -1380,7 +1412,23 @@ exports.updateTeamProfile = onCall(async (request) => {
   return db.runTransaction(async (transaction) => {
     const { ref, members } = await teamInTransaction(transaction, teamId);
     if (!isManager(findMember(members, request.auth.uid))) throw new HttpsError("permission-denied", "Only a team admin or captain can edit team details.");
-    transaction.update(ref, { [keys[0]]: value, updatedAtEpochMs: Date.now() });
+    const updates = keys[0] === "teamName"
+      ? { teamName: value, name: value, shortName: value.slice(0, 3).toUpperCase(), updatedAtEpochMs: Date.now() }
+      : { [keys[0]]: value, updatedAtEpochMs: Date.now() };
+    transaction.update(ref, updates);
+    return { teamId };
+  });
+});
+
+exports.deleteTeam = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before deleting a team.");
+  const teamId = requireTeamId(request.data?.teamId);
+  return db.runTransaction(async (transaction) => {
+    const { ref, members } = await teamInTransaction(transaction, teamId);
+    if (!hasRole(findMember(members, request.auth.uid), ROLES.ADMIN)) {
+      throw new HttpsError("permission-denied", "Only a team admin can delete this team.");
+    }
+    transaction.delete(ref);
     return { teamId };
   });
 });

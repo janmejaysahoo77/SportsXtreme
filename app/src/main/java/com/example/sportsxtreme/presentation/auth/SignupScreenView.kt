@@ -16,6 +16,7 @@ import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.util.AttributeSet
+import android.util.Log
 import android.util.Patterns
 import android.view.Gravity
 import android.view.View
@@ -28,6 +29,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Space
 import android.widget.TextView
+import android.widget.ProgressBar
 import android.widget.Toast
 
 import com.example.sportsxtreme.R
@@ -49,7 +51,7 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import kotlinx.coroutines.CoroutineScope
@@ -182,8 +184,9 @@ class SignupScreenView @JvmOverloads constructor(
         return editText
     }
 
-    private fun primaryButton(context: Context): TextView {
-        return TextView(context).apply {
+    private fun primaryButton(context: Context): View {
+        val container = FrameLayout(context)
+        val button = TextView(context).apply {
             createAccountButton = this
             text = context.getString(R.string.str_create_account)
             gravity = Gravity.CENTER
@@ -201,6 +204,13 @@ class SignupScreenView @JvmOverloads constructor(
                 handleSignup(context)
             }
         }
+        container.addView(button, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        container.addView(ProgressBar(context).apply {
+            isIndeterminate = true
+            visibility = View.GONE
+            tag = "auth_loading_spinner"
+        }, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.END or Gravity.CENTER_VERTICAL).apply { rightMargin = dp(14) })
+        return container
     }
 
     private fun consentCheckbox(context: Context): View = LinearLayout(context).apply {
@@ -349,20 +359,17 @@ class SignupScreenView @JvmOverloads constructor(
 
         val serverClientId = googleServerClientId(context)
         if (serverClientId.isNullOrBlank()) {
-            showError("Google signup needs a Firebase web client ID. Add SHA keys in Firebase, download google-services.json again, then rebuild.")
+            showError("Firebase did not generate a Google web client ID. Check the Google provider setup and app/google-services.json, then rebuild.")
             return
         }
 
         setLoading(true, googleLoading = true)
         signupScope.launch {
             try {
-                val googleIdOption = GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(false)
-                    .setServerClientId(serverClientId)
-                    .setAutoSelectEnabled(false)
+                val googleSignInOption = GetSignInWithGoogleOption.Builder(serverClientId)
                     .build()
                 val request = GetCredentialRequest.Builder()
-                    .addCredentialOption(googleIdOption)
+                    .addCredentialOption(googleSignInOption)
                     .build()
                 val result = credentialManager.getCredential(context, request)
                 val credential = result.credential
@@ -383,10 +390,13 @@ class SignupScreenView @JvmOverloads constructor(
                     showError("Google signup did not return a valid account.")
                 }
             } catch (error: GetCredentialCancellationException) {
+                Log.d("SignupScreenView", "[AUTH] Google signup cancelled by user")
                 showError(null)
             } catch (error: GetCredentialException) {
+                Log.e("SignupScreenView", "[AUTH] Google signup credential request failed: ${error.message}", error)
                 showError(error.message ?: "Google signup failed")
             } catch (error: GoogleIdTokenParsingException) {
+                Log.e("SignupScreenView", "[AUTH] Google signup token could not be parsed: ${error.message}", error)
                 showError("Google signup response could not be read.")
             } finally {
                 setLoading(false)
@@ -404,14 +414,14 @@ class SignupScreenView @JvmOverloads constructor(
     }
 
     private fun googleServerClientId(context: Context): String? {
-        val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-        return if (resId != 0) context.getString(resId) else null
+        return context.getString(R.string.default_web_client_id).takeIf { it.isNotBlank() }
     }
 
     private fun setLoading(loading: Boolean, googleLoading: Boolean = false) {
         isSignupLoading = loading
         refreshCreateAccountButton()
         createAccountButton.text = if (loading) "CREATING..." else context.getString(R.string.str_create_account)
+        (createAccountButton.parent as? ViewGroup)?.findViewWithTag<View>("auth_loading_spinner")?.visibility = if (loading) View.VISIBLE else View.GONE
         if (googleLoading) {
             createAccountButton.text = context.getString(R.string.str_create_account)
         }

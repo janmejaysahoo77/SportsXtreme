@@ -28,6 +28,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -230,19 +231,18 @@ private fun rememberPlayerMatches(userId: String?, playerTeamLogosById: Map<Stri
 }
 
 @Composable
-private fun rememberParticipatedTournaments(userId: String?): HostTournamentsViewModel.UiState {
-    var state by remember(userId) {
+private fun rememberParticipatedTournaments(userId: String?, teamIds: Set<String>): HostTournamentsViewModel.UiState {
+    var state by remember(userId, teamIds) {
         mutableStateOf<HostTournamentsViewModel.UiState>(HostTournamentsViewModel.UiState.Loading)
     }
-    DisposableEffect(userId) {
-        if (userId.isNullOrBlank()) {
+    DisposableEffect(userId, teamIds) {
+        if (userId.isNullOrBlank() || teamIds.isEmpty()) {
             state = HostTournamentsViewModel.UiState.Content(emptyList())
             return@DisposableEffect onDispose { }
         }
 
         val registration = FirebaseFirestore.getInstance()
-            .collectionGroup("teams")
-            .whereEqualTo("captainUserId", userId)
+            .collection("tournaments")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     state = HostTournamentsViewModel.UiState.Error(
@@ -251,30 +251,15 @@ private fun rememberParticipatedTournaments(userId: String?): HostTournamentsVie
                     return@addSnapshotListener
                 }
 
-                val tournamentIds = snapshot?.documents.orEmpty()
-                    .mapNotNull { it.reference.parent.parent?.id }
-                    .distinct()
-                if (tournamentIds.isEmpty()) {
-                    state = HostTournamentsViewModel.UiState.Content(emptyList())
-                    return@addSnapshotListener
-                }
-
-                val firestore = FirebaseFirestore.getInstance()
-                val tournamentRefs = tournamentIds.map { firestore.collection("tournaments").document(it) }
-                com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.DocumentSnapshot>(
-                    tournamentRefs.map { it.get() }
-                ).addOnSuccessListener { documents ->
-                    state = HostTournamentsViewModel.UiState.Content(
-                        documents.mapNotNull { document ->
-                            if (!document.exists()) null
-                            else document.toObject(Tournament::class.java)?.copy(id = document.id)
-                        }.sortedByDescending { it.createdAtEpochMs }
-                    )
-                }.addOnFailureListener { fetchError ->
-                    state = HostTournamentsViewModel.UiState.Error(
-                        fetchError.message ?: "Unable to load participated tournaments"
-                    )
-                }
+                state = HostTournamentsViewModel.UiState.Content(
+                    snapshot?.documents.orEmpty()
+                        .filter { document ->
+                            val registeredTeamIds = document.get("teamIds") as? List<*> ?: emptyList<Any>()
+                            registeredTeamIds.filterIsInstance<String>().any { it in teamIds }
+                        }
+                        .mapNotNull { document -> document.toObject(Tournament::class.java)?.copy(id = document.id) }
+                        .sortedByDescending { it.createdAtEpochMs }
+                )
             }
         onDispose { registration.remove() }
     }
@@ -518,6 +503,7 @@ fun MyCricketScreen(
     val selectedTab = pagerState.currentPage
     var selectedMatchesTab by remember { mutableIntStateOf(0) }
     var selectedTournamentSegment by remember { mutableIntStateOf(0) }
+    var teamSearchQuery by remember { mutableStateOf("") }
     var tournamentPendingDeletion by remember { mutableStateOf<Tournament?>(null) }
     var guestPromptDetail by remember { mutableStateOf<String?>(null) }
     val joinedTeams = rememberJoinedTeams()
@@ -527,7 +513,10 @@ fun MyCricketScreen(
     fun runProtectedAction(detail: String, action: () -> Unit) {
         if (isGuest) guestPromptDetail = detail else action()
     }
-    val participatedTournamentsState = rememberParticipatedTournaments(currentUserId)
+    val participatedTournamentsState = rememberParticipatedTournaments(
+        currentUserId,
+        joinedTeams.mapTo(linkedSetOf()) { it.id }
+    )
     val playerMatchesState = rememberPlayerMatches(
         currentUserId,
         joinedTeams.associate { it.id to it.logoUrl }
@@ -664,8 +653,9 @@ fun MyCricketScreen(
                             }
                         )
                     }
-                    item { QuickSearchBar() }
-                    item { ActiveTeamsHeader(joinedTeams.size) }
+                    item { QuickSearchBar(teamSearchQuery, onQueryChanged = { teamSearchQuery = it }) }
+                    val filteredTeams = joinedTeams.filter { it.name.contains(teamSearchQuery.trim(), ignoreCase = true) }
+                    item { ActiveTeamsHeader(filteredTeams.size) }
                     if (joinedTeams.isEmpty()) {
                         if (isGuest) item {
                             GuestAccessCard(
@@ -674,8 +664,10 @@ fun MyCricketScreen(
                                 onSignup = { guestPromptDetail = "Login or sign up to create or join a team" }
                             )
                         } else item { NoJoinedTeamsCard() }
+                    } else if (filteredTeams.isEmpty()) {
+                        item { Text("No teams match ‘$teamSearchQuery’.", color = CricketMuted, fontSize = 13.sp, modifier = Modifier.padding(18.dp)) }
                     } else {
-                        items(joinedTeams) { team -> TeamCard(team) }
+                        items(filteredTeams) { team -> TeamCard(team) }
                     }
                 }
 
@@ -2142,7 +2134,7 @@ private fun CreateTeamPrompt(onCreateClick: () -> Unit) {
 }
 
 @Composable
-private fun QuickSearchBar() {
+private fun QuickSearchBar(query: String, onQueryChanged: (String) -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -2161,11 +2153,18 @@ private fun QuickSearchBar() {
                 colorFilter = ColorFilter.tint(ClubMuted)
             )
             Spacer(Modifier.width(12.dp))
-            Text(
-                "Quick search",
-                color = ClubMuted,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChanged,
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 15.sp),
+                decorationBox = { innerTextField ->
+                    Box {
+                        if (query.isBlank()) Text("Search teams", color = ClubMuted, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        innerTextField()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }

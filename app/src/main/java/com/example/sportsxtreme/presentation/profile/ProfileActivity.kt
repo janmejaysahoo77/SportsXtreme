@@ -1,6 +1,7 @@
 package com.example.sportsxtreme.presentation.profile
 
 import android.os.Bundle
+import android.graphics.Bitmap
 import android.net.Uri
 import android.content.Intent
 import android.util.Log
@@ -60,6 +61,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
@@ -89,6 +92,9 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.functions.FirebaseFunctions
 import com.google.firebase.functions.FirebaseFunctionsException
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -210,6 +216,7 @@ private fun ProfileScreen(
     var nameDraft by remember { mutableStateOf("") }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showProfilePhotoActions by remember { mutableStateOf(false) }
+    var showProfileQr by remember { mutableStateOf(false) }
     var draftProfile by remember { mutableStateOf(uiState.profile) }
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -433,7 +440,7 @@ private fun ProfileScreen(
                             .fillMaxWidth()
                             .padding(bottom = 10.dp)
                     )
-                    ProfileStats(uiState.profile)
+                    ProfileStats(uiState.profile, onShowQr = { showProfileQr = true })
                     if (isOwnProfile) {
                         SectionTitle(
                             title = "Personal Details",
@@ -630,6 +637,45 @@ private fun ProfileScreen(
                         }
                     }
                 }
+            }
+
+            if (showProfileQr && uiState.profile.id.isNotBlank()) {
+                val profileUrl = remember(uiState.profile.id) { profileDeepLink(uiState.profile.id) }
+                val qrBitmap = remember(profileUrl) { profileQrBitmap(profileUrl) }
+                AlertDialog(
+                    onDismissRequest = { showProfileQr = false },
+                    title = { Text("Scan to view profile", color = Platinum, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (qrBitmap != null) {
+                                Image(
+                                    bitmap = qrBitmap,
+                                    contentDescription = "QR code for ${uiState.profile.name}'s profile",
+                                    modifier = Modifier.size(220.dp).padding(8.dp)
+                                )
+                            } else {
+                                Text("Could not create the profile QR code.", color = SoftText)
+                            }
+                            Text(profileUrl, color = SoftText, fontSize = 10.sp, textAlign = TextAlign.Center)
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            runCatching {
+                                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, profileUrl)
+                                }, "Share profile"))
+                            }.onFailure { Toast.makeText(context, "Unable to share profile link", Toast.LENGTH_SHORT).show() }
+                        }) { Text("Share", color = Lime) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showProfileQr = false }) { Text("Close", color = Platinum) }
+                    },
+                    containerColor = Color(0xFF081014),
+                    titleContentColor = Platinum,
+                    textContentColor = Platinum
+                )
             }
 
             if (showNameDialog) {
@@ -1415,31 +1461,30 @@ private fun HostedTile(value: String, label: String, accent: Color, modifier: Mo
 }
 
 @Composable
-private fun ProfileStats(profile: UserProfile) {
+private fun ProfileStats(profile: UserProfile, onShowQr: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         StatTile(profile.followers.toString(), "Followers", Lime, Modifier.weight(1f), comingSoon = true)
         StatTile(profile.following.toString(), "Following", Aqua, Modifier.weight(1f), comingSoon = true)
-        StatTile("Profile", "QR", Gold, Modifier.weight(1f), showQr = true)
+        StatTile("Profile", "QR", Gold, Modifier.weight(1f), showQr = true, onClick = onShowQr, qrValue = profileDeepLink(profile.id))
     }
 }
 
 @Composable
-private fun StatTile(value: String, label: String, accent: Color, modifier: Modifier, showQr: Boolean = false, comingSoon: Boolean = false) {
+private fun StatTile(value: String, label: String, accent: Color, modifier: Modifier, showQr: Boolean = false, comingSoon: Boolean = false, onClick: (() -> Unit)? = null, qrValue: String? = null) {
+    val qrBitmap = remember(showQr, qrValue) { if (showQr && !qrValue.isNullOrBlank()) profileQrBitmap(qrValue) else null }
     Column(
         modifier
             .shadow(12.dp, RoundedCornerShape(15.dp), clip = false)
             .clip(RoundedCornerShape(15.dp))
             .background(Brush.verticalGradient(listOf(Color(0xFF142229), Card)))
             .border(1.dp, accent.copy(alpha = 0.42f), RoundedCornerShape(15.dp))
+            .clickable(enabled = onClick != null) { onClick?.invoke() }
             .padding(vertical = 15.dp, horizontal = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         if (showQr) {
-            Image(
-                painter = painterResource(id = R.drawable.img),
-                contentDescription = "Profile QR",
-                modifier = Modifier.size(34.dp)
-            )
+            if (qrBitmap != null) Image(bitmap = qrBitmap, contentDescription = "Profile QR", modifier = Modifier.size(42.dp))
+            else Text("QR", color = Platinum, fontSize = 20.sp, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(6.dp))
         } else {
             Text(value, color = Platinum, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 1)
@@ -1463,6 +1508,24 @@ private fun StatTile(value: String, label: String, accent: Color, modifier: Modi
         }
     }
 }
+
+private fun profileDeepLink(userId: String): String =
+    "https://sportsxtreme-95fbb.web.app/profile?userId=$userId"
+
+private fun profileQrBitmap(value: String): ImageBitmap? = runCatching {
+    val matrix = QRCodeWriter().encode(
+        value,
+        BarcodeFormat.QR_CODE,
+        512,
+        512,
+        mapOf(EncodeHintType.MARGIN to 1)
+    )
+    Bitmap.createBitmap(matrix.width, matrix.height, Bitmap.Config.ARGB_8888).apply {
+        for (y in 0 until matrix.height) for (x in 0 until matrix.width) {
+            setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+        }
+    }.asImageBitmap()
+}.getOrNull()
 
 @Composable
 private fun ProfilePhotoAction(
@@ -1760,7 +1823,7 @@ private fun playingProfileInputs(profile: UserProfile): List<ProfileChoiceInput>
         ),
         ProfileChoiceInput(
             label = "Batting",
-            options = listOf("Right hand batter", "LeftHand Batter", "MiddleHand Batter"),
+            options = listOf("Right hand batter", "LeftHand Batter"),
             currentValue = profile.battingStyle,
             updateProfile = { currentProfile, value -> currentProfile.copy(battingStyle = value) }
         ),

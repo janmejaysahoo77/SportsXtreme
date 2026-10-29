@@ -11,6 +11,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.Build
 import android.os.Looper
 import android.util.Log
 import android.animation.ObjectAnimator
@@ -72,6 +73,7 @@ import com.example.sportsxtreme.common.Resource
 import com.example.sportsxtreme.data.di.AuthDependencies
 import com.example.sportsxtreme.presentation.phoneAuth.PhoneAuth
 import com.example.sportsxtreme.presentation.home.HomeScreenView
+import com.example.sportsxtreme.presentation.profile.ProfileActivity
 import com.example.sportsxtreme.presentation.home.LiveMatchViewModel
 import com.example.sportsxtreme.presentation.media.XtremeMediaActivity
 import com.example.sportsxtreme.presentation.store.ShoppingActivity
@@ -125,11 +127,31 @@ class MainActivity : ComponentActivity() {
     private val hostTournamentsViewModel: HostTournamentsViewModel by viewModels()
     private val locationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var locationPermissionPromptedThisSession = false
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        getSharedPreferences("notification_permission", MODE_PRIVATE)
+            .edit().putBoolean("home_prompted", true).apply()
+    }
+
+    private fun requestNotificationPermissionOnFirstHomeEntry() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val preferences = getSharedPreferences("notification_permission", MODE_PRIVATE)
+        if (preferences.getBoolean("home_prompted", false)) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            preferences.edit().putBoolean("home_prompted", true).apply()
+            return
+        }
+        window.decorView.post {
+            if (currentScreen == Screen.Home) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     private var locationSettingsCheckInProgress = false
     private var homeLocationLabel by mutableStateOf("Finding your location…")
     private var returnToHomeAfterAuthCancel = false
     private var currentScreen by mutableStateOf(Screen.Splash)
     private var pendingSharedFeedPostId: String? = null
+    private var pendingSharedTeamId: String? = null
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -161,8 +183,14 @@ class MainActivity : ComponentActivity() {
         }
 
         super.onCreate(savedInstanceState)
+        extractProfileUserId(intent)?.let { userId ->
+            openProfileFromLink(userId)
+            finish()
+            return
+        }
         receiveIncomingInviteToken(intent)
         pendingSharedFeedPostId = extractSharedFeedPostId(intent)
+        pendingSharedTeamId = extractSharedTeamId(intent)
         val hasIncomingAuthLink = handleIncomingAuthLink(intent)
         val forceLogin = intent.getBooleanExtra(EXTRA_FORCE_LOGIN, false)
         val forceSignup = intent.getBooleanExtra(EXTRA_FORCE_SIGNUP, false)
@@ -421,6 +449,7 @@ class MainActivity : ComponentActivity() {
                             liveMatchViewModel = liveMatchViewModel,
                             hostTournamentsViewModel = hostTournamentsViewModel,
                             startInMyCricketTeams = openMyCricketTeamsAfterInvite,
+                            startInHostTab = intent.getBooleanExtra(EXTRA_OPEN_HOST_TAB, false),
                             startInQuickScoringTab = openHostQuickScoringAfterReturn,
                             sharedPostId = pendingSharedFeedPostId
                         ).also {
@@ -526,8 +555,12 @@ class MainActivity : ComponentActivity() {
         openHostQuickScoringAfterReturn = false
         currentScreen = Screen.Home
         ensureComposeInitialized()
+        requestNotificationPermissionOnFirstHomeEntry()
         window.decorView.post {
-            if (currentScreen == Screen.Home) requestLocationPermissionAndUpdate()
+            if (currentScreen == Screen.Home) {
+                requestLocationPermissionAndUpdate()
+                openPendingSharedTeam()
+            }
         }
     }
 
@@ -538,6 +571,7 @@ class MainActivity : ComponentActivity() {
         openHostQuickScoringAfterReturn = true
         currentScreen = Screen.Home
         ensureComposeInitialized()
+        requestNotificationPermissionOnFirstHomeEntry()
         window.decorView.post {
             if (currentScreen == Screen.Home) requestLocationPermissionAndUpdate()
         }
@@ -571,6 +605,20 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        extractSharedTeamId(intent)?.let { teamId ->
+            pendingSharedTeamId = teamId
+            if (currentScreen == Screen.Home) openPendingSharedTeam()
+            else if (com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null) showHomeScreen()
+            return
+        }
+        extractProfileUserId(intent)?.let { userId ->
+            openProfileFromLink(userId)
+            return
+        }
+        if (intent.getBooleanExtra(EXTRA_OPEN_HOST_TAB, false)) {
+            showHomeScreen()
+            return
+        }
         if (intent.getBooleanExtra(EXTRA_OPEN_HOST_QUICK_SCORING, false)) {
             showHostQuickScoringTab()
             return
@@ -606,11 +654,15 @@ class MainActivity : ComponentActivity() {
             ?: extractInviteToken(intent)?.let(inviteLinkViewModel::receiveInviteToken)
     }
 
+    private fun isSupportedHost(host: String?): Boolean {
+        return host == INVITE_HOST || host == ALT_INVITE_HOST
+    }
+
     private fun extractInviteToken(intent: Intent?): String? {
         val uri = intent?.data ?: return null
         if (intent.action != Intent.ACTION_VIEW ||
             uri.scheme != INVITE_SCHEME ||
-            uri.host != INVITE_HOST ||
+            !isSupportedHost(uri.host) ||
             uri.path != INVITE_PATH
         ) {
             return null
@@ -624,7 +676,7 @@ class MainActivity : ComponentActivity() {
         val uri = intent?.data ?: return null
         if (intent.action != Intent.ACTION_VIEW ||
             uri.scheme != INVITE_SCHEME ||
-            uri.host != INVITE_HOST ||
+            !isSupportedHost(uri.host) ||
             uri.path != TEAM_INVITE_PATH
         ) return null
         return uri.getQueryParameter(TEAM_INVITE_QUERY_PARAMETER)
@@ -634,7 +686,7 @@ class MainActivity : ComponentActivity() {
 
     private fun extractTournamentInviteToken(intent: Intent?): String? {
         val uri = intent?.data ?: return null
-        if (intent.action != Intent.ACTION_VIEW || uri.scheme != INVITE_SCHEME || uri.host != INVITE_HOST || uri.path != TOURNAMENT_INVITE_PATH) return null
+        if (intent.action != Intent.ACTION_VIEW || uri.scheme != INVITE_SCHEME || !isSupportedHost(uri.host) || uri.path != TOURNAMENT_INVITE_PATH) return null
         return uri.getQueryParameter(TEAM_INVITE_QUERY_PARAMETER)?.trim()?.takeIf { it.matches(TEAM_INVITE_TOKEN_PATTERN) }
     }
 
@@ -646,11 +698,46 @@ class MainActivity : ComponentActivity() {
         val uri = intent?.data ?: return null
         if (intent.action != Intent.ACTION_VIEW ||
             uri.scheme != INVITE_SCHEME ||
-            uri.host != INVITE_HOST ||
+            !isSupportedHost(uri.host) ||
             uri.pathSegments.size != 2 ||
             uri.pathSegments[0] != SHARED_POST_PATH_SEGMENT
         ) return null
         return uri.pathSegments[1].takeIf { it.matches(SOCIAL_POST_ID_PATTERN) }
+    }
+
+    private fun extractSharedTeamId(intent: Intent?): String? {
+        val uri = intent?.data ?: return null
+        if (intent.action != Intent.ACTION_VIEW || uri.scheme != INVITE_SCHEME || !isSupportedHost(uri.host) || uri.path != TEAM_VIEW_PATH) return null
+        return uri.getQueryParameter(TEAM_VIEW_QUERY_PARAMETER)?.trim()?.takeIf { it.matches(TEAM_ID_PATTERN) }
+    }
+
+    private fun openPendingSharedTeam() {
+        val teamId = pendingSharedTeamId ?: return
+        if (com.google.firebase.auth.FirebaseAuth.getInstance().currentUser == null) return
+        pendingSharedTeamId = null
+        startActivity(
+            Intent(this, com.example.sportsxtreme.presentation.team.TeamProfileActivity::class.java)
+                .putExtra(com.example.sportsxtreme.presentation.team.TeamProfileActivity.EXTRA_TEAM_ID, teamId)
+        )
+    }
+
+    private fun extractProfileUserId(intent: Intent?): String? {
+        val uri = intent?.data ?: return null
+        if (intent.action != Intent.ACTION_VIEW ||
+            uri.scheme != INVITE_SCHEME ||
+            !isSupportedHost(uri.host) ||
+            uri.path != PROFILE_PATH
+        ) return null
+        return uri.getQueryParameter(PROFILE_USER_ID_PARAMETER)
+            ?.trim()
+            ?.takeIf { it.matches(PROFILE_USER_ID_PATTERN) }
+    }
+
+    private fun openProfileFromLink(userId: String) {
+        startActivity(
+            Intent(this, ProfileActivity::class.java)
+                .putExtra(ProfileActivity.EXTRA_USER_ID, userId)
+        )
     }
 
     private fun requestLocationPermissionAndUpdate() {
@@ -846,13 +933,21 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_FORCE_SIGNUP = "extra_force_signup"
         const val EXTRA_OPEN_HOST_QUICK_SCORING = "open_host_quick_scoring"
         const val DESTINATION_SPORT_SELECTION = "sport_selection"
+        const val EXTRA_OPEN_HOST_TAB = "open_host_tab"
         private const val INVITE_SCHEME = "https"
         private const val INVITE_HOST = "sportsxtreme-95fbb.web.app"
+        private const val ALT_INVITE_HOST = "sportsxtreme-95fbb.firebaseapp.com"
         private const val INVITE_PATH = "/join"
         private const val INVITE_QUERY_PARAMETER = "invite"
         private const val TEAM_INVITE_PATH = "/team-invite"
         private const val TOURNAMENT_INVITE_PATH = "/tournament-invite"
         private const val SHARED_POST_PATH_SEGMENT = "post"
+        private const val TEAM_VIEW_PATH = "/team"
+        private const val TEAM_VIEW_QUERY_PARAMETER = "teamId"
+        private val TEAM_ID_PATTERN = Regex("^[A-Za-z0-9_-]{1,150}$")
+        private const val PROFILE_PATH = "/profile"
+        private const val PROFILE_USER_ID_PARAMETER = "userId"
+        private val PROFILE_USER_ID_PATTERN = Regex("^[A-Za-z0-9_-]{1,128}$")
         private val SOCIAL_POST_ID_PATTERN = Regex("^[A-Za-z0-9_-]{1,150}$")
         private const val TEAM_INVITE_QUERY_PARAMETER = "token"
         private val TEAM_INVITE_TOKEN_PATTERN = Regex("^[A-Za-z0-9_-]{43}$")

@@ -14,7 +14,15 @@ The Android phone-auth implementation uses Firebase Authentication with `PhoneAu
 5. Download the refreshed `google-services.json` after changing the registered fingerprints and rebuild the app. Fingerprint registration itself is managed in Firebase Console; it is not encoded in this file.
 6. Install a release build from Google Play when validating Play Integrity in production-like conditions. Sideloaded/debug builds and devices without Google Play services may use Firebase's reCAPTCHA fallback, so some browser checks can remain even after setup is correct.
 
-Get the local debug fingerprints with:
+The app's Gradle `applicationId` is `com.sportsxtreme.app`. The checked-in `app/google-services.json` contains a matching Firebase Android client, as well as a legacy client for `com.example.sportsxtreme`; Google Services selects the matching client for the build. Do not change the Gradle `applicationId` to the legacy package to work around verification. The JSON file alone cannot establish that the signing certificate on a particular installed APK/AAB is registered in Firebase. If Firebase reports that the request is missing a valid app identifier, compare the installed build's signing certificate with the SHA-1 and SHA-256 fingerprints on the matching Firebase Android app, then check the API key restriction for the reCAPTCHA handler domain.
+
+## Google sign-in setup
+
+Google sign-in and sign-up both use Firebase Authentication. In Firebase Console, enable **Google** under **Authentication > Sign-in method** and choose a support email. Register the SHA-1 fingerprints for the debug certificate, the release certificate used for local APKs, and the Google Play App Signing certificate if applicable. The current matching client in `app/google-services.json` includes one Android OAuth client for `com.sportsxtreme.app` with SHA-1 `3b:29:2d:8e:53:d1:9c:83:1b:57:4a:33:50:c1:9b:97:86:42:de:1b`; a build signed with a different certificate needs its SHA-1 added in Firebase. After registering fingerprints or changing Google provider settings, download the updated `google-services.json` and rebuild. The web OAuth client ID is generated from this file at build time; reference it through `R.string.default_web_client_id` so resource shrinking preserves it, and do not hard-code it in app resources.
+
+For a Play-distributed build, use the **App signing key certificate** from Play Console, not only the upload key certificate. For a locally installed build, register the certificate that signed that exact build. After changing fingerprints in Firebase, download a fresh `google-services.json` and rebuild/reinstall.
+
+Get the local debug fingerprints with (requires the Gradle wrapper distribution to be available):
 
 ```text
 ./gradlew.bat signingReport

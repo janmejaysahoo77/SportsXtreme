@@ -10,8 +10,7 @@ import com.example.sportsxtreme.presentation.scoring.*
 import com.example.sportsxtreme.presentation.match.*
 import com.example.sportsxtreme.presentation.media.*
 import com.example.sportsxtreme.presentation.home.CommunityScreen
-import com.example.sportsxtreme.presentation.home.LeaderboardScreen
-import com.sportsxtreme.v2features.LeaderBoardScreen2
+import com.sportsxtreme.v2features.LeaderboardScreen
 import com.example.sportsxtreme.presentation.home.MyCricketScreen
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*
@@ -103,6 +102,7 @@ class HomeScreenView @JvmOverloads constructor(
     private val liveMatchViewModel: LiveMatchViewModel? = null,
     private val hostTournamentsViewModel: HostTournamentsViewModel? = null,
     private val startInMyCricketTeams: Boolean = false,
+    private val startInHostTab: Boolean = false,
     private val startInQuickScoringTab: Boolean = false,
     sharedPostId: String? = null
 ) : FrameLayout(context, attrs) {
@@ -140,7 +140,7 @@ class HomeScreenView @JvmOverloads constructor(
         NavItem("Community", NavIconView.Icon.USERS),
         NavItem("Leaderboard", NavIconView.Icon.TROPHY)
     )
-    private var selectedIndex = if (startInMyCricketTeams) 1 else 0
+    private var selectedIndex = when { startInMyCricketTeams -> 1; startInHostTab -> 2; else -> 0 }
     private var requestedFeedPostId: String? = sharedPostId
     private lateinit var contentHolder: FrameLayout
     private lateinit var navRow: LinearLayout
@@ -152,6 +152,9 @@ class HomeScreenView @JvmOverloads constructor(
     private var drawerProfilePhotoUserId: String? = null
     private var drawerProfileCompletionText: TextView? = null
     private var drawerProfileCompletionFill: View? = null
+    private var drawerProfileCompletionBar: View? = null
+    private var lastDrawerProfileCompletion: Int? = null
+    private var profileCompletionToastShown = false
     private var locationLabelView: TextView? = null
     private var homeMatchSearchQuery = ""
     private var liveMatchesSectionView: LiveMatchesSectionView? = null
@@ -331,6 +334,8 @@ class HomeScreenView @JvmOverloads constructor(
             values += !(profile?.get("bowlingStyle") as? String).orEmpty().isBlank()
         }
         val completion = (values.count { it } * 100 / values.size).coerceIn(0, 100)
+        val previousCompletion = lastDrawerProfileCompletion
+        lastDrawerProfileCompletion = completion
         val color = when {
             completion < 30 -> Color.rgb(255, 77, 79)
             completion < 70 -> Color.rgb(255, 194, 71)
@@ -344,6 +349,16 @@ class HomeScreenView @JvmOverloads constructor(
             drawerProfileCompletionFill?.apply {
                 (background as? GradientDrawable)?.setColor(color)
                 scaleX = completion / 100f
+            }
+            if (completion == 100 && previousCompletion != null && previousCompletion < 100 && !profileCompletionToastShown) {
+                profileCompletionToastShown = true
+                Toast.makeText(context, "Profile completed!", Toast.LENGTH_SHORT).show()
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (drawerProfileCompletionText?.text?.toString() == "Profile completed • 100%") {
+                        drawerProfileCompletionText?.visibility = View.GONE
+                        drawerProfileCompletionBar?.visibility = View.GONE
+                    }
+                }, 4_000L)
             }
         }
     }
@@ -518,6 +533,7 @@ class HomeScreenView @JvmOverloads constructor(
                     })
 
                     addView(FrameLayout(context).apply {
+                        drawerProfileCompletionBar = this
                         background = GradientDrawable().apply {
                             cornerRadius = dp(2).toFloat()
                             setColor(Color.rgb(60, 65, 70))
@@ -952,7 +968,7 @@ class HomeScreenView @JvmOverloads constructor(
     private fun createLeaderboardContent(context: Context): View {
         return ComposeView(context).apply {
             setContent {
-                LeaderBoardScreen2(onMenuClick = { openDrawer() })
+                LeaderboardScreen(onMenuClick = { openDrawer() })
             }
         }
     }
@@ -2636,6 +2652,19 @@ class HomeScreenView @JvmOverloads constructor(
         private var currentBannerIndex = 0
         private var pageStridePx = 0
         private lateinit var bannerScroller: HorizontalScrollView
+        private val bannerSkeleton = FrameLayout(context).apply {
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(Color.rgb(14, 31, 48))
+            }
+            val bones = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                addView(View(context).apply { background = skeletonBone() }, LinearLayout.LayoutParams(dp(142), dp(13)).apply { bottomMargin = dp(10) })
+                addView(View(context).apply { background = skeletonBone() }, LinearLayout.LayoutParams(dp(220), dp(9)))
+            }
+            addView(bones, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
         private val autoAdvance = object : Runnable {
             override fun run() {
                 if (!isAttachedToWindow || bannerCount < 2) return
@@ -2646,8 +2675,9 @@ class HomeScreenView @JvmOverloads constructor(
         }
 
         init {
-            orientation = VERTICAL
-            visibility = GONE
+            orientation = LinearLayout.VERTICAL
+            visibility = VISIBLE
+            bannerDots.visibility = GONE
             bannerScroller = configureHorizontalScroll(HorizontalScrollView(context)).apply {
                 isHorizontalScrollBarEnabled = false
                 clipToPadding = false
@@ -2667,6 +2697,8 @@ class HomeScreenView @JvmOverloads constructor(
                     }
                 }
             }
+            addView(bannerSkeleton, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(196)))
+            bannerScroller.visibility = GONE
             addView(bannerScroller, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(bannerDots, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(10)))
         }
@@ -2679,6 +2711,7 @@ class HomeScreenView @JvmOverloads constructor(
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
                         Log.w("HomeBanners", "Unable to load published app banners", error)
+                        visibility = GONE
                         return@addSnapshotListener
                     }
                     if (snapshot == null) return@addSnapshotListener
@@ -2779,6 +2812,9 @@ class HomeScreenView @JvmOverloads constructor(
                     setSelectedBanner(0)
                     if (bannerCount > 1 && isAttachedToWindow) autoAdvanceHandler.postDelayed(autoAdvance, 4_500L)
                     Log.d("HomeBanners", "Loaded ${banners.size} published app banner(s)")
+                    bannerSkeleton.visibility = GONE
+                    bannerScroller.visibility = if (banners.isEmpty()) GONE else VISIBLE
+                    bannerDots.visibility = if (banners.size > 1) VISIBLE else GONE
                     visibility = if (banners.isEmpty()) GONE else VISIBLE
                 }
         }
@@ -3808,8 +3844,32 @@ class HomeScreenView @JvmOverloads constructor(
         var currentLikeCount = 0
         var isLikeRequestInFlight = false
         var currentPostShareText: String? = null
-        return LinearLayout(context).apply {
+        var feedSkeleton: LinearLayout? = null
+        var feedContent: LinearLayout? = null
+        return FrameLayout(context).apply {
+            val skeleton = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(16), dp(22), dp(16), dp(22))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(8).toFloat()
+                    setColor(Color.rgb(15, 22, 33))
+                    setStroke(1, Color.argb(48, 255, 255, 255))
+                }
+                repeat(2) { index -> addView(View(context).apply { background = skeletonBone() }, LinearLayout.LayoutParams(if (index == 0) dp(120) else dp(220), dp(if (index == 0) 12 else 9)).apply { topMargin = dp(7); bottomMargin = dp(7) }) }
+                addView(TextView(context).apply {
+                    text = "Loading sports feed…"
+                    setTextColor(Color.rgb(130, 145, 142))
+                    textSize = 10f
+                    visibility = View.GONE
+                    tag = "feed_skeleton_message"
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+            }
+            feedSkeleton = skeleton
+            addView(skeleton, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
+            visibility = View.INVISIBLE
             setPadding(dp(12), dp(12), dp(12), dp(10))
             background = GradientDrawable().apply {
                 cornerRadius = dp(8).toFloat()
@@ -3914,8 +3974,10 @@ class HomeScreenView @JvmOverloads constructor(
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).apply { topMargin = dp(12) })
 
             addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
                     isClickable = true
                     isFocusable = true
@@ -3932,6 +3994,8 @@ class HomeScreenView @JvmOverloads constructor(
                         typeface = Typeface.DEFAULT_BOLD
                         includeFontPadding = false
                     }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(6) })
+                    minimumHeight = dp(44)
+                    preserveFeedButtonTouch(this)
                     setOnClickListener {
                         val userId = FirebaseAuth.getInstance().currentUser?.uid
                         val postRef = currentPostRef
@@ -3939,17 +4003,29 @@ class HomeScreenView @JvmOverloads constructor(
                             Toast.makeText(context, "Sign in to like this post", Toast.LENGTH_SHORT).show()
                         } else if (postRef != null && !isLikeRequestInFlight) {
                             isLikeRequestInFlight = true
-                            isEnabled = false
+                            val previouslyLiked = isCurrentUserLiked
+                            val previousCount = currentLikeCount
+                            isCurrentUserLiked = !previouslyLiked
+                            currentLikeCount = (previousCount + if (isCurrentUserLiked) 1 else -1).coerceAtLeast(0)
+                            likeCountView?.text = "$currentLikeCount ${if (currentLikeCount == 1) "like" else "likes"}"
+                            likeButtonIcon?.imageTintList = android.content.res.ColorStateList.valueOf(
+                                if (isCurrentUserLiked) Color.rgb(255, 75, 105) else Color.WHITE
+                            )
+
                             val likeRef = postRef.collection("likes").document(userId)
-                            val operation = if (isCurrentUserLiked) likeRef.delete() else likeRef.set(
+                            val operation = if (previouslyLiked) likeRef.delete() else likeRef.set(
                                 mapOf("uid" to userId, "createdAt" to FieldValue.serverTimestamp())
                             )
                             operation.addOnSuccessListener {
                                 isLikeRequestInFlight = false
-                                isEnabled = true
                             }.addOnFailureListener { error ->
                                 isLikeRequestInFlight = false
-                                isEnabled = true
+                                isCurrentUserLiked = previouslyLiked
+                                currentLikeCount = previousCount
+                                likeCountView?.text = "$currentLikeCount ${if (currentLikeCount == 1) "like" else "likes"}"
+                                likeButtonIcon?.imageTintList = android.content.res.ColorStateList.valueOf(
+                                    if (isCurrentUserLiked) Color.rgb(255, 75, 105) else Color.WHITE
+                                )
                                 Log.w("HomeScreenView", "Unable to update social post like", error)
                                 val message = if (error is FirebaseFirestoreException && error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                                     "Likes are blocked by Firestore rules. Deploy firestore.rules and try again."
@@ -3962,6 +4038,7 @@ class HomeScreenView @JvmOverloads constructor(
                     }
                 }, LinearLayout.LayoutParams(0, dp(42), 1f))
                 addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
                     isClickable = true
                     isFocusable = true
@@ -3976,6 +4053,8 @@ class HomeScreenView @JvmOverloads constructor(
                         typeface = Typeface.DEFAULT_BOLD
                         includeFontPadding = false
                     }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(6) })
+                    minimumHeight = dp(44)
+                    preserveFeedButtonTouch(this)
                     setOnClickListener {
                         val shareText = currentPostShareText
                         if (shareText.isNullOrBlank()) {
@@ -3985,7 +4064,11 @@ class HomeScreenView @JvmOverloads constructor(
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_TEXT, shareText)
                             }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share SportsXtreme post"))
+                            runCatching { context.startActivity(Intent.createChooser(shareIntent, "Share SportsXtreme post")) }
+                                .onFailure { error ->
+                                    Log.w("HomeScreenView", "Unable to share social post", error)
+                                    Toast.makeText(context, "Unable to share this post", Toast.LENGTH_SHORT).show()
+                                }
                         }
                     }
                 }, LinearLayout.LayoutParams(0, dp(42), 1f))
@@ -3998,10 +4081,37 @@ class HomeScreenView @JvmOverloads constructor(
                         .whereEqualTo("status", "Published")
                         .whereArrayContains("destinations", "SportsXtreme App")
                         .addSnapshotListener { snapshot, error ->
-                            if (error != null || snapshot == null || !isAttachedToWindow) return@addSnapshotListener
+                            if (error != null) {
+                                Log.w("HomeScreenView", "Unable to load sports feed", error)
+                                feedContent?.visibility = View.INVISIBLE
+                                feedSkeleton?.visibility = View.VISIBLE
+                                feedSkeleton?.apply {
+                                    removeAllViews()
+                                    addView(TextView(context).apply { text = "Unable to load sports feed"; setTextColor(Color.rgb(130, 145, 142)); textSize = 11f; gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(120)))
+                                }
+                                return@addSnapshotListener
+                            }
+                            if (snapshot == null || !isAttachedToWindow) return@addSnapshotListener
+                            if (snapshot.documents.isEmpty()) {
+                                feedContent?.visibility = View.INVISIBLE
+                                feedSkeleton?.visibility = View.VISIBLE
+                                feedSkeleton?.apply {
+                                    removeAllViews()
+                                    addView(TextView(context).apply { text = "No sports updates right now"; setTextColor(Color.rgb(130, 145, 142)); textSize = 11f; gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(120)))
+                                }
+                                return@addSnapshotListener
+                            }
                             val post = requestedFeedPostId?.let { requestedId ->
                                 snapshot.documents.firstOrNull { it.id == requestedId }
-                                    ?: return@addSnapshotListener
+                                    ?: run {
+                                        feedContent?.visibility = View.INVISIBLE
+                                        feedSkeleton?.visibility = View.VISIBLE
+                                        feedSkeleton?.apply {
+                                            removeAllViews()
+                                            addView(TextView(context).apply { text = "This shared post is unavailable"; setTextColor(Color.rgb(130, 145, 142)); textSize = 11f; gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(120)))
+                                        }
+                                        return@addSnapshotListener
+                                    }
                             } ?: snapshot.documents.maxByOrNull { doc ->
                                 listOf("publishedAt", "createdAt", "updatedAt", "timestamp")
                                     .firstNotNullOfOrNull { key ->
@@ -4011,7 +4121,15 @@ class HomeScreenView @JvmOverloads constructor(
                                             else -> null
                                         }
                                     } ?: 0L
-                            } ?: return@addSnapshotListener
+                            } ?: run {
+                                feedSkeleton?.apply {
+                                    removeAllViews()
+                                    addView(TextView(context).apply { text = "This shared post is unavailable"; setTextColor(Color.rgb(130, 145, 142)); textSize = 11f; gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(120)))
+                                }
+                                return@addSnapshotListener
+                            }
+                            feedSkeleton?.visibility = View.GONE
+                            feedContent?.visibility = View.VISIBLE
                             val postRef = post.reference
                             if (currentPostRef?.id != postRef.id) {
                                 likesListener?.remove()
@@ -4066,22 +4184,55 @@ class HomeScreenView @JvmOverloads constructor(
                             currentPostShareText = "$shareDescription\n${context.getString(R.string.social_post_share_base_url)}/${post.id}"
                             val imageValue = listOf("imageUrl", "imageURL", "image", "imagePath", "storagePath")
                                 .firstNotNullOfOrNull { key -> post.getString(key)?.trim()?.takeIf(String::isNotEmpty) }
-                                ?: return@addSnapshotListener
-                            val image = posterView ?: return@addSnapshotListener
-                            val storageRef: StorageReference? = if (imageValue.startsWith("gs://") || (!imageValue.startsWith("http://") && !imageValue.startsWith("https://"))) {
-                                runCatching<StorageReference> { FirebaseStorage.getInstance().getReferenceFromUrl(imageValue) }
-                                    .getOrElse { _: Throwable -> FirebaseStorage.getInstance().reference.child(imageValue.removePrefix("/")) }
-                            } else null
-                            if (storageRef == null) {
-                                image.visibility = View.VISIBLE
-                                image.load(imageValue)
-                            } else {
-                                storageRef.downloadUrl.addOnSuccessListener { uri: Uri ->
-                                    if (isAttachedToWindow) {
+                            if (!imageValue.isNullOrBlank()) {
+                                val image = posterView
+                                if (image != null) {
+                                    val storageRef: StorageReference? = if (imageValue.startsWith("gs://") || (!imageValue.startsWith("http://") && !imageValue.startsWith("https://"))) {
+                                        runCatching<StorageReference> { FirebaseStorage.getInstance().getReferenceFromUrl(imageValue) }
+                                            .getOrElse { _: Throwable -> FirebaseStorage.getInstance().reference.child(imageValue.removePrefix("/")) }
+                                    } else null
+                                    if (storageRef == null) {
                                         image.visibility = View.VISIBLE
-                                        image.load(uri)
+                                        image.load(imageValue)
+                                    } else {
+                                        storageRef.downloadUrl.addOnSuccessListener { uri: Uri ->
+                                            if (isAttachedToWindow) {
+                                                image.visibility = View.VISIBLE
+                                                image.load(uri)
+                                            }
+                                        }.addOnFailureListener { error: Exception -> Log.w("HomeScreenView", "Unable to load social post image", error) }
                                     }
-                                }.addOnFailureListener { error: Exception -> Log.w("HomeScreenView", "Unable to load social post image", error) }
+                                }
+                            } else {
+                                posterView?.visibility = View.GONE
+                            }
+
+                            val postStack = feedContent?.parent as? LinearLayout
+                            postStack?.apply {
+                                if (childCount > 1) {
+                                    removeViews(1, childCount - 1)
+                                }
+                                val olderPosts = snapshot.documents
+                                    .filterNot { it.id == post.id }
+                                    .sortedByDescending { olderPost ->
+                                        listOf("publishedAt", "createdAt", "updatedAt", "timestamp")
+                                            .firstNotNullOfOrNull { key ->
+                                                when (val value = olderPost.get(key)) {
+                                                    is Timestamp -> value.toDate().time
+                                                    is Number -> value.toLong().let { if (it < 100_000_000_000L) it * 1_000L else it }
+                                                    else -> null
+                                                }
+                                            } ?: 0L
+                                    }
+                                olderPosts.forEach { olderPost ->
+                                    addView(View(context).apply { setBackgroundColor(Color.argb(55, 255, 255, 255)) },
+                                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                                            topMargin = dp(14)
+                                            bottomMargin = dp(14)
+                                        })
+                                    addView(socialFeedPostCard(context, olderPost),
+                                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                                }
                             }
                         }
                 }
@@ -4092,6 +4243,235 @@ class HomeScreenView @JvmOverloads constructor(
                     likesListener?.remove()
                     likesListener = null
                     currentPostRef = null
+                }
+            })
+            }
+            feedContent = content
+            val postStack = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+            addView(postStack, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
+    private fun skeletonBone(): GradientDrawable = GradientDrawable().apply {
+        cornerRadius = dp(6).toFloat()
+        setColor(Color.rgb(32, 47, 62))
+    }
+
+    private fun preserveFeedButtonTouch(button: View) {
+        button.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            false
+        }
+    }
+
+    private fun socialFeedPostCard(context: Context, post: com.google.firebase.firestore.DocumentSnapshot): View {
+        val title = (post.getString("title") ?: post.getString("tittle")).orEmpty().ifBlank { "Sports update" }
+        val caption = post.getString("caption").orEmpty()
+        val postRef = post.reference
+        var liked = false
+        var currentLikesCount = 0
+        var likeRequestInFlight = false
+        var likesListener: ListenerRegistration? = null
+        var likeCountTextView: TextView? = null
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(12), dp(12), dp(10))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.rgb(15, 22, 33))
+                setStroke(1, Color.argb(48, 255, 255, 255))
+            }
+            addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                addView(ImageView(context).apply {
+                    setImageResource(R.drawable.appicon2)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                }, LinearLayout.LayoutParams(dp(36), dp(36)))
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(TextView(context).apply {
+                            text = context.getString(R.string.str_sportsxtreme)
+                            setTextColor(Color.WHITE)
+                            textSize = 10f
+                            typeface = Typeface.DEFAULT_BOLD
+                            includeFontPadding = false
+                        })
+                        addView(ImageView(context).apply {
+                            setImageResource(R.drawable.baseline_check_circle_24)
+                            imageTintList = android.content.res.ColorStateList.valueOf(Color.rgb(52, 211, 153))
+                            contentDescription = context.getString(R.string.verified)
+                        }, LinearLayout.LayoutParams(dp(13), dp(13)).apply { leftMargin = dp(4) })
+                    })
+                    val postDate = listOf("publishedAt", "createdAt", "updatedAt", "timestamp")
+                        .firstNotNullOfOrNull { key ->
+                            when (val value = post.get(key)) {
+                                is Timestamp -> value.toDate()
+                                is Number -> Date(value.toLong().let { if (it < 100_000_000_000L) it * 1_000L else it })
+                                else -> null
+                            }
+                        }
+                    if (postDate != null) addView(TextView(context).apply {
+                        text = SimpleDateFormat("d MMM yyyy, h:mm a", Locale.getDefault()).format(postDate)
+                        setTextColor(Color.rgb(135, 150, 158))
+                        textSize = 7.2f
+                        typeface = Typeface.DEFAULT_BOLD
+                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(3) })
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(9) })
+            })
+            addView(TextView(context).apply {
+                text = title
+                setTextColor(Color.WHITE)
+                textSize = 22f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
+                includeFontPadding = false
+                setLineSpacing(0f, 0.92f)
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
+            if (caption.isNotBlank()) addView(TextView(context).apply {
+                text = caption
+                setTextColor(Color.WHITE)
+                textSize = 10.3f
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+                setLineSpacing(0f, 1.08f)
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) })
+            val imageUrl = listOf("imageUrl", "imageURL", "image", "imagePath", "storagePath")
+                .firstNotNullOfOrNull { key -> post.getString(key)?.trim()?.takeIf(String::isNotBlank) }
+            if (!imageUrl.isNullOrBlank()) {
+                val image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+                addView(image, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(260)).apply { topMargin = dp(18) })
+                val storageRef = if (imageUrl.startsWith("gs://") || (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://"))) {
+                    runCatching { FirebaseStorage.getInstance().getReferenceFromUrl(imageUrl) }
+                        .getOrElse { FirebaseStorage.getInstance().reference.child(imageUrl.removePrefix("/")) }
+                } else null
+                if (storageRef == null) image.load(imageUrl)
+                else storageRef.downloadUrl.addOnSuccessListener { uri -> if (image.isAttachedToWindow) image.load(uri) }
+                    .addOnFailureListener { error -> Log.w("HomeScreenView", "Unable to load social post image", error) }
+            }
+
+            val likesRow = LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                addView(ImageView(context).apply {
+                    setImageResource(R.drawable.ic_heart)
+                    imageTintList = android.content.res.ColorStateList.valueOf(Color.rgb(255, 75, 105))
+                }, LinearLayout.LayoutParams(dp(18), dp(18)))
+                likeCountTextView = TextView(context).apply {
+                    text = "0 likes"
+                    setTextColor(Color.WHITE)
+                    textSize = 8.2f
+                    typeface = Typeface.DEFAULT_BOLD
+                }
+                addView(likeCountTextView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(6) })
+            }
+            addView(likesRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+            addView(View(context).apply { setBackgroundColor(Color.argb(38, 255, 255, 255)) },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply { topMargin = dp(12) })
+            val likeIcon = ImageView(context).apply {
+                setImageResource(R.drawable.ic_heart)
+                imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            }
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+                    isClickable = true
+                    isFocusable = true
+                    addView(likeIcon, LinearLayout.LayoutParams(dp(18), dp(18)))
+                    addView(TextView(context).apply { text = "Like"; setTextColor(Color.WHITE); textSize = 8.2f; typeface = Typeface.DEFAULT_BOLD },
+                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(6) })
+                    minimumHeight = dp(44)
+                    preserveFeedButtonTouch(this)
+                    setOnClickListener {
+                        val userId = FirebaseAuth.getInstance().currentUser?.uid
+                        if (userId == null) Toast.makeText(context, "Sign in to like this post", Toast.LENGTH_SHORT).show()
+                        else if (!likeRequestInFlight) {
+                            likeRequestInFlight = true
+                            val previouslyLiked = liked
+                            val previousCount = currentLikesCount
+                            liked = !previouslyLiked
+                            currentLikesCount = (previousCount + if (liked) 1 else -1).coerceAtLeast(0)
+                            likeCountTextView?.text = "$currentLikesCount ${if (currentLikesCount == 1) "like" else "likes"}"
+                            likeIcon.imageTintList = android.content.res.ColorStateList.valueOf(if (liked) Color.rgb(255, 75, 105) else Color.WHITE)
+
+                            val likeRef = postRef.collection("likes").document(userId)
+                            val operation = if (previouslyLiked) likeRef.delete() else likeRef.set(mapOf("uid" to userId, "createdAt" to FieldValue.serverTimestamp()))
+                            operation.addOnCompleteListener { task ->
+                                likeRequestInFlight = false
+                                if (!task.isSuccessful) {
+                                    liked = previouslyLiked
+                                    currentLikesCount = previousCount
+                                    likeCountTextView?.text = "$currentLikesCount ${if (currentLikesCount == 1) "like" else "likes"}"
+                                    likeIcon.imageTintList = android.content.res.ColorStateList.valueOf(if (liked) Color.rgb(255, 75, 105) else Color.WHITE)
+                                    val error = task.exception
+                                    Log.w("HomeScreenView", "Unable to update social post like", error)
+                                    val message = if (error is FirebaseFirestoreException && error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                        "Likes are blocked by Firestore rules. Deploy firestore.rules and try again."
+                                    } else "Could not update like: ${error?.localizedMessage ?: "Please try again."}"
+                                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }
+                }, LinearLayout.LayoutParams(0, dp(42), 1f))
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+                    isClickable = true
+                    isFocusable = true
+                    addView(ImageView(context).apply { setImageResource(R.drawable.ic_share) }, LinearLayout.LayoutParams(dp(18), dp(18)))
+                    addView(TextView(context).apply { text = "Share"; setTextColor(Color.WHITE); textSize = 8.2f; typeface = Typeface.DEFAULT_BOLD },
+                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(6) })
+                    minimumHeight = dp(44)
+                    preserveFeedButtonTouch(this)
+                    setOnClickListener {
+                        val shareText = buildString {
+                            append(title)
+                            if (caption.isNotBlank()) append("\n\n$caption")
+                            append("\n\nOpen this post in SportsXtreme:\n${context.getString(R.string.social_post_share_base_url)}/${post.id}")
+                        }
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, shareText) }
+                        runCatching { context.startActivity(Intent.createChooser(shareIntent, "Share SportsXtreme post")) }
+                            .onFailure { error ->
+                                Log.w("HomeScreenView", "Unable to share social post", error)
+                                Toast.makeText(context, "Unable to share this post", Toast.LENGTH_SHORT).show()
+                            }
+                    }
+                }, LinearLayout.LayoutParams(0, dp(42), 1f))
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+            addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    if (likesListener != null) return
+                    likesListener = postRef.collection("likes").addSnapshotListener { likes, error ->
+                        if (error != null) {
+                            Log.w("HomeScreenView", "Unable to load social post likes", error)
+                            return@addSnapshotListener
+                        }
+                        if (likes == null || !isAttachedToWindow) return@addSnapshotListener
+                        val userId = FirebaseAuth.getInstance().currentUser?.uid
+                        currentLikesCount = likes.documents.size
+                        liked = userId != null && likes.documents.any { it.id == userId }
+                        likeCountTextView?.text = "$currentLikesCount ${if (currentLikesCount == 1) "like" else "likes"}"
+                        likeIcon.imageTintList = android.content.res.ColorStateList.valueOf(if (liked) Color.rgb(255, 75, 105) else Color.WHITE)
+                    }
+                }
+                override fun onViewDetachedFromWindow(view: View) {
+                    likesListener?.remove()
+                    likesListener = null
                 }
             })
         }
