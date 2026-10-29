@@ -122,7 +122,7 @@ data class ClubRank(
 )
 
 @Composable
-fun LeaderBoardScreen2(
+fun LeaderboardScreen(
     onMenuClick: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableStateOf(LeaderboardTab.PLAYER) }
@@ -198,16 +198,27 @@ fun LeaderBoardScreen2(
                                 ?: playerId.substringAfterLast("::").trim()
                             canonicalId.takeIf { it.isNotBlank() && it != playerId }
                         }.distinct()
-                        val existingAccountIds = runCatching {
-                            linkedAccountIds.chunked(30).flatMap { accountIds ->
+                        val profileLookupIds = documents.mapNotNull { doc ->
+                            val playerId = doc.getString("playerId")?.trim().orEmpty()
+                            doc.getString("canonicalPlayerId")?.trim()?.takeIf(String::isNotBlank)
+                                ?: playerId.substringAfterLast("::").trim().takeIf(String::isNotBlank)
+                        }.distinct()
+                        val publicProfiles = runCatching {
+                            profileLookupIds.chunked(30).flatMap { accountIds ->
                                 firestore.collection("publicProfiles")
                                     .whereIn(FieldPath.documentId(), accountIds)
                                     .get()
                                     .await()
                                     .documents
-                                    .map { it.id }
-                            }.toSet()
-                        }.getOrDefault(linkedAccountIds.toSet())
+                            }.associateBy { it.id }
+                        }.getOrDefault(emptyMap())
+                        val existingAccountIds = if (publicProfiles.isNotEmpty() || profileLookupIds.isEmpty()) {
+                            publicProfiles.keys
+                        } else {
+                            // A temporary profile lookup failure should not hide
+                            // otherwise valid leaderboard rows.
+                            linkedAccountIds.toSet()
+                        }
                         if (!effectActive || revision != playerSnapshotRevision) return@launch
                         val missingLinkedAccounts = linkedAccountIds.toSet() - existingAccountIds
                         val records = documents.map { doc ->
@@ -223,7 +234,10 @@ fun LeaderBoardScreen2(
                             "All-rounder" -> doc.getLong("allRounderPoints") ?: 0L
                             else -> doc.getLong("battingPoints") ?: 0L
                         }
-                        val name = doc.getString("name").orEmpty().ifBlank { playerId }
+                        val currentProfileName = publicProfiles[id]?.getString("name")
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                        val name = currentProfileName ?: doc.getString("name").orEmpty().ifBlank { playerId }
                         val stats = when (selectedSkill) {
                             "Bowling" -> "W ${doc.getLong("wickets") ?: 0} • ECO ${rate((doc.getLong("runsConceded") ?: 0L).toDouble() * 6 / (doc.getLong("legalBalls") ?: 0L).coerceAtLeast(1))} • AVG ${rate((doc.getLong("runsConceded") ?: 0L).toDouble() / (doc.getLong("wickets") ?: 0L).coerceAtLeast(1))}"
                             "All-rounder" -> "BAT ${doc.getLong("battingPoints") ?: 0} • BOWL ${doc.getLong("bowlingPoints") ?: 0} • FIELD ${doc.getLong("fieldingPoints") ?: 0}"

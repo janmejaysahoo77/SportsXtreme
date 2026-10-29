@@ -195,6 +195,22 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
     }
 
     private fun navigateBackFromTournament() {
+        if (intent.getBooleanExtra(EXTRA_JUST_REGISTERED, false)) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Leave tournament setup?")
+                .setMessage("You Can Manage Your Tournament From Your Tournament Tab of Host screen")
+                .setNegativeButton("Stay", null)
+                .setPositiveButton("Go Back") { _, _ ->
+                    startActivity(
+                        Intent(this, MainActivity::class.java)
+                            .putExtra(MainActivity.EXTRA_OPEN_HOST_TAB, true)
+                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    )
+                    finish()
+                }
+                .show()
+            return
+        }
         if (isTaskRoot) {
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         }
@@ -203,6 +219,7 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_TOURNAMENT_ID = "tournament_id"
+        const val EXTRA_JUST_REGISTERED = "tournament_just_registered"
         const val EXTRA_INITIAL_TAB = "initial_tab"
         const val EXTRA_INITIAL_MATCH_TAB = "initial_match_tab"
         const val TEAMS_TAB_INDEX = 1

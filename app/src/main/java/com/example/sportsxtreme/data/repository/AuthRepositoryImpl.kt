@@ -314,7 +314,11 @@ class AuthRepositoryImpl(
             this is FirebaseAuthInvalidCredentialsException -> "Email or password is incorrect."
             rawMessage.contains("operation is not allowed", ignoreCase = true) ||
                 rawMessage.contains("sign-in provider is disabled", ignoreCase = true) -> {
-                "Email link login is not enabled in Firebase yet. Enable Email/Password sign-in and Email link sign-in, then try again."
+                if (defaultMessage.contains("Google", ignoreCase = true)) {
+                    "Google sign-in is not enabled in Firebase. In Firebase Console, open Authentication > Sign-in method, enable Google, select a support email, and save."
+                } else {
+                    "Email link login is not enabled in Firebase yet. Enable Email/Password sign-in and Email link sign-in, then try again."
+                }
             }
             rawMessage.contains("blocked all requests", ignoreCase = true) ||
                 rawMessage.contains("unusual activity", ignoreCase = true) -> {

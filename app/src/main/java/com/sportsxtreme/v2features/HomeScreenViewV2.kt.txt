@@ -10,7 +10,6 @@ import com.example.sportsxtreme.presentation.scoring.*
 import com.example.sportsxtreme.presentation.match.*
 import com.example.sportsxtreme.presentation.media.*
 import com.example.sportsxtreme.presentation.home.CommunityScreen
-import com.example.sportsxtreme.presentation.home.LeaderboardScreen
 import com.example.sportsxtreme.presentation.home.MyCricketScreen
 import com.example.sportsxtreme.presentation.team.*
 import com.example.sportsxtreme.presentation.profile.*

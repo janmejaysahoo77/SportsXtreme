@@ -112,14 +112,47 @@ class TeamProfileActivity : ComponentActivity() {
             TeamProfileScreen(
                 teamId = teamId,
                 onBack = ::finish,
+                onDeleteTeam = { teamId ->
+                    FirebaseFunctions.getInstance("us-central1").getHttpsCallable("deleteTeam")
+                        .call(mapOf("teamId" to teamId))
+                        .addOnSuccessListener {
+                            Toast.makeText(this, "Team deleted", Toast.LENGTH_SHORT).show()
+                            finish()
+                        }
+                        .addOnFailureListener { error ->
+                            Toast.makeText(this, error.message ?: "Unable to delete team", Toast.LENGTH_LONG).show()
+                        }
+                },
                 onPickTeamPhoto = { pickTeamPhoto(teamId) },
                 isUploadingTeamPhoto = isUploadingTeamPhoto,
-                onShareTeam = { teamName ->
+                onSaveTeamName = { newName, onComplete ->
+                    if (teamId.isNotBlank()) {
+                        val changes = hashMapOf("teamName" to newName.trim())
+                        val payload = hashMapOf<String, Any>(
+                            "teamId" to teamId,
+                            "teamName" to newName.trim(),
+                            "changes" to changes
+                        )
+                        FirebaseFunctions.getInstance("us-central1").getHttpsCallable("updateTeamProfile")
+                            .call(payload)
+                            .addOnSuccessListener { Toast.makeText(this@TeamProfileActivity, "Team name updated", Toast.LENGTH_SHORT).show(); onComplete(true) }
+                            .addOnFailureListener { error -> Toast.makeText(this@TeamProfileActivity, error.message ?: "Unable to update team name", Toast.LENGTH_LONG).show(); onComplete(false) }
+                    } else onComplete(false)
+                },
+                onAddPlayer = { teamName ->
                     startActivity(
                         Intent(this, AddPlayerActivity::class.java)
                             .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_ID, teamId)
                             .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_NAME, teamName)
                     )
+                },
+                onShareTeam = { teamName ->
+                    val link = "https://sportsxtreme-95fbb.web.app/team?teamId=${android.net.Uri.encode(teamId)}"
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, "View $teamName on SportsXtreme:\n$link")
+                    }
+                    startActivity(Intent.createChooser(shareIntent, "Share $teamName"))
                 }
             )
         }
@@ -197,8 +230,11 @@ private data class TeamMatchData(
 private fun TeamProfileScreen(
     teamId: String,
     onBack: () -> Unit,
+    onDeleteTeam: (String) -> Unit,
     onPickTeamPhoto: () -> Unit,
     isUploadingTeamPhoto: Boolean,
+    onSaveTeamName: (String, (Boolean) -> Unit) -> Unit,
+    onAddPlayer: (String) -> Unit,
     onShareTeam: (String) -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -376,11 +412,14 @@ private fun TeamProfileScreen(
       Column(Modifier.fillMaxSize()) {
         TopBar(
             onBack = onBack,
-            canShare = viewerRoles.any { it == "ADMIN" || it == "CAPTAIN" || it == "VICE_CAPTAIN" },
-            onShare = { onShareTeam(team.name) }
+            canAddPlayers = viewerRoles.any { it == "ADMIN" || it == "CAPTAIN" || it == "VICE_CAPTAIN" },
+            onAddPlayer = { onAddPlayer(team.name) },
+            onShare = { onShareTeam(team.name) },
+            canDelete = viewerRoles.any { it == "ADMIN" },
+            onDelete = { onDeleteTeam(teamId) }
         )
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            TeamHero(team, canManageTeam, isUploadingTeamPhoto, onPickTeamPhoto)
+            TeamHero(team, canManageTeam, isUploadingTeamPhoto, onPickTeamPhoto, onSaveTeamName)
             ProfileTabs(
                 selectedTab = TeamProfileTabOrder.getOrElse(pagerState.targetPage) { "Profile" },
                 onSelect = { tabName ->
@@ -422,7 +461,7 @@ private fun TeamProfileScreen(
                     )
                     "Matches" -> if (!initialSkeletonFinished || matchesLoading) TeamTabSkeleton("Matches") else MatchesTabContent(matches)
                     "Stats" -> if (!initialSkeletonFinished || matchesLoading) TeamTabSkeleton("Stats") else StatsTabContent(matches)
-                    "Leaderboard" -> if (!initialSkeletonFinished || teamLoading) TeamTabSkeleton("Leaderboard") else LeaderboardTabContent()
+                    "Leaderboard" -> if (!initialSkeletonFinished || teamLoading) TeamTabSkeleton("Leaderboard") else LeaderboardTabContent(teamId)
                     "Members" -> if (!initialSkeletonFinished || teamLoading || membersLoading) TeamTabSkeleton("Members") else MembersTabContent(teamId, members, viewerRoles)
                 }
             }
@@ -432,31 +471,42 @@ private fun TeamProfileScreen(
 }
 
 @Composable
-private fun TopBar(onBack: () -> Unit, canShare: Boolean, onShare: () -> Unit) {
+private fun TopBar(onBack: () -> Unit, canAddPlayers: Boolean, onAddPlayer: () -> Unit, onShare: () -> Unit, canDelete: Boolean, onDelete: () -> Unit) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("‹", color = Color.White, fontSize = 34.sp, modifier = Modifier.size(44.dp).clickable { onBack() })
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             Text("Team Profile", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
         }
-        if (canShare) {
-            Image(
-                painter = painterResource(R.drawable.ic_share),
-                contentDescription = "Share team",
-                modifier = Modifier.size(40.dp).clickable(onClick = onShare).padding(8.dp)
-            )
+        Image(
+            painter = painterResource(R.drawable.ic_share),
+            contentDescription = "Share team link",
+            modifier = Modifier.size(40.dp).clickable(onClick = onShare).padding(8.dp)
+        )
+        if (canAddPlayers || canDelete) {
             Box {
                 Text("⋮", color = Color.White, fontSize = 25.sp, modifier = Modifier.size(32.dp).clickable { menuExpanded = true }, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                    DropdownMenuItem(text = { Text("Share") }, onClick = { menuExpanded = false; onShare() })
+                    DropdownMenuItem(text = { Text("Add player") }, onClick = { menuExpanded = false; onAddPlayer() })
+                    if (canDelete) DropdownMenuItem(text = { Text("Delete team", color = Color(0xFFD32F2F)) }, onClick = { menuExpanded = false; confirmDelete = true })
                 }
             }
-        } else Spacer(Modifier.width(34.dp))
+        } else Spacer(Modifier.width(32.dp))
     }
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text("Delete team?") },
+        text = { Text("This will permanently delete this team. This action cannot be undone.") },
+        confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Delete", color = Color(0xFFD32F2F)) } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } }
+    )
 }
 
 @Composable
-private fun TeamHero(team: TeamProfileData, canEditPhoto: Boolean, isUploadingPhoto: Boolean, onPickTeamPhoto: () -> Unit) {
+private fun TeamHero(team: TeamProfileData, canEditPhoto: Boolean, isUploadingPhoto: Boolean, onPickTeamPhoto: () -> Unit, onSaveName: (String, (Boolean) -> Unit) -> Unit) {
+    var editingName by remember { mutableStateOf(false) }
+    var isSavingName by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.BottomEnd) {
             Box(
@@ -492,6 +542,30 @@ private fun TeamHero(team: TeamProfileData, canEditPhoto: Boolean, isUploadingPh
         }
         Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(team.name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 14.dp))
+            if (canEditPhoto) {
+                Image(
+                    painter = painterResource(R.drawable.baseline_edit_24),
+                    contentDescription = "Edit team name",
+                    colorFilter = ColorFilter.tint(Color(0xFF22C55E)),
+                    modifier = Modifier.size(20.dp).clickable(enabled = !isSavingName) { editingName = true }
+                )
+            }
+        }
+        if (editingName) {
+            ProfileFieldEditor(
+                field = EditableProfileField("teamName", "Team name", "", team.name),
+                onDismiss = { if (!isSavingName) editingName = false },
+                isSaving = isSavingName
+            ) { value ->
+                val newName = value.trim()
+                if (newName.isNotBlank() && newName.length <= 30 && newName != team.name) {
+                    isSavingName = true
+                    onSaveName(newName) { saved ->
+                        isSavingName = false
+                        if (saved) editingName = false
+                    }
+                } else if (newName.isNotBlank()) editingName = false
+            }
         }
         val foundedDate = team.founded.trim()
         val locationAndFounded = listOf(team.location.trim(), foundedDate.takeIf { it.isNotBlank() }?.let { "Since $it" })
@@ -655,14 +729,14 @@ private fun EditButton(onClick: () -> Unit) = Icon(
 )
 
 @Composable
-private fun ProfileFieldEditor(field: EditableProfileField, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+private fun ProfileFieldEditor(field: EditableProfileField, onDismiss: () -> Unit, isSaving: Boolean = false, onSave: (String) -> Unit) {
     var value by remember(field.key, field.value) { mutableStateOf(field.value) }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSaving) onDismiss() },
         title = { Text("Edit ${field.label}") },
-        text = { OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text(field.label) }, singleLine = field.key != "description" && field.key != "teamMotto") },
-        confirmButton = { TextButton(onClick = { onSave(value) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        text = { OutlinedTextField(value = value, onValueChange = { input -> if (field.key != "teamName" || input.length <= 30) value = input }, label = { Text(field.label) }, singleLine = field.key != "description" && field.key != "teamMotto") },
+        confirmButton = { TextButton(onClick = { onSave(value) }, enabled = !isSaving) { if (isSaving) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !isSaving) { Text("Cancel") } }
     )
 }
 
@@ -1082,11 +1156,63 @@ private fun SplitStatCard(icon1: String, label1: String, value1: String, percent
 }
 @Composable private fun SplitStat(icon: String, label: String, value: String, percent: String, modifier: Modifier) = Row(modifier.padding(horizontal = 5.dp), verticalAlignment = Alignment.CenterVertically) { Text(icon, color = ProfileAccent, fontSize = 24.sp); Column(Modifier.padding(start = 10.dp).weight(1f)) { Text(label, color = ProfileMuted, fontSize = 10.sp); Text(value, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold); Text("out of 24", color = ProfileMuted, fontSize = 9.sp) }; Box(Modifier.size(48.dp).border(6.dp, ProfileAccent, CircleShape), contentAlignment = Alignment.Center) { Text(percent, color = Color.White, fontSize = 9.sp) } }
 
+private data class TeamLeaderboardPlayer(
+    val id: String,
+    val name: String,
+    val photoUrl: String,
+    val matches: Long,
+    val runs: Long,
+    val battingPoints: Long,
+    val outs: Long,
+    val balls: Long,
+    val wickets: Long,
+    val runsConceded: Long,
+    val legalBalls: Long,
+    val catches: Long,
+    val runOuts: Long,
+    val stumpings: Long,
+    val fieldingPoints: Long
+)
+
 @Composable
-private fun LeaderboardTabContent() {
-    val players = listOf("Rahul Sharma|All-rounder|642|53.5|142.1|18", "Amit Verma|Batsman|521|43.4|138.6|18", "Siddharth Das|Batsman|398|36.2|132.4|16", "Karan Patel|Wicket Keeper|312|28.4|129.1|15", "Rohit Sahu|All-rounder|287|26.1|118.4|14", "Manish Nayak|Batsman|246|22.3|121.6|12", "Aditya Rout|All-rounder|198|19.8|118.4|12", "Vikram Singh|Batsman|176|18.2|111.1|11")
+private fun LeaderboardTabContent(teamId: String) {
+    var players by remember(teamId) { mutableStateOf<List<TeamLeaderboardPlayer>>(emptyList()) }
+    var loading by remember(teamId) { mutableStateOf(true) }
+    var loadError by remember(teamId) { mutableStateOf(false) }
+    DisposableEffect(teamId) {
+        val registration = FirebaseFirestore.getInstance()
+            .collection("leaderboards").document("playerAggregates").collection("entries")
+            .whereEqualTo("teamId", teamId)
+            .addSnapshotListener { snapshot, error ->
+                loading = false
+                loadError = error != null
+                if (error != null) return@addSnapshotListener
+                val records = snapshot?.documents.orEmpty()
+                    .filter { it.getString("sport") == "CRICKET" && it.getString("tournamentId").orEmpty().isBlank() && it.getString("format") == "LIMITED_OVERS" }
+                    .map { doc ->
+                        fun number(key: String) = doc.getLong(key) ?: 0L
+                        TeamLeaderboardPlayer(
+                            id = doc.getString("canonicalPlayerId")?.takeIf(String::isNotBlank) ?: doc.getString("playerId").orEmpty(),
+                            name = doc.getString("name").orEmpty().ifBlank { "Team player" },
+                            photoUrl = doc.getString("profilePhotoUrl").orEmpty(),
+                            matches = number("matches"), runs = number("runs"), battingPoints = number("battingPoints"),
+                            outs = number("outs"), balls = number("balls"), wickets = number("wickets"),
+                            runsConceded = number("runsConceded"), legalBalls = number("legalBalls"),
+                            catches = number("catches"), runOuts = number("runOuts"), stumpings = number("stumpings"),
+                            fieldingPoints = number("fieldingPoints")
+                        )
+                    }
+                    .filter { it.id.isNotBlank() }
+                    .groupBy { it.id }
+                    .values
+                    .map { samePlayer -> samePlayer.maxBy { it.battingPoints + it.wickets * 20 + it.fieldingPoints } }
+                    .sortedByDescending { it.battingPoints + it.wickets * 20 + it.fieldingPoints }
+                players = records
+            }
+        onDispose { registration.remove() }
+    }
     var selectedCategory by remember { mutableIntStateOf(0) }
-    val categories = listOf("Bat", "Bowl", "Field", "P'ship")
+    val categories = listOf("Batting", "Bowling", "Fielding")
     Column(Modifier.padding(horizontal = 12.dp)) {
         Text("Team Leaderboard", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
         Text("Top performers from our team", color = ProfileMuted, fontSize = 11.sp)
@@ -1102,27 +1228,40 @@ private fun LeaderboardTabContent() {
             Text("#", color = ProfileMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp))
             Spacer(Modifier.width(40.dp))
             Text("PLAYER", color = ProfileMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            listOf("RUNS", "AVG", "SR", "MAT").forEachIndexed { i, label -> Text(label, color = ProfileMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(listOf(42.dp, 40.dp, 42.dp, 28.dp)[i])) }
+            val labels = when (selectedCategory) { 1 -> listOf("WKT", "AVG", "ECO", "MAT"); 2 -> listOf("PTS", "CT", "RO", "MAT"); else -> listOf("RUNS", "AVG", "SR", "MAT") }
+            labels.forEachIndexed { i, label -> Text(label, color = ProfileMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(listOf(42.dp, 40.dp, 42.dp, 28.dp)[i])) }
         }
-        players.forEachIndexed { index, player -> LeaderboardRow(index + 1, player) }
+        when {
+            loading -> Box(Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = ProfileAccent, modifier = Modifier.size(24.dp), strokeWidth = 2.dp) }
+            loadError -> Text("Unable to load this team's leaderboard.", color = ProfileMuted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 18.dp))
+            players.isEmpty() -> EmptyTeamTab("Player rankings will appear after this team's matches are completed.")
+            else -> players.sortedByDescending { player -> when (selectedCategory) { 1 -> player.wickets * 20; 2 -> player.fieldingPoints; else -> player.battingPoints } }
+                .forEachIndexed { index, player -> LeaderboardRow(index + 1, player, selectedCategory) }
+        }
         Spacer(Modifier.height(20.dp))
     }
 }
 
 @Composable
-private fun LeaderboardRow(rank: Int, record: String) {
-    val p = record.split("|")
+private fun LeaderboardRow(rank: Int, player: TeamLeaderboardPlayer, category: Int) {
     val gold = Color(0xFFFFC928)
     Row(Modifier.fillMaxWidth().height(64.dp).drawBehind { drawLine(ProfileStroke, Offset(0f, size.height), Offset(size.width, size.height), 0.7.dp.toPx()) }.padding(horizontal = 3.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("$rank", color = if (rank <= 3) gold else Color(0xFFD8E0EA), fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        Box(Modifier.padding(start = 7.dp).size(36.dp).border(1.3.dp, Color(0xFF34465D), CircleShape).background(Color(0xFF111C2A), CircleShape))
-        Column(Modifier.weight(1f).padding(start = 9.dp)) { Text(p[0], color = Color(0xFFF3F5F8), fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1); Text(p[1], color = Color(0xFF8F9CAF), fontSize = 10.sp, maxLines = 1) }
-        Text(p[2], color = ProfileAccent, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(42.dp))
-        Text(p[3], color = Color(0xFFD0D7E1), fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(40.dp))
-        Text(p[4], color = Color(0xFFD0D7E1), fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(42.dp))
-        Text(p[5], color = Color(0xFFD0D7E1), fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(28.dp))
+        Box(Modifier.padding(start = 7.dp).size(36.dp).border(1.3.dp, Color(0xFF34465D), CircleShape).background(Color(0xFF111C2A), CircleShape), contentAlignment = Alignment.Center) {
+            if (player.photoUrl.isNotBlank()) AsyncImage(model = player.photoUrl, contentDescription = "${player.name} profile photo", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+            else Text(player.name.split(Regex("\\s+")).take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }.joinToString(""), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+        Column(Modifier.weight(1f).padding(start = 9.dp)) { Text(player.name, color = Color(0xFFF3F5F8), fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1); Text(when (category) { 1 -> "Bowling"; 2 -> "Fielding"; else -> "Batting" }, color = Color(0xFF8F9CAF), fontSize = 10.sp, maxLines = 1) }
+        val figures = when (category) {
+            1 -> listOf(player.wickets.toString(), (player.runsConceded.toDouble() / player.wickets.coerceAtLeast(1)).formatLeaderboard(), (player.runsConceded.toDouble() * 6 / player.legalBalls.coerceAtLeast(1)).formatLeaderboard(), player.matches.toString())
+            2 -> listOf(player.fieldingPoints.toString(), player.catches.toString(), player.runOuts.toString(), player.matches.toString())
+            else -> listOf(player.runs.toString(), (player.runs.toDouble() / player.outs.coerceAtLeast(1)).formatLeaderboard(), (player.runs.toDouble() * 100 / player.balls.coerceAtLeast(1)).formatLeaderboard(), player.matches.toString())
+        }
+        figures.forEachIndexed { i, value -> Text(value, color = if (i == 0) ProfileAccent else Color(0xFFD0D7E1), fontSize = 11.sp, fontWeight = if (i == 0) FontWeight.Bold else FontWeight.Normal, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(listOf(42.dp, 40.dp, 42.dp, 28.dp)[i])) }
     }
 }
+
+private fun Double.formatLeaderboard(): String = if (isFinite()) String.format(java.util.Locale.US, "%.1f", this) else "0.0"
 
 @Composable
 private fun MembersTabContent(
@@ -1166,7 +1305,9 @@ private fun MemberRow(
         isManager && !targetIsAdmin ||
             isViceCaptain && !targetHasLeadershipRole
         )
+    val isWicketKeeper = member.playingRole.equals("WICKET_KEEPER", ignoreCase = true)
     var actionsExpanded by remember(member.userId) { mutableStateOf(false) }
+    var isUpdatingMember by remember(member.userId) { mutableStateOf(false) }
     val isLeader = member.teamRoles.any { it == "ADMIN" || it == "CAPTAIN" }
     Row(
         Modifier.fillMaxWidth().padding(top = 7.dp).heightIn(min = 82.dp)
@@ -1180,6 +1321,11 @@ private fun MemberRow(
             Box(Modifier.fillMaxSize().border(2.dp, ProfileAccent, CircleShape).padding(3.dp).clip(CircleShape).background(Color(0xFF132A38)), contentAlignment = Alignment.Center) {
                 if (member.profilePhotoUrl.isNotBlank()) {
                     AsyncImage(model = member.profilePhotoUrl, contentDescription = "${member.name} profile photo", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                }
+            }
+            if (isUpdatingMember) {
+                Box(Modifier.fillMaxSize().background(Color(0xAA071A25), CircleShape), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(modifier = Modifier.size(25.dp), color = Color(0xFF22C55E), strokeWidth = 2.5.dp)
                 }
             }
         }
@@ -1210,7 +1356,9 @@ private fun MemberRow(
             Text(member.battingStyle.ifBlank { "—" }, color = Color(0xFFDCE5EF), fontSize = 10.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             Text(member.bowlingStyle.ifBlank { "—" }, color = Color(0xFFBCC9D8), fontSize = 10.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp))
         }
-        if (canShowActions && !isSelf) {
+        if (isUpdatingMember) {
+            CircularProgressIndicator(modifier = Modifier.padding(horizontal = 8.dp).size(22.dp), color = Color(0xFF22C55E), strokeWidth = 2.dp)
+        } else if (canShowActions && !isSelf) {
             Box {
                 Text(
                     "⋮",
@@ -1224,28 +1372,30 @@ private fun MemberRow(
                     expanded = actionsExpanded,
                     onDismissRequest = { actionsExpanded = false }
                 ) {
-                    if (canAssignRoles && "CAPTAIN" !in member.teamRoles) {
-                        TeamMemberAction("Make captain") {
+                    if (canAssignRoles) {
+                        val isCaptain = "CAPTAIN" in member.teamRoles
+                        TeamMemberAction(if (isCaptain) "Remove captain" else "Make captain") {
                             actionsExpanded = false
-                            updateMemberRole(teamId, member.userId, "CAPTAIN", null, context)
+                            isUpdatingMember = true
+                            updateMemberRole(teamId, member.userId, if (isCaptain) "PLAYER" else "CAPTAIN", null, context) { isUpdatingMember = false }
                         }
-                    }
-                    if (canAssignRoles && "VICE_CAPTAIN" !in member.teamRoles) {
-                        TeamMemberAction("Make vice-captain") {
+                        val isViceCaptain = "VICE_CAPTAIN" in member.teamRoles
+                        TeamMemberAction(if (isViceCaptain) "Remove vice captain" else "Make vice-captain") {
                             actionsExpanded = false
-                            updateMemberRole(teamId, member.userId, "VICE_CAPTAIN", null, context)
+                            isUpdatingMember = true
+                            updateMemberRole(teamId, member.userId, if (isViceCaptain) "PLAYER" else "VICE_CAPTAIN", null, context) { isUpdatingMember = false }
                         }
-                    }
-                    if (canAssignRoles && member.playingRole != "WICKET_KEEPER") {
-                        TeamMemberAction("Make wicketkeeper") {
+                        TeamMemberAction(if (isWicketKeeper) "Remove wicketkeeper" else "Make wicketkeeper") {
                             actionsExpanded = false
-                            updateMemberRole(teamId, member.userId, null, "WICKET_KEEPER", context)
+                            isUpdatingMember = true
+                            updateMemberRole(teamId, member.userId, null, if (isWicketKeeper) "PLAYER" else "WICKET_KEEPER", context) { isUpdatingMember = false }
                         }
                     }
                     if (canRemove) {
                         TeamMemberAction("Remove player") {
                             actionsExpanded = false
-                            removeMember(teamId, member.userId, context)
+                            isUpdatingMember = true
+                            removeMember(teamId, member.userId, context) { isUpdatingMember = false }
                         }
                     }
                     if (!canAssignRoles && !canRemove) {
@@ -1273,7 +1423,8 @@ private fun updateMemberRole(
     targetUserId: String,
     teamRole: String?,
     playingRole: String?,
-    context: android.content.Context
+    context: android.content.Context,
+    onComplete: () -> Unit
 ) {
     val payload = mutableMapOf<String, Any>("teamId" to teamId, "targetUserId" to targetUserId)
     teamRole?.let { payload["teamRole"] = it }
@@ -1281,17 +1432,21 @@ private fun updateMemberRole(
     com.google.firebase.functions.FirebaseFunctions.getInstance()
         .getHttpsCallable("updateTeamMemberRole")
         .call(payload)
+        .addOnSuccessListener { onComplete() }
         .addOnFailureListener { error ->
             android.widget.Toast.makeText(context, error.message ?: "Unable to update the player role.", android.widget.Toast.LENGTH_SHORT).show()
+            onComplete()
         }
 }
 
-private fun removeMember(teamId: String, targetUserId: String, context: android.content.Context) {
+private fun removeMember(teamId: String, targetUserId: String, context: android.content.Context, onComplete: () -> Unit) {
     com.google.firebase.functions.FirebaseFunctions.getInstance()
         .getHttpsCallable("removeTeamMember")
         .call(mapOf("teamId" to teamId, "targetUserId" to targetUserId))
+        .addOnSuccessListener { onComplete() }
         .addOnFailureListener { error ->
             android.widget.Toast.makeText(context, error.message ?: "Unable to remove the player.", android.widget.Toast.LENGTH_SHORT).show()
+            onComplete()
         }
 }
 

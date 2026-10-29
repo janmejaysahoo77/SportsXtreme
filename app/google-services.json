@@ -59,11 +59,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "896267230604-8dt96gg31fmp1cjcvropvq7sj53upn93.apps.googleusercontent.com",
+          "client_id": "896267230604-a5787468gqhblq68hhhsfv7et1gjuag2.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.sportsxtreme.app",
-            "certificate_hash": "88822a637b36d19427f07ec28bdd8638071b0872"
+            "certificate_hash": "3b292d8e53d19c831b574a3350c19b978642de1b"
           }
         },
         {

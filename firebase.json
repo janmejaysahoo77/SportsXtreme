@@ -25,8 +25,12 @@
     "rewrites": [
       { "source": "/join", "destination": "/app-link-fallback.html" },
       { "source": "/team-invite", "destination": "/app-link-fallback.html" },
+      { "source": "/team", "destination": "/app-link-fallback.html" },
       { "source": "/tournament-invite", "destination": "/app-link-fallback.html" },
-      { "source": "/scorecard", "destination": "/app-link-fallback.html" }
+      { "source": "/scorecard", "destination": "/app-link-fallback.html" },
+      { "source": "/tournament", "destination": "/app-link-fallback.html" },
+      { "source": "/post/**", "destination": "/app-link-fallback.html" },
+      { "source": "/profile", "destination": "/app-link-fallback.html" }
     ]
   },
   "firestore": {

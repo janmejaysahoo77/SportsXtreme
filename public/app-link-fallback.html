@@ -11,7 +11,10 @@
       main { box-sizing: border-box; width: min(100% - 32px, 480px); padding: 32px; border: 1px solid #26333a; border-radius: 20px; background: #0c1419; }
       h1 { margin-top: 0; font-size: 1.7rem; }
       p { color: #a8b5b9; line-height: 1.55; }
-      a { display: inline-block; margin-top: 12px; padding: 13px 18px; border-radius: 10px; background: #c7ff1a; color: #071116; font-weight: 700; text-decoration: none; }
+      a { display: block; box-sizing: border-box; margin-top: 12px; padding: 13px 18px; border-radius: 10px; font-weight: 700; text-align: center; text-decoration: none; }
+      .app-link { background: #c7ff1a; color: #071116; }
+      .store-link { border: 1px solid #405058; color: #c7ff1a; }
+      [hidden] { display: none !important; }
       small { display: block; margin-top: 20px; color: #a8b5b9; line-height: 1.5; }
     </style>
   </head>
@@ -19,21 +22,37 @@
     <main>
       <h1 id="title">Open this link in SportsXtreme</h1>
       <p id="description">This link opens in the SportsXtreme Android app.</p>
-      <a href="https://play.google.com/store/apps/details?id=com.sportsxtreme.app">Get SportsXtreme on Google Play</a>
-      <small>After installing the app, return to this browser tab and open the original link again.</small>
+      <a id="open-app" class="app-link" href="#" hidden>Open in SportsXtreme</a>
+      <a class="store-link" href="https://play.google.com/store/apps/details?id=com.sportsxtreme.app">Get SportsXtreme on Google Play</a>
+      <small>If the app is installed, tap “Open in SportsXtreme.” Otherwise, install it, then return to the original link to open this invitation.</small>
     </main>
     <script>
       const route = location.pathname.split("/").filter(Boolean)[0];
       const pages = {
         join: ["Match invitation", "Install SportsXtreme to choose a team and join this match."],
         "team-invite": ["Team invitation", "Install SportsXtreme to open this team invitation."],
+        team: ["Team profile", "Install SportsXtreme to view this team profile."],
         "tournament-invite": ["Tournament invitation", "Install SportsXtreme to open this tournament invitation."],
-        scorecard: ["Public scorecard", "Install SportsXtreme to view this live or completed scorecard."]
+        scorecard: ["Public scorecard", "Install SportsXtreme to view this live or completed scorecard."],
+        profile: ["Player profile", "Install SportsXtreme to view this player's profile."]
       };
       const [title, description] = pages[route] || pages.scorecard;
       document.title = `${title} · SportsXtreme`;
       document.getElementById("title").textContent = title;
       document.getElementById("description").textContent = description;
+
+      const openAppLink = document.getElementById("open-app");
+      if (/Android/i.test(navigator.userAgent)) {
+        const playStoreUrl = "https://play.google.com/store/apps/details?id=com.sportsxtreme.app";
+        const intentUrl = `intent://${location.host}${location.pathname}${location.search}#Intent;scheme=https;package=com.sportsxtreme.app;S.browser_fallback_url=${encodeURIComponent(playStoreUrl)};end`;
+        openAppLink.href = intentUrl;
+        openAppLink.hidden = false;
+
+        // Auto-redirect to launch app immediately if installed
+        try {
+          window.location.href = intentUrl;
+        } catch (e) {}
+      }
     </script>
   </body>
 </html>
