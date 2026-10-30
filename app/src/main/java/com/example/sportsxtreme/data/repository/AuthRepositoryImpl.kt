@@ -47,8 +47,8 @@ class AuthRepositoryImpl(
                 when (val seedResult = seedFirestoreProfile(session.user, "email signup")) {
                     is Resource.Success -> Resource.Success(session)
                     is Resource.Error -> {
-                        Log.e(TAG, "[AUTH] Firestore profile seed failed during createEmailAccount: ${seedResult.message}")
-                        Resource.Error(seedResult.message ?: "Firestore profile setup failed")
+                        Log.w(TAG, "[AUTH] Firestore profile seed failed during createEmailAccount: ${seedResult.message}. Proceeding with session.")
+                        Resource.Success(session)
                     }
                     is Resource.Loading -> Resource.Loading()
                 }
@@ -111,11 +111,16 @@ class AuthRepositoryImpl(
                     authDataSource.deleteCurrentUserAndSignOut()
                     return@fold Resource.Error("No account found. Please register first.")
                 }
+                // A Google identity proves the email, but this app requires a verified
+                // phone before creating the app profile or completing registration.
+                if (!session.user.isPhoneVerified) {
+                    return@fold Resource.Success(session)
+                }
                 when (val seedResult = seedFirestoreProfile(session.user, "Google sign-in")) {
                     is Resource.Success -> Resource.Success(session)
                     is Resource.Error -> {
-                        Log.e(TAG, "[AUTH] Firestore profile seed failed during Google sign-in: ${seedResult.message}")
-                        Resource.Error(seedResult.message ?: "Firestore profile setup failed")
+                        Log.w(TAG, "[AUTH] Firestore profile seed failed during Google sign-in: ${seedResult.message}. Proceeding with session.")
+                        Resource.Success(session)
                     }
                     is Resource.Loading -> Resource.Loading()
                 }

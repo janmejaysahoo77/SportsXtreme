@@ -1392,10 +1392,20 @@ exports.updateTeamProfile = onCall(async (request) => {
     : null);
   if (!changes || typeof changes !== "object" || Array.isArray(changes)) throw new HttpsError("invalid-argument", "Invalid team details.");
   const keys = Object.keys(changes);
-  if (keys.length !== 1 || !allowedFields.has(keys[0]) || typeof changes[keys[0]] !== "string") {
+  if (keys.length < 1 || keys.length > 2 || keys.some((key) => !allowedFields.has(key) || typeof changes[key] !== "string")) {
     throw new HttpsError("invalid-argument", "Invalid team detail.");
   }
-  const value = changes[keys[0]].trim();
+  const normalizedChanges = Object.fromEntries(keys.map((key) => [key, changes[key].trim()]));
+  const value = normalizedChanges[keys[0]];
+  const captainUserId = typeof request.data?.captainUserId === "string" ? request.data.captainUserId.trim() : "";
+  let captainPhoneNumber = "";
+  if (keys.includes("captainName") && captainUserId) {
+    try {
+      captainPhoneNumber = (await getAuth().getUser(captainUserId)).phoneNumber || "";
+    } catch (_) {
+      throw new HttpsError("invalid-argument", "Unable to find the selected captain's phone number.");
+    }
+  }
   if (keys[0] === "teamName" && (!value || value.length > 30)) throw new HttpsError("invalid-argument", "Team name must be between 1 and 30 characters.");
   if (keys[0] !== "teamName" && value.length > 500) throw new HttpsError("invalid-argument", "Team detail is too long.");
   if (keys[0] === "logoUrl") {
@@ -1412,9 +1422,12 @@ exports.updateTeamProfile = onCall(async (request) => {
   return db.runTransaction(async (transaction) => {
     const { ref, members } = await teamInTransaction(transaction, teamId);
     if (!isManager(findMember(members, request.auth.uid))) throw new HttpsError("permission-denied", "Only a team admin or captain can edit team details.");
-    const updates = keys[0] === "teamName"
-      ? { teamName: value, name: value, shortName: value.slice(0, 3).toUpperCase(), updatedAtEpochMs: Date.now() }
-      : { [keys[0]]: value, updatedAtEpochMs: Date.now() };
+    let updates = { ...normalizedChanges, updatedAtEpochMs: Date.now() };
+    if (keys.includes("captainName") && captainUserId) {
+      if (!members.some((member) => member.userId === captainUserId)) throw new HttpsError("invalid-argument", "The selected captain must be a joined team member.");
+      if (captainPhoneNumber) updates = { ...updates, captainMobile: captainPhoneNumber };
+    }
+    if (keys.includes("teamName")) Object.assign(updates, { name: value, shortName: value.slice(0, 3).toUpperCase() });
     transaction.update(ref, updates);
     return { teamId };
   });

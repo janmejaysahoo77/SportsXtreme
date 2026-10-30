@@ -234,6 +234,7 @@ class LoginScreenView @JvmOverloads constructor(
                 is Resource.Success -> {
                     Log.i("LoginScreenView", "[AUTH] handleLogin SUCCESS! User UID: ${result.data?.id}, name: ${result.data?.name}")
                     showError(null)
+                    GuestExperiencePreferences.clearPhoneSignupPending(context, result.data?.id)
                     (context as? MainActivity)?.showHomeScreen()
                 }
                 is Resource.Error -> {
@@ -349,6 +350,7 @@ class LoginScreenView @JvmOverloads constructor(
                         is Resource.Success -> {
                             Log.i("LoginScreenView", "[AUTH] signInWithGoogle SUCCESS! User UID: ${authResult.data?.user?.id}")
                             showError(null)
+                            GuestExperiencePreferences.clearPhoneSignupPending(context, authResult.data?.user?.id)
                             when (val profileResult = authViewModel.completePendingAuthentication()) {
                                 is Resource.Success -> (context as? MainActivity)?.showHomeScreen()
                                 is Resource.Error -> showError(profileResult.message ?: "Google login failed")

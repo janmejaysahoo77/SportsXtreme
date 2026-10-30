@@ -66,10 +66,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontStyle
@@ -97,6 +104,7 @@ import coil3.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.functions.FirebaseFunctions
 import kotlinx.coroutines.launch
 
 private val CricketAccent = XtremeLime
@@ -505,9 +513,13 @@ fun MyCricketScreen(
     var selectedTournamentSegment by remember { mutableIntStateOf(0) }
     var teamSearchQuery by remember { mutableStateOf("") }
     var tournamentPendingDeletion by remember { mutableStateOf<Tournament?>(null) }
+    var teamPendingLeave by remember { mutableStateOf<CricketTeam?>(null) }
+    var isLeavingTeam by remember { mutableStateOf(false) }
+    val leftTeamIds = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     var guestPromptDetail by remember { mutableStateOf<String?>(null) }
     val joinedTeams = rememberJoinedTeams()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     val isGuest = currentUserId == null
     fun runProtectedAction(detail: String, action: () -> Unit) {
@@ -542,7 +554,16 @@ fun MyCricketScreen(
         })
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().then(
+                    if (page == 2) Modifier.pointerInput(page) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            if (waitForUpOrCancellation(pass = PointerEventPass.Initial) != null) {
+                                focusManager.clearFocus()
+                            }
+                        }
+                    } else Modifier
+                ),
                 contentPadding = PaddingValues(
                     start = 10.dp,
                     top = 10.dp,
@@ -654,7 +675,8 @@ fun MyCricketScreen(
                         )
                     }
                     item { QuickSearchBar(teamSearchQuery, onQueryChanged = { teamSearchQuery = it }) }
-                    val filteredTeams = joinedTeams.filter { it.name.contains(teamSearchQuery.trim(), ignoreCase = true) }
+                    val visibleTeams = joinedTeams.filter { it.id !in leftTeamIds }
+                    val filteredTeams = visibleTeams.filter { it.name.contains(teamSearchQuery.trim(), ignoreCase = true) }
                     item { ActiveTeamsHeader(filteredTeams.size) }
                     if (joinedTeams.isEmpty()) {
                         if (isGuest) item {
@@ -667,7 +689,7 @@ fun MyCricketScreen(
                     } else if (filteredTeams.isEmpty()) {
                         item { Text("No teams match ‘$teamSearchQuery’.", color = CricketMuted, fontSize = 13.sp, modifier = Modifier.padding(18.dp)) }
                     } else {
-                        items(filteredTeams) { team -> TeamCard(team) }
+                        items(filteredTeams, key = { it.id }) { team -> TeamCard(team, onLeaveTeam = { teamPendingLeave = team }) }
                     }
                 }
 
@@ -724,6 +746,44 @@ fun MyCricketScreen(
                 dismissButton = {
                     TextButton(onClick = { tournamentPendingDeletion = null }) { Text("Cancel") }
                 }
+            )
+        }
+
+        teamPendingLeave?.let { team ->
+            AlertDialog(
+                onDismissRequest = { if (!isLeavingTeam) teamPendingLeave = null },
+                title = { Text("Leave ${team.name}?") },
+                text = { Text("You will no longer be a member of this team.") },
+                confirmButton = {
+                    TextButton(enabled = !isLeavingTeam, onClick = {
+                        isLeavingTeam = true
+                        FirebaseFunctions.getInstance().getHttpsCallable("leaveTeam")
+                            .call(mapOf("teamId" to team.id))
+                            .addOnCompleteListener { task ->
+                                isLeavingTeam = false
+                                if (task.isSuccessful) {
+                                    if (team.id !in leftTeamIds) leftTeamIds.add(team.id)
+                                    teamPendingLeave = null
+                                    Toast.makeText(context, "You left ${team.name}", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, task.exception?.message ?: "Unable to leave team", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                    }) {
+                        if (isLeavingTeam) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Text("Leaving…", modifier = Modifier.padding(start = 8.dp))
+                            }
+                        } else {
+                            Text("Leave team")
+                        }
+                    }
+                },
+                dismissButton = { TextButton(enabled = !isLeavingTeam, onClick = { teamPendingLeave = null }) { Text("Cancel") } }
             )
         }
 
@@ -2158,6 +2218,7 @@ private fun QuickSearchBar(query: String, onQueryChanged: (String) -> Unit) {
                 onValueChange = onQueryChanged,
                 singleLine = true,
                 textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 15.sp),
+                cursorBrush = SolidColor(CricketAccent),
                 decorationBox = { innerTextField ->
                     Box {
                         if (query.isBlank()) Text("Search teams", color = ClubMuted, fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -2223,8 +2284,9 @@ private fun NoJoinedTeamsCard() {
 }
 
 @Composable
-private fun TeamCard(team: CricketTeam) {
+private fun TeamCard(team: CricketTeam, onLeaveTeam: () -> Unit) {
     val context = LocalContext.current
+    var menuExpanded by remember(team.id) { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2291,11 +2353,17 @@ private fun TeamCard(team: CricketTeam) {
                 )
             }
         }
-        Text(
-            "⋮",
-            color = Color.White.copy(alpha = 0.3f),
-            fontSize = 20.sp
-        )
+        Box {
+            IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(44.dp)) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "Team options", tint = Color.White)
+            }
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenuItem(
+                    text = { Text("Leave team") },
+                    onClick = { menuExpanded = false; onLeaveTeam() }
+                )
+            }
+        }
     }
 }
 

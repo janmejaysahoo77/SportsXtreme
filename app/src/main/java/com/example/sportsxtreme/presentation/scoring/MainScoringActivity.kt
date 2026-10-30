@@ -131,7 +131,6 @@ class MainScoringActivity : ComponentActivity() {
                 onUpdateTarget = scoringViewModel::updateInningsTarget,
                 onApplyPenaltyRuns = scoringViewModel::applyPenaltyRuns,
                 onAbandonMatch = ::abandonMatchAndFinish,
-                onBack = ::pauseScoringAndFinish,
                 onLeaveScoring = ::leaveScoringToHostQuickScoring,
                 onRun = { runs, dir, meta -> scoringViewModel.recordRuns(runs, dir, meta) },
                 onExtra = { type, runs -> scoringViewModel.recordExtra(type, runs) },
@@ -232,7 +231,6 @@ private fun MainScoringScreen(
     onUpdateTarget: (Int, () -> Unit, (String) -> Unit) -> Unit,
     onApplyPenaltyRuns: (String, Int, () -> Unit, (String) -> Unit) -> Unit,
     onAbandonMatch: () -> Unit,
-    onBack: () -> Unit,
     onLeaveScoring: () -> Unit,
     onRun: (Int, String?, Map<String, String>) -> Unit,
     onExtra: (com.example.sportsxtreme.domain.model.ExtraType, Int) -> Unit,
@@ -278,7 +276,7 @@ private fun MainScoringScreen(
     var showLeaveScoringConfirmation by remember { mutableStateOf(false) }
     val needsReplacement = innings?.status?.name == "LIVE" &&
         (matchState?.striker == null || matchState.nonStriker == null)
-    BackHandler(enabled = needsReplacement) {
+    BackHandler {
         showLeaveScoringConfirmation = true
     }
     LaunchedEffect(innings?.id) {
@@ -307,7 +305,7 @@ private fun MainScoringScreen(
     ) {
         // ── Main content – single screen, no scroll ──
         Column(modifier = Modifier.fillMaxSize()) {
-            ScoringTopBar(scorerName, onBack)
+            ScoringTopBar(scorerName) { showLeaveScoringConfirmation = true }
             Spacer(Modifier.weight(0.5f))
             // Score summary
             ScoreSummaryCard(
@@ -657,7 +655,7 @@ private fun MainScoringScreen(
             }
         }
 
-        if (showLeaveScoringConfirmation && needsReplacement) {
+        if (showLeaveScoringConfirmation) {
             Dialog(
                 onDismissRequest = { showLeaveScoringConfirmation = false },
                 properties = DialogProperties(usePlatformDefaultWidth = true, dismissOnClickOutside = false)
@@ -669,17 +667,24 @@ private fun MainScoringScreen(
                     horizontalAlignment = Alignment.Start
                 ) {
                     Text("Leave scoring?", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
-                    Text(
-                        "You are leaving the scoring screen. You can continue from the Quick Scoring tab on the host screen.",
-                        color = ScoringMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp)
+                    androidx.compose.foundation.text.BasicText(
+                        text = androidx.compose.ui.text.buildAnnotatedString {
+                            append("You can continue your scoring from the ")
+                            pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Black, color = Color.White))
+                            append("Quick Scoring")
+                            pop()
+                            append(" tab.")
+                        },
+                        style = androidx.compose.ui.text.TextStyle(color = ScoringMuted, fontSize = 14.sp),
+                        modifier = Modifier.padding(top = 10.dp)
                     )
                     Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.End) {
                         Text(
-                            "NO", color = ScoringMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                            "Stay here", color = ScoringMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                             modifier = Modifier.clickable { showLeaveScoringConfirmation = false }.padding(horizontal = 16.dp, vertical = 12.dp)
                         )
                         Text(
-                            "YES", color = ScoringAccent, fontSize = 13.sp, fontWeight = FontWeight.Black,
+                            "Okay sure", color = ScoringAccent, fontSize = 13.sp, fontWeight = FontWeight.Black,
                             modifier = Modifier.clickable {
                                 showLeaveScoringConfirmation = false
                                 onLeaveScoring()
@@ -701,7 +706,7 @@ private fun MainScoringScreen(
                 limit == null || (scorecard?.bowling?.firstOrNull { it.playerId == player.id }?.legalBalls ?: 0) + 6 <= limit * 6
             }
         if (needsNextBowler && !needsReplacement) {
-            Dialog(onDismissRequest = onBack,
+            Dialog(onDismissRequest = { showLeaveScoringConfirmation = true },
                 properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
                 Column(modifier = Modifier.fillMaxSize().background(ScoringBg).verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.Center) {
                     Text("OVER COMPLETE", color = ScoringAccent, fontSize = 22.sp, fontWeight = FontWeight.Black)
@@ -725,7 +730,7 @@ private fun MainScoringScreen(
         if (innings?.status?.name == "COMPLETED") {
             val firstInningsComplete = innings.number == 1
             if (firstInningsComplete) {
-                Dialog(onDismissRequest = onBack, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
+            Dialog(onDismissRequest = { showLeaveScoringConfirmation = true }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
                     Column(modifier = Modifier.fillMaxSize().background(ScoringBg).verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.Center) {
                         Text("INNINGS BREAK", color = ScoringAccent, fontSize = 22.sp, fontWeight = FontWeight.Black)
                         Text("${matchState?.battingTeam?.name.orEmpty()} finished on ${innings.score}/${innings.wickets}. Choose the chasing team's openers and bowler.", color = Color.White, modifier = Modifier.padding(top = 10.dp, bottom = 20.dp))
@@ -757,7 +762,7 @@ private fun MainScoringScreen(
                     }
                 }
             } else {
-                Dialog(onDismissRequest = onBack, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
+            Dialog(onDismissRequest = { showLeaveScoringConfirmation = true }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
                     Column(modifier = Modifier.fillMaxSize().background(ScoringBg).padding(24.dp), verticalArrangement = Arrangement.Center) {
                         Text("MATCH FINISHED", color = ScoringAccent, fontSize = 24.sp, fontWeight = FontWeight.Black)
                         Text("${matchState?.score ?: innings.score}/${innings.wickets} • ${innings.legalBalls / 6}.${innings.legalBalls % 6} overs", color = Color.White, modifier = Modifier.padding(vertical = 16.dp))

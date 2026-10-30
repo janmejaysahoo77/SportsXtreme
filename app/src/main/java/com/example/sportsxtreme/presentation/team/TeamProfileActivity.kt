@@ -21,6 +21,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,6 +46,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.core.view.WindowCompat
 import com.example.sportsxtreme.presentation.ui.theme.*
 import com.example.sportsxtreme.R
+import com.example.sportsxtreme.presentation.profile.ProfileActivity
 import coil3.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.DocumentSnapshot
@@ -55,6 +57,11 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import android.widget.Toast
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.rememberDatePickerState
+import android.content.ActivityNotFoundException
+import android.net.Uri
 import com.google.firebase.functions.FirebaseFunctions
 import java.util.UUID
 import androidx.compose.animation.core.RepeatMode
@@ -204,7 +211,8 @@ private data class MemberProfileData(
     val playingRole: String,
     val profilePhotoUrl: String,
     val battingStyle: String,
-    val bowlingStyle: String
+    val bowlingStyle: String,
+    val phoneNumber: String = ""
 )
 
 private data class TeamMatchData(
@@ -237,6 +245,7 @@ private fun TeamProfileScreen(
     onAddPlayer: (String) -> Unit,
     onShareTeam: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { TeamProfileTabOrder.size })
     var team by remember(teamId) { mutableStateOf(TeamProfileData()) }
@@ -451,18 +460,33 @@ private fun TeamProfileScreen(
                                 }
                             }
                         },
-                        onSave = { key, value ->
+                            onSave = { key, value ->
                             if (teamId.isNotBlank()) {
+                                    val captain = if (key == "captainName") members.firstOrNull { it.name.equals(value.trim(), ignoreCase = true) } else null
+                                    val changes = mapOf(key to value.trim())
+                                    val payload = if (captain != null) mapOf("teamId" to teamId, "changes" to changes, "captainUserId" to captain.userId) else mapOf("teamId" to teamId, "changes" to changes)
                                 com.google.firebase.functions.FirebaseFunctions.getInstance()
                                     .getHttpsCallable("updateTeamProfile")
-                                    .call(mapOf("teamId" to teamId, "changes" to mapOf(key to value.trim())))
+                                    .call(payload)
                             }
                         }
                     )
                     "Matches" -> if (!initialSkeletonFinished || matchesLoading) TeamTabSkeleton("Matches") else MatchesTabContent(matches)
                     "Stats" -> if (!initialSkeletonFinished || matchesLoading) TeamTabSkeleton("Stats") else StatsTabContent(matches)
                     "Leaderboard" -> if (!initialSkeletonFinished || teamLoading) TeamTabSkeleton("Leaderboard") else LeaderboardTabContent(teamId)
-                    "Members" -> if (!initialSkeletonFinished || teamLoading || membersLoading) TeamTabSkeleton("Members") else MembersTabContent(teamId, members, viewerRoles)
+                    "Members" -> if (!initialSkeletonFinished || teamLoading || membersLoading) TeamTabSkeleton("Members") else MembersTabContent(
+                        teamId = teamId,
+                        members = members,
+                        viewerRoles = viewerRoles,
+                        onMemberClick = { member ->
+                            context.startActivity(
+                                Intent(context, ProfileActivity::class.java)
+                                    .putExtra(ProfileActivity.EXTRA_USER_ID, member.userId)
+                                    .putExtra(ProfileActivity.EXTRA_DISPLAY_NAME, member.name)
+                                    .putExtra(ProfileActivity.EXTRA_PROFILE_PHOTO_URL, member.profilePhotoUrl)
+                            )
+                        }
+                    )
                 }
             }
         }
@@ -607,7 +631,6 @@ private fun ProfileTabs(selectedTab: String, onSelect: (String) -> Unit) {
 private fun ProfileTabContent(team: TeamProfileData, matches: List<TeamMatchData>, canEdit: Boolean, onViewAllMatches: () -> Unit, onSave: (String, String) -> Unit) {
     Column(Modifier.padding(horizontal = 13.dp, vertical = 4.dp)) {
         AboutCard(team, canEdit, onSave)
-        RecentMatchesSection(matches, onViewAllMatches)
         Spacer(Modifier.height(18.dp))
     }
 }
@@ -729,12 +752,71 @@ private fun EditButton(onClick: () -> Unit) = Icon(
 )
 
 @Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 private fun ProfileFieldEditor(field: EditableProfileField, onDismiss: () -> Unit, isSaving: Boolean = false, onSave: (String) -> Unit) {
     var value by remember(field.key, field.value) { mutableStateOf(field.value) }
+    val context = LocalContext.current
+    if (field.key == "founded") {
+        val initialDateMillis = remember(field.value) {
+            runCatching {
+                java.time.LocalDate.parse(field.value)
+                    .atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            }.getOrNull()
+        }
+        val dateState = rememberDatePickerState(initialSelectedDateMillis = initialDateMillis)
+        DatePickerDialog(
+            onDismissRequest = onDismiss,
+            confirmButton = {
+                TextButton(onClick = {
+                    dateState.selectedDateMillis?.let { millis ->
+                        val date = java.time.Instant.ofEpochMilli(millis)
+                            .atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                        onSave(date.toString())
+                    }
+                }, enabled = dateState.selectedDateMillis != null) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        ) {
+            DatePicker(state = dateState, title = { Text("Founded On") }, headline = { Text("Select a date") })
+        }
+        return
+    }
     AlertDialog(
         onDismissRequest = { if (!isSaving) onDismiss() },
         title = { Text("Edit ${field.label}") },
-        text = { OutlinedTextField(value = value, onValueChange = { input -> if (field.key != "teamName" || input.length <= 30) value = input }, label = { Text(field.label) }, singleLine = field.key != "description" && field.key != "teamMotto") },
+        text = {
+            val groundField: @Composable (Modifier) -> Unit = { fieldModifier ->
+                OutlinedTextField(
+                    modifier = fieldModifier,
+                    value = value,
+                    onValueChange = { input ->
+                        if ((field.key != "teamName" || input.length <= 30) &&
+                            (field.key != "captainMobile" || input.filter(Char::isDigit).length <= 15)
+                        ) value = input
+                    },
+                    label = { Text(field.label) },
+                    singleLine = field.key != "description" && field.key != "teamMotto",
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = if (field.key == "captainMobile") androidx.compose.ui.text.input.KeyboardType.Phone
+                        else androidx.compose.ui.text.input.KeyboardType.Text
+                    )
+                )
+            }
+            if (field.key == "homeGround") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    groundField(Modifier.weight(1f))
+                    IconButton(onClick = {
+                        try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=${Uri.encode(value.ifBlank { "ground" })}")))
+                        } catch (_: ActivityNotFoundException) {
+                            Toast.makeText(context, "No map app available", Toast.LENGTH_SHORT).show()
+                        }
+                    }) {
+                        Icon(painter = painterResource(R.drawable.loca), contentDescription = "Choose location", tint = ProfileAccent)
+                    }
+                }
+            } else groundField(Modifier.fillMaxWidth())
+        },
         confirmButton = { TextButton(onClick = { onSave(value) }, enabled = !isSaving) { if (isSaving) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !isSaving) { Text("Cancel") } }
     )
@@ -1267,7 +1349,8 @@ private fun Double.formatLeaderboard(): String = if (isFinite()) String.format(j
 private fun MembersTabContent(
     teamId: String,
     members: List<TeamMemberData>,
-    viewerRoles: List<String>
+    viewerRoles: List<String>,
+    onMemberClick: (TeamMemberData) -> Unit
 ) {
     Column(Modifier.padding(horizontal = 12.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1278,7 +1361,7 @@ private fun MembersTabContent(
             EmptyTeamTab("No members have joined this team yet.")
         } else {
             members.forEachIndexed { index, member ->
-                MemberRow(index, teamId, member, viewerRoles)
+                MemberRow(index, teamId, member, viewerRoles, onClick = { onMemberClick(member) })
             }
         }
         Spacer(Modifier.height(20.dp))
@@ -1290,7 +1373,8 @@ private fun MemberRow(
     index: Int,
     teamId: String,
     member: TeamMemberData,
-    viewerRoles: List<String>
+    viewerRoles: List<String>,
+    onClick: () -> Unit
 ) {
     val context = LocalContext.current
     val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
@@ -1313,6 +1397,7 @@ private fun MemberRow(
         Modifier.fillMaxWidth().padding(top = 7.dp).heightIn(min = 82.dp)
             .shadow(8.dp, RoundedCornerShape(15.dp), ambientColor = Color.White.copy(alpha = .18f), spotColor = Color.White.copy(alpha = .22f))
             .background(Color(0xFF071A25), RoundedCornerShape(15.dp))
+            .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1481,7 +1566,7 @@ private fun fetchTeamMemberProfiles(
                         playingRole = (profile["playingRole"] as? String).orEmpty().ifBlank { "Player" },
                         profilePhotoUrl = (profile["profilePhotoUrl"] as? String).orEmpty(),
                         battingStyle = (profile["battingStyle"] as? String).orEmpty(),
-                        bowlingStyle = (profile["bowlingStyle"] as? String).orEmpty()
+        bowlingStyle = (profile["bowlingStyle"] as? String).orEmpty()
                     )
                 }
                 .toMap()

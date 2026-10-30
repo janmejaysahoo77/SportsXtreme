@@ -42,6 +42,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenu
@@ -49,6 +50,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -397,7 +400,7 @@ private fun RegisterTournamentFinalPage(
                             },
                             canEdit = isOrganizer
                         )
-                        else -> LeaderboardTab()
+                        else -> LeaderboardTab(tournament.id)
                     }
                 }
             }
@@ -1279,6 +1282,7 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
     var showManualTeamPicker by remember { mutableStateOf(false) }
     var availableTeams by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var joinedTeams by remember(tournament?.id) { mutableStateOf(emptyList<TournamentJoinedTeam>()) }
+    var teamSearchQuery by remember(tournament?.id) { mutableStateOf("") }
     DisposableEffect(tournament?.id) {
         val tournamentId = tournament?.id.orEmpty()
         if (tournamentId.isBlank()) return@DisposableEffect onDispose { }
@@ -1420,17 +1424,63 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
             }
         }
         Spacer(Modifier.height(18.dp))
-        Box(Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp)).background(FinalPanel), contentAlignment = Alignment.CenterStart) {
-            Text("⌕   Search teams", color = FinalMuted, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
-        }
+        OutlinedTextField(
+            value = teamSearchQuery,
+            onValueChange = { teamSearchQuery = it },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Search teams by name", color = FinalMuted, fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search teams", tint = FinalMuted) },
+            trailingIcon = {
+                if (teamSearchQuery.isNotEmpty()) {
+                    Text(
+                        "×",
+                        color = FinalMuted,
+                        fontSize = 21.sp,
+                        modifier = Modifier.clickable { teamSearchQuery = "" }.padding(horizontal = 8.dp)
+                    )
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                cursorColor = FinalAccent,
+                focusedBorderColor = FinalAccent,
+                unfocusedBorderColor = FinalDivider,
+                focusedContainerColor = FinalPanel,
+                unfocusedContainerColor = FinalPanel
+            )
+        )
         Spacer(Modifier.height(16.dp))
-        if (joinedTeams.isNotEmpty()) {
+        val filteredTeams = joinedTeams.filter { it.name.contains(teamSearchQuery.trim(), ignoreCase = true) }
+        if (filteredTeams.isNotEmpty()) {
             Text("REGISTERED TEAMS", color = FinalMuted, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(10.dp))
-            joinedTeams.forEachIndexed { index, team ->
-                TournamentTeamCard(team, index + 1, canManage, isRemovingTeamId == team.id) { teamPendingRemoval = team }
+            filteredTeams.forEachIndexed { index, team ->
+                TournamentTeamCard(
+                    team = team,
+                    position = index + 1,
+                    canManage = canManage,
+                    isRemoving = isRemovingTeamId == team.id,
+                    onClick = {
+                        context.startActivity(
+                            Intent(context, com.example.sportsxtreme.presentation.team.TeamProfileActivity::class.java)
+                                .putExtra(com.example.sportsxtreme.presentation.team.TeamProfileActivity.EXTRA_TEAM_ID, team.id)
+                        )
+                    },
+                    onRemove = { teamPendingRemoval = team }
+                )
                 Spacer(Modifier.height(10.dp))
             }
+        } else if (joinedTeams.isNotEmpty()) {
+            Text(
+                "No teams match ‘${teamSearchQuery.trim()}’. ",
+                color = FinalMuted,
+                fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+                textAlign = TextAlign.Center
+            )
         }
         Spacer(Modifier.height(12.dp))
         if (joinedTeams.isEmpty() && canManage) Box(Modifier.fillMaxWidth().clip(FinalCardShape).background(FinalPanel).border(1.dp, FinalDivider, FinalCardShape).padding(horizontal = 20.dp, vertical = 26.dp), contentAlignment = Alignment.Center) {
@@ -1505,9 +1555,16 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
 private data class TournamentJoinedTeam(val id: String, val name: String, val captainUserId: String, val logoUrl: String = "")
 
 @Composable
-private fun TournamentTeamCard(team: TournamentJoinedTeam, position: Int, canManage: Boolean, isRemoving: Boolean, onRemove: () -> Unit) {
+private fun TournamentTeamCard(
+    team: TournamentJoinedTeam,
+    position: Int,
+    canManage: Boolean,
+    isRemoving: Boolean,
+    onClick: () -> Unit,
+    onRemove: () -> Unit
+) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(FinalPanel).border(1.dp, FinalDivider, RoundedCornerShape(15.dp)).padding(14.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(FinalPanel).border(1.dp, FinalDivider, RoundedCornerShape(15.dp)).clickable(onClick = onClick).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(FinalAccent.copy(alpha = .13f)), contentAlignment = Alignment.Center) {
@@ -1963,9 +2020,29 @@ private fun GroupAction(iconRes: Int, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun LeaderboardTab() {
+private fun LeaderboardTab(tournamentId: String) {
     var selectedLeaderboardTab by remember { mutableIntStateOf(0) }
+    var playerDocuments by remember(tournamentId) { mutableStateOf<List<com.google.firebase.firestore.DocumentSnapshot>>(emptyList()) }
+    var isLoading by remember(tournamentId) { mutableStateOf(true) }
+    var loadError by remember(tournamentId) { mutableStateOf<String?>(null) }
     val leaderboardTabs = listOf("Bat", "Bowl", "Field", "MVP")
+
+    DisposableEffect(tournamentId) {
+        val registration = FirebaseFirestore.getInstance()
+            .collection("leaderboards").document("playerAggregates").collection("entries")
+            .whereEqualTo("tournamentId", tournamentId)
+            .addSnapshotListener { snapshot, error ->
+                isLoading = false
+                if (error != null) {
+                    loadError = error.localizedMessage ?: "Unable to load tournament leaderboard"
+                    playerDocuments = emptyList()
+                } else {
+                    loadError = null
+                    playerDocuments = snapshot?.documents.orEmpty().filter { it.getString("sport") == "CRICKET" }
+                }
+            }
+        onDispose { registration.remove() }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp)
@@ -1994,17 +2071,72 @@ private fun LeaderboardTab() {
         }
         Spacer(Modifier.height(22.dp))
         val category = leaderboardTabs[selectedLeaderboardTab]
-        Column(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(FinalPanel)
-                .border(1.dp, FinalDivider, RoundedCornerShape(16.dp)).padding(horizontal = 20.dp, vertical = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("No $category leaders yet", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            Text("Player rankings will appear here after matches are scored.", color = FinalMuted, fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center)
+        val players = playerDocuments.map { doc ->
+            val runs = doc.getLong("runs") ?: 0L
+            val balls = doc.getLong("balls") ?: 0L
+            val outs = doc.getLong("outs") ?: 0L
+            val wickets = doc.getLong("wickets") ?: 0L
+            val conceded = doc.getLong("runsConceded") ?: 0L
+            val legalBalls = doc.getLong("legalBalls") ?: 0L
+            val fieldPoints = doc.getLong("fieldingPoints") ?: 0L
+            val batPoints = doc.getLong("battingPoints") ?: 0L
+            val bowlPoints = doc.getLong("bowlingPoints") ?: 0L
+            val score = when (category) {
+                "Bowl" -> bowlPoints
+                "Field" -> fieldPoints
+                "MVP" -> batPoints + bowlPoints + fieldPoints
+                else -> batPoints
+            }
+            val playerId = doc.getString("playerId").orEmpty()
+            val canonicalId = doc.getString("canonicalPlayerId")?.takeIf(String::isNotBlank)
+                ?: playerId.substringAfterLast("::").ifBlank { playerId }
+            val stats = when (category) {
+                "Bowl" -> "W $wickets • ECO ${String.format(java.util.Locale.US, "%.1f", conceded * 6.0 / legalBalls.coerceAtLeast(1))} • PTS $bowlPoints"
+                "Field" -> "PTS $fieldPoints • C ${doc.getLong("catches") ?: 0L} • RO ${doc.getLong("runOuts") ?: 0L} • ST ${doc.getLong("stumpings") ?: 0L}"
+                "MVP" -> "BAT $batPoints • BOWL $bowlPoints • FIELD $fieldPoints"
+                else -> "RUNS $runs • AVG ${String.format(java.util.Locale.US, "%.1f", runs.toDouble() / outs.coerceAtLeast(1))} • SR ${String.format(java.util.Locale.US, "%.1f", runs * 100.0 / balls.coerceAtLeast(1))}"
+            }
+            TournamentPlayerLeader(canonicalId, doc.getString("name").orEmpty().ifBlank { "Player" }, doc.getString("teamShortName").orEmpty(), score, stats)
+        }.filter { it.id.isNotBlank() }
+            .groupBy { it.id }
+            .map { (_, duplicateRows) -> duplicateRows.maxBy { it.score } }
+            .sortedWith(compareByDescending<TournamentPlayerLeader> { it.score }.thenBy { it.name.lowercase() })
+
+        when {
+            isLoading -> Box(Modifier.fillMaxWidth().padding(vertical = 36.dp), contentAlignment = Alignment.Center) {
+                androidx.compose.material3.CircularProgressIndicator(color = FinalAccent)
+            }
+            loadError != null -> Text(loadError.orEmpty(), color = Color(0xFFFF7A7A), fontSize = 13.sp, modifier = Modifier.padding(vertical = 20.dp))
+            players.isEmpty() -> Column(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(FinalPanel)
+                    .border(1.dp, FinalDivider, RoundedCornerShape(16.dp)).padding(horizontal = 20.dp, vertical = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("No $category leaders yet", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Player rankings will appear here after matches are scored.", color = FinalMuted, fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center)
+            }
+            else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                players.forEachIndexed { index, player ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(FinalPanel)
+                            .border(1.dp, FinalDivider, RoundedCornerShape(14.dp)).padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("${index + 1}", color = FinalAccent, fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(30.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(player.name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(listOf(player.team, player.stats).filter(String::isNotBlank).joinToString("  •  "), color = FinalMuted, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text(player.score.toString(), color = FinalAccent, fontSize = 16.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
         }
     }
 }
+
+private data class TournamentPlayerLeader(val id: String, val name: String, val team: String, val score: Long, val stats: String)
 
 @Composable
 private fun PointTableRow(team: String, played: String, won: String, points: String, highlighted: Boolean) {

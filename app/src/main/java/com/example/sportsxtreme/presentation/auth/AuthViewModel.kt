@@ -8,6 +8,7 @@ import com.example.sportsxtreme.domain.model.PendingUserProfile
 import com.example.sportsxtreme.domain.model.PhoneAuthSession
 import com.example.sportsxtreme.domain.model.User
 import com.example.sportsxtreme.domain.usecase.AuthUseCases
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -184,6 +185,20 @@ class AuthViewModel(
         return completeAuthentication(authSession.user)
     }
 
+    fun restoreCurrentSession(): Resource<User>? {
+        val user = state.value.authenticatedUser ?: useCases.getCurrentUser() ?: return null
+        if (!user.isEmailVerified && !user.isPhoneVerified) {
+            FirebaseAuth.getInstance().signOut()
+            _state.value = state.value.copy(authenticatedUser = null, pendingAuthSession = null)
+            return Resource.Error("Please verify your email before logging in.")
+        }
+        _state.value = state.value.copy(
+            authenticatedUser = user,
+            emailVerificationStatus = if (user.isEmailVerified) EmailVerificationStatus.Verified else state.value.emailVerificationStatus
+        )
+        return Resource.Success(user)
+    }
+
     suspend fun completePhoneSignup(
         name: String,
         email: String,
@@ -313,43 +328,36 @@ class AuthViewModel(
                     isPhoneVerified = user.isPhoneVerified
                 )
             )
-        } ?: return completeAuthWithoutBlockingOnProfile(user)
-
-        return when (result) {
-            is Resource.Success -> {
-                val authenticatedUser = result.data ?: user
-                _state.value = state.value.copy(
-                    isLoading = false,
-                    pendingAuthSession = null,
-                    pendingPhoneSession = null,
-                    authenticatedUser = authenticatedUser,
-                    emailVerificationStatus = if (authenticatedUser.isEmailVerified) {
-                        EmailVerificationStatus.Verified
-                    } else {
-                        state.value.emailVerificationStatus
-                    },
-                    errorMessage = null
-                )
-                Resource.Success(authenticatedUser)
-            }
-            is Resource.Error -> {
-                completeAuthWithoutBlockingOnProfile(user)
-            }
-            is Resource.Loading -> result
         }
-    }
 
-    private fun completeAuthWithoutBlockingOnProfile(user: User): Resource<User> {
+        val authenticatedUser = when (result) {
+            is Resource.Success -> result.data ?: user
+            is Resource.Error -> {
+                Log.w(TAG, "[AUTH] Profile setup failed: ${result.message}. Proceeding with authenticated user.")
+                user
+            }
+            null, is Resource.Loading -> {
+                Log.w(TAG, "[AUTH] Profile setup timed out or loading. Proceeding with authenticated user.")
+                user
+            }
+        }
+
         _state.value = state.value.copy(
             isLoading = false,
             pendingAuthSession = null,
             pendingPhoneSession = null,
-            authenticatedUser = user,
-            emailVerificationStatus = EmailVerificationStatus.Verified,
+            authenticatedUser = authenticatedUser,
+            emailVerificationStatus = if (authenticatedUser.isEmailVerified) {
+                EmailVerificationStatus.Verified
+            } else {
+                state.value.emailVerificationStatus
+            },
             errorMessage = null
         )
-        return Resource.Success(user)
+        return Resource.Success(authenticatedUser)
     }
+
+
 
     fun clear() {
         scope.cancel()
@@ -381,13 +389,7 @@ class AuthViewModel(
             } ?: Resource.Error("Phone verified, but profile update timed out. Try again.")
 
             if (profileResult is Resource.Error) {
-                val message = profileResult.message ?: "Phone verified, but profile update failed."
-                _state.value = state.value.copy(
-                    isLoading = false,
-                    phoneVerificationStatus = PhoneVerificationStatus.VerificationFailure,
-                    errorMessage = message
-                )
-                return Resource.Error(message)
+                Log.w(TAG, "[AUTH] Phone verified, but profile update failed: ${profileResult.message}. Proceeding with verified user.")
             }
         }
         if (!isNewPhoneUser && verifiedUser == null) {
@@ -471,6 +473,6 @@ class AuthViewModel(
 
     private companion object {
         private const val TAG = "AuthViewModel"
-        const val PROFILE_WRITE_TIMEOUT_MS = 3000L
+        const val PROFILE_WRITE_TIMEOUT_MS = 15_000L
     }
 }

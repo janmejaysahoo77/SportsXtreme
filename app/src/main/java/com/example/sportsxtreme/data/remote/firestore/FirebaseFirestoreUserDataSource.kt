@@ -157,7 +157,6 @@ class FirebaseFirestoreUserDataSource(
 
     private fun seedProfileSubcollections(userId: String): com.google.android.gms.tasks.Task<Void> {
         val batch = firestore.batch()
-        val stats = UserProfileStats(userId = userId)
         val settings = UserProfileSettings(userId = userId)
         val starterAchievement = UserAchievement(
             id = "season_form",
@@ -168,11 +167,6 @@ class FirebaseFirestoreUserDataSource(
             iconName = "xp"
         )
 
-        batch.set(
-            userDocument(userId).collection(STATS_COLLECTION).document(SUMMARY_DOCUMENT),
-            stats.toFirestorePayload() + mapOf("updatedAt" to FieldValue.serverTimestamp()),
-            SetOptions.merge()
-        )
         batch.set(
             userDocument(userId).collection(SETTINGS_COLLECTION).document(PREFERENCES_DOCUMENT),
             settings.toFirestorePayload() + mapOf("updatedAt" to FieldValue.serverTimestamp()),

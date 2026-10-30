@@ -5,6 +5,8 @@ import com.example.sportsxtreme.presentation.ui.theme.*
 import android.os.Bundle
 import android.content.Intent
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
+import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,13 +34,17 @@ class ManagePlayersInsideTeamActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val teamName = intent.getStringExtra(EXTRA_TEAM_NAME).orEmpty().ifBlank { "Your Team" }
         val teamId = intent.getStringExtra(EXTRA_TEAM_ID).orEmpty()
+        val returnToHomeAfterBack = intent.getBooleanExtra(EXTRA_RETURN_TO_HOME_AFTER_BACK, false)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = leaveManagePlayers(returnToHomeAfterBack)
+        })
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = android.graphics.Color.rgb(2, 10, 20)
         window.navigationBarColor = android.graphics.Color.rgb(2, 10, 20)
         setContent {
             ManagePlayersScreen(
                 teamName = teamName,
-                onBack = ::finish,
+                onBack = { leaveManagePlayers(returnToHomeAfterBack) },
                 onProfile = { startActivity(Intent(this, TeamProfileActivity::class.java).putExtra(TeamProfileActivity.EXTRA_TEAM_ID, teamId)) },
                 onAddPlayer = {
                     startActivity(
@@ -51,9 +57,21 @@ class ManagePlayersInsideTeamActivity : ComponentActivity() {
         }
     }
 
+    private fun leaveManagePlayers(returnToHome: Boolean) {
+        if (returnToHome) {
+            Toast.makeText(this, "You can find your team at MyCricket", Toast.LENGTH_SHORT).show()
+            startActivity(
+                Intent(this, com.example.sportsxtreme.presentation.auth.MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            )
+        }
+        finish()
+    }
+
     companion object {
         const val EXTRA_TEAM_NAME = "com.example.sportsxtreme.extra.TEAM_NAME"
         const val EXTRA_TEAM_ID = "com.example.sportsxtreme.extra.TEAM_ID"
+        const val EXTRA_RETURN_TO_HOME_AFTER_BACK = "com.example.sportsxtreme.extra.RETURN_TO_HOME_AFTER_BACK"
     }
 
     private val ManageBackground = Color(0xFF0A101C)

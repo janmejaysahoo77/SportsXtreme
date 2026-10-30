@@ -429,6 +429,7 @@ fun LeaderboardScreen(
                     item {
                         Spacer(modifier = Modifier.height(14.dp))
                         FilterSection(
+                            showSkill = selectedTab == LeaderboardTab.PLAYER,
                             selectedSkill = selectedSkill,
                             selectedTournament = selectedTournamentName,
                             showTournament = selectedTab != LeaderboardTab.PLAYER,
@@ -718,6 +719,7 @@ private fun TabsRow(
 
 @Composable
 private fun FilterSection(
+    showSkill: Boolean,
     selectedSkill: String,
     selectedTournament: String,
     showTournament: Boolean,
@@ -749,13 +751,14 @@ private fun FilterSection(
                 .padding(horizontal = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Pill 1: Skill (Batting / Bowling / All rounder)
-            FilterPill(
-                iconType = FilterIconType.PERSON,
-                label = selectedSkill,
-                isOpen = isSkillDropdownOpen,
-                onClick = onToggleSkill
-            )
+            if (showSkill) {
+                FilterPill(
+                    iconType = FilterIconType.PERSON,
+                    label = selectedSkill,
+                    isOpen = isSkillDropdownOpen,
+                    onClick = onToggleSkill
+                )
+            }
 
             // Pill 2: Ball type
             FilterPill(
@@ -790,7 +793,7 @@ private fun FilterSection(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Skill Dropdown Box
-            if (isSkillDropdownOpen) {
+            if (showSkill && isSkillDropdownOpen) {
                 DropdownMenuCard(
                     items = skills.map { skill ->
                         DropdownItemData(

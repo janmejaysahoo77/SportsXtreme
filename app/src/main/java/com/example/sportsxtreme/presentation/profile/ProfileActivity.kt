@@ -38,6 +38,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
@@ -1733,7 +1734,19 @@ private fun ProfileTextInput(
         singleLine = true,
         label = { Text(label) },
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = Platinum,
+            unfocusedTextColor = Platinum,
+            disabledTextColor = SoftText,
+            focusedLabelColor = Aqua,
+            unfocusedLabelColor = SoftText,
+            disabledLabelColor = SoftText,
+            cursorColor = Aqua,
+            focusedBorderColor = Aqua,
+            unfocusedBorderColor = Line,
+            disabledBorderColor = Line.copy(alpha = 0.6f)
+        )
     )
 }
 

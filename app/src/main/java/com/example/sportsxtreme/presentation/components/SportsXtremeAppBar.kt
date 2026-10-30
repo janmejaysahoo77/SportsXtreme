@@ -71,7 +71,7 @@ fun SportsXtremeAppBar(
     ) {
         Box(
             modifier = Modifier
-                .size(34.dp)
+                .size(48.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .clickable(onClick = onMenuClick),
             contentAlignment = Alignment.Center

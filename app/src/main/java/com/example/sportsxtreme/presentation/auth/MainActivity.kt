@@ -204,11 +204,19 @@ class MainActivity : ComponentActivity() {
             override fun handleOnBackPressed() {
                 when (currentScreen) {
                     Screen.Home -> finish()
+                    Screen.PhoneAuth -> {
+                        val firebaseUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                        if (signupPhoneVerificationPending && firebaseUser != null && firebaseUser.phoneNumber.isNullOrBlank()) {
+                            // A signed-in account without a linked phone must stay in the
+                            // verification flow; backing out must not expose guest routes.
+                        } else {
+                            returnFromAuthFlow()
+                        }
+                    }
                     Screen.Signup,
                     Screen.Login,
                     Screen.EmailVerification,
                     Screen.VerificationComplete,
-                    Screen.PhoneAuth,
                     Screen.OtpVerification,
                     Screen.SportSelection,
                     Screen.Members -> returnFromAuthFlow()
@@ -479,7 +487,16 @@ class MainActivity : ComponentActivity() {
 
     private fun routeAfterSplash() {
         if (authViewModel.state.value.authenticatedUser != null) {
-            showHomeScreen()
+            val user = authViewModel.state.value.authenticatedUser!!
+            if (!user.isPhoneVerified && GuestExperiencePreferences.isPhoneSignupPending(this, user.id)) {
+                showPhoneAuthScreen(forSignupCompletion = true)
+                return
+            }
+            when (authViewModel.restoreCurrentSession()) {
+                is Resource.Success -> showHomeScreen()
+                is Resource.Error -> showLoginScreen()
+                is Resource.Loading, null -> showMainScreen()
+            }
         } else if (GuestExperiencePreferences.selectedSport(this) != null) {
             showHomeScreen()
         } else if (GuestExperiencePreferences.hasCompletedOnboarding(this)) {
@@ -541,6 +558,14 @@ class MainActivity : ComponentActivity() {
     }
 
     fun showSportSelectionScreen() {
+        val firebaseUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        if (firebaseUser != null && firebaseUser.phoneNumber.isNullOrBlank() &&
+            GuestExperiencePreferences.isPhoneSignupPending(this, firebaseUser.uid)
+        ) {
+            showPhoneAuthScreen(forSignupCompletion = true)
+            return
+        }
+        firebaseUser?.let { GuestExperiencePreferences.clearPhoneSignupPending(this, it.uid) }
         homeScreenView = null
         signupPhoneVerificationPending = false
         currentScreen = Screen.SportSelection
@@ -548,6 +573,14 @@ class MainActivity : ComponentActivity() {
     }
 
     fun showHomeScreen() {
+        val firebaseUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        if (firebaseUser != null && firebaseUser.phoneNumber.isNullOrBlank() &&
+            GuestExperiencePreferences.isPhoneSignupPending(this, firebaseUser.uid)
+        ) {
+            showPhoneAuthScreen(forSignupCompletion = true)
+            return
+        }
+        firebaseUser?.let { GuestExperiencePreferences.clearPhoneSignupPending(this, it.uid) }
         homeScreenView = null
         emailVerificationScreenView = null
         returnToHomeAfterAuthCancel = false

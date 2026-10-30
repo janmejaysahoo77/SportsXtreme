@@ -381,6 +381,9 @@ class SignupScreenView @JvmOverloads constructor(
                     when (val authResult = authViewModel.signInWithGoogle(googleCredential.idToken)) {
                         is Resource.Success -> {
                             showError(null)
+                            authResult.data?.user?.id?.let { userId ->
+                                GuestExperiencePreferences.markPhoneSignupPending(context, userId)
+                            }
                             (context as? MainActivity)?.showPhoneAuthScreen(forSignupCompletion = true)
                         }
                         is Resource.Error -> showError(authResult.message ?: "Google signup failed")

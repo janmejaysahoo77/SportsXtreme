@@ -138,6 +138,7 @@ class CreateTeamActivity : ComponentActivity() {
                     Intent(this@CreateTeamActivity, ManagePlayersInsideTeamActivity::class.java)
                         .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_NAME, teamName)
                         .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_ID, teamRef.id)
+                        .putExtra(ManagePlayersInsideTeamActivity.EXTRA_RETURN_TO_HOME_AFTER_BACK, true)
                 )
             } catch (error: Exception) {
                 Toast.makeText(this@CreateTeamActivity, error.message ?: "Unable to create team", Toast.LENGTH_SHORT).show()

@@ -166,10 +166,7 @@ class ScorecardActivity : ComponentActivity() {
             if (savedInstanceState == null && incrementedViews.add(matchId)) {
                 firestore.collection("matches").document(matchId)
                     .update(
-                        mapOf(
-                            "scorecardViews" to FieldValue.increment(1),
-                            "lastViewedAt" to FieldValue.serverTimestamp()
-                        )
+                        mapOf("scorecardViews" to FieldValue.increment(1))
                     )
                     .addOnFailureListener { error ->
                         Log.w("ScorecardActivity", "Could not increment scorecard views", error)
@@ -893,7 +890,7 @@ private fun ScorecardScreen(
     onOpenPlayer: (String, String) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(1) }
-    val tabs = listOf("INFO", "LIVE", "SCORECARD", "SUMMARY", "COMMENTARY")
+    val tabs = listOf("INFO", "LIVE", "SCORECARD", "SUMMARY")
 
     Box(
         modifier = Modifier
@@ -954,7 +951,7 @@ private fun ScorecardScreen(
                             1 -> LiveTab(match)
                             2 -> ScorecardTab(match, onOpenPlayer)
                             3 -> SummaryTab(match)
-                            else -> CommentaryTab(match)
+                            else -> SummaryTab(match)
                         }
                     }
                     Spacer(Modifier.height(100.dp))
@@ -1045,7 +1042,6 @@ private fun ScorecardTabs(
             .clip(RoundedCornerShape(28.dp))
             .background(Color.White.copy(alpha = 0.055f))
             .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(28.dp))
-            .horizontalScroll(rememberScrollState())
             .padding(5.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
@@ -1053,7 +1049,7 @@ private fun ScorecardTabs(
             TabButton(
                 label = label,
                 selected = selectedTab == index,
-                modifier = Modifier,
+                modifier = Modifier.weight(1f),
                 onClick = { onTabSelected(index) }
             )
         }
@@ -1080,14 +1076,14 @@ private fun TabButton(label: String, selected: Boolean, modifier: Modifier, onCl
                 RoundedCornerShape(23.dp)
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
             text = label,
             color = if (selected) Accent else Color(0xFFB7C1BD),
-            fontSize = 13.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Black,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -1378,7 +1374,7 @@ private fun LiveScorePanel(match: MatchDetail) {
             LiveRateChip("CRR", match.currentRunRate)
             if (!match.isFirstInnings && target != null) {
                 Spacer(Modifier.width(7.dp))
-                LiveRateChip("REQ", match.rrr)
+                LiveRateChip("RRR", match.rrr)
                 Spacer(Modifier.width(7.dp))
                 LiveRateChip("TARGET", match.target)
             }
@@ -1397,10 +1393,28 @@ private fun LiveScorePanel(match: MatchDetail) {
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Black
             )
+        } else if (match.status == "COMPLETED" && !match.isFirstInnings) {
+            val winnerName = when {
+                match.result.contains(match.leftName, ignoreCase = true) -> match.leftName
+                match.result.contains(match.rightName, ignoreCase = true) -> match.rightName
+                runsNeeded == 0 -> battingName
+                leftRuns != null && rightRuns != null && leftRuns != rightRuns -> if (leftRuns > rightRuns) match.leftName else match.rightName
+                else -> null
+            }
+            val completedMessage = when {
+                match.result == "TIE" || isCompletedTie -> "Match tied"
+                winnerName != null -> "$winnerName won the match"
+                match.result.isNotBlank() -> match.result
+                else -> null
+            }
+            if (completedMessage != null) {
+                Spacer(Modifier.height(10.dp))
+                Text(completedMessage, color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            }
         } else if (match.status != "COMPLETED" && !match.isFirstInnings && runsNeeded != null && ballsRemaining != null) {
             Spacer(Modifier.height(10.dp))
             Text(
-                text = if (runsNeeded == 0) "Target reached" else "$battingName need $runsNeeded runs from $ballsRemaining balls",
+                text = if (runsNeeded == 0) "Target reached" else if (ballsRemaining == 0) "$oppositionName won the match" else "$battingName need $runsNeeded runs from $ballsRemaining balls",
                 color = if (runsNeeded == 0) Accent else Color(0xFFFF4D5E),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Black,

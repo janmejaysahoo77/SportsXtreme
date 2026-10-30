@@ -19,6 +19,29 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role in roles;
     }
+    function validBlog(data) {
+      return data.keys().hasOnly([
+          'title', 'slug', 'excerpt', 'content', 'thumbnailUrl', 'thumbnailStoragePath',
+          'authorId', 'authorName', 'status', 'createdAt', 'updatedAt', 'publishedAt'
+        ])
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 180
+        && data.slug is string && data.slug.matches('^[a-z0-9]+(-[a-z0-9]+)*$') && data.slug.size() <= 120
+        && data.excerpt is string && data.excerpt.size() > 0 && data.excerpt.size() <= 400
+        && data.content is string && data.content.size() > 0 && data.content.size() <= 50000
+        && data.thumbnailUrl is string && data.thumbnailUrl.size() <= 2048
+        && data.thumbnailStoragePath is string && data.thumbnailStoragePath.size() <= 512
+        && data.authorId == request.auth.uid
+        && data.authorName is string && data.authorName.size() > 0 && data.authorName.size() <= 120
+        && data.status in ['Draft', 'Published']
+        && data.updatedAt == request.time;
+    }
+    function validFaq(data) {
+      return data.keys().hasOnly(['question', 'answer', 'displayOrder', 'isActive', 'createdAt', 'updatedAt'])
+        && data.question is string && data.question.size() > 0 && data.question.size() <= 300
+        && data.answer is string && data.answer.size() > 0 && data.answer.size() <= 10000
+        && data.displayOrder is int && data.displayOrder >= 0 && data.displayOrder <= 10000
+        && data.isActive is bool && data.updatedAt == request.time;
+    }
     function canReviewCommunityPostReports() {
       return isModerationAdmin() || hasAdminPortalRole(['Super Admin', 'Moderator']);
     }
@@ -341,12 +364,9 @@ service cloud.firestore {
         && data.id == userId;
     }
 
-    // ---------- User account documents: owner-only reads, owner writes ----------
+    // ---------- User profiles: signed-in reads, owner writes public fields only ----------
     match /users/{userId} {
-      // Root documents may contain legacy account fields. They are never a
-      // public read model; clients can read only their own root document.
-      allow get: if request.auth != null && request.auth.uid == userId;
-      allow list: if false;
+      allow read: if request.auth != null;
       allow create: if request.auth != null
         && request.auth.uid == userId
         && isAllowedPublicUserProfile(request.resource.data, userId)
@@ -372,8 +392,8 @@ service cloud.firestore {
       }
     }
     match /publicProfiles/{userId} {
-      // Match the previous signed-in profile visibility while separating these
-      // safe fields from legacy account data in users/{userId}.
+      // Public projections contain display fields only; contact details remain
+      // under users/{uid}/private/account.
       allow read: if request.auth != null;
       allow create, update: if request.auth != null
         && request.auth.uid == userId
@@ -409,8 +429,19 @@ service cloud.firestore {
     // Contact Messages
     match /sportsXtremeWeb/config/contactMessages/{messageId} {
       allow create: if request.resource.data.email is string
-                    && request.resource.data.name is string;
-      allow read, update, delete: if false;
+                    && request.resource.data.email.size() <= 254
+                    && request.resource.data.email.matches('^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}$')
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() >= 1
+                    && request.resource.data.name.size() <= 100
+                    && (!request.resource.data.keys().hasAny(['subject']) || (request.resource.data.subject is string && request.resource.data.subject.size() <= 150))
+                    && (!request.resource.data.keys().hasAny(['message']) || (request.resource.data.message is string && request.resource.data.message.size() <= 5000));
+      allow read: if hasAdminPortalRole(['Super Admin', 'Support Agent']);
+      allow update: if hasAdminPortalRole(['Super Admin', 'Support Agent'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'status', 'updatedAt'])
+        && (!request.resource.data.keys().hasAny(['isRead']) || request.resource.data.isRead is bool)
+        && (!request.resource.data.keys().hasAny(['status']) || request.resource.data.status in ['new', 'in_progress', 'resolved']);
+      allow delete: if hasAdminPortalRole(['Super Admin', 'Support Agent']);
     }
 
     // Waitlist Registrations
@@ -521,24 +552,9 @@ service cloud.firestore {
 
     // ---------- SportsXtreme Admin portal: own administrator profile ----------
     match /users/{userId} {
-      allow create: if hasAdminPortalRole(['Super Admin', 'Support Agent', 'Moderator'])
-        && isAllowedPublicUserProfile(request.resource.data, userId)
-        && request.resource.data.get('createdAt', null) == request.time
-        && request.resource.data.get('updatedAt', null) == request.time;
-      allow update: if hasAdminPortalRole(['Super Admin', 'Support Agent', 'Moderator'])
-        && request.resource.data.id == userId
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'id', 'name', 'updatedAt', 'profilePhotoUrl', 'location', 'joinedLabel',
-          'gender', 'role', 'battingStyle', 'bowlingStyle'
-        ])
-        && request.resource.data.updatedAt == request.time;
-      allow delete: if hasAdminPortalRole(['Super Admin', 'Support Agent', 'Moderator']);
+      allow create, update, delete: if hasAdminPortalRole(['Super Admin', 'Support Agent', 'Moderator']);
     }
 
-    // Default deny for all other private mobile app collections
-    match /{document=**} {
-      allow read, write: if false;
-    }
     match /sportsXtremeWeb/faqforms/submissions/{submissionId} {
   allow create: if request.resource.data.keys().hasAll([
                   'name', 'email', 'subject', 'category', 'message',
@@ -568,11 +584,68 @@ service cloud.firestore {
                 && request.resource.data.status == 'new'
                 && request.resource.data.createdAt == request.time;
 
-  allow read, update, delete: if false;
+  allow read: if hasAdminPortalRole(['Super Admin', 'Support Agent']);
+  allow update: if hasAdminPortalRole(['Super Admin', 'Support Agent'])
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'status', 'updatedAt'])
+                && (!request.resource.data.keys().hasAny(['isRead']) || request.resource.data.isRead is bool)
+                && (!request.resource.data.keys().hasAny(['status']) || request.resource.data.status in ['new', 'in_progress', 'resolved']);
+  allow delete: if hasAdminPortalRole(['Super Admin', 'Support Agent']);
 }
 
+    // Website content is public only in its published/active state. All writes
+    // and drafts are restricted to the existing administrator roles.
+    match /blogs/{blogId} {
+      allow get, list: if resource.data.status == 'Published'
+        || hasAdminPortalRole(['Super Admin', 'Content Manager']);
+      allow create: if hasAdminPortalRole(['Super Admin', 'Content Manager'])
+        && validBlog(request.resource.data)
+        && request.resource.data.createdAt == request.time;
+      allow update: if hasAdminPortalRole(['Super Admin', 'Content Manager'])
+        && validBlog(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if hasAdminPortalRole(['Super Admin', 'Content Manager']);
+    }
+    match /faqs/{faqId} {
+      allow get, list: if resource.data.isActive == true
+        || hasAdminPortalRole(['Super Admin', 'Content Manager']);
+      allow create: if hasAdminPortalRole(['Super Admin', 'Content Manager'])
+        && validFaq(request.resource.data)
+        && request.resource.data.createdAt == request.time;
+      allow update: if hasAdminPortalRole(['Super Admin', 'Content Manager'])
+        && validFaq(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if hasAdminPortalRole(['Super Admin', 'Content Manager']);
+    }
+    // Default deny for all other private mobile app collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
 match /accountDeletionRequests/{requestId} {
-  allow read, write: if false;
-}
+      allow create: if request.resource.data.keys().hasAll([
+                      'email', 'source', 'status', 'createdAt'
+                    ])
+                    && request.resource.data.keys().hasOnly([
+                      'email', 'reason', 'source', 'status', 'createdAt'
+                    ])
+                    && request.resource.data.email is string
+                    && request.resource.data.email.size() <= 254
+                    && request.resource.data.email.matches(
+                      '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}$'
+                    )
+                    && request.resource.data.source == 'public_website'
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.createdAt == request.time
+                    && (!('reason' in request.resource.data)
+                      || (request.resource.data.reason is string
+                        && request.resource.data.reason.size() <= 1000));
+
+      allow read, update, delete: if false;
+    }
+
+    // Deny access to every other collection unless another rule grants it.
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }

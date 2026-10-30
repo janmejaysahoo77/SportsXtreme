@@ -1460,6 +1460,7 @@ class HomeScreenView @JvmOverloads constructor(
         }
         val allContent = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         var selectedFilter = "ALL"
+        var searchQuery = ""
         var latestState: HostTournamentsViewModel.UiState = HostTournamentsViewModel.UiState.Loading
         lateinit var render: (HostTournamentsViewModel.UiState) -> Unit
 
@@ -1501,7 +1502,13 @@ class HomeScreenView @JvmOverloads constructor(
             isHorizontalScrollBarEnabled = false; addView(filters)
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)))
 
-        allContent.addView(tournamentSearch(context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)))
+        allContent.addView(
+            tournamentSearch(context) { query ->
+                searchQuery = query
+                render.invoke(latestState)
+            },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48))
+        )
         content.addView(allContent, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         render = { state ->
@@ -1515,19 +1522,28 @@ class HomeScreenView @JvmOverloads constructor(
                     blockParams(top = 12)
                 )
                 is HostTournamentsViewModel.UiState.Content -> {
+                    val query = searchQuery.trim()
                     val visibleTournaments = state.tournaments.filter { tournament ->
-                        when (selectedFilter) {
+                        val matchesSearch = query.isBlank() || listOf(
+                            tournament.name,
+                            tournament.type,
+                            tournament.city,
+                            tournament.ground,
+                            tournament.requirements.location
+                        ).any { it.contains(query, ignoreCase = true) }
+                        val matchesFilter = when (selectedFilter) {
                             "ONGOING" -> tournament.startDateAsLocalDate() == LocalDate.now()
                             "UPCOMING" -> tournament.startDateAsLocalDate()?.isAfter(LocalDate.now()) == true
                             else -> true
                         }
+                        matchesSearch && matchesFilter
                     }
                     if (visibleTournaments.isEmpty()) {
                         allContent.addView(
                             tournamentMessageCard(
                                 context,
-                                if (selectedFilter == "ALL") "No tournaments yet" else "No ${selectedFilter.lowercase()} tournaments",
-                                if (selectedFilter == "ALL") "Your tournaments will appear here after you register one." else "Tournaments matching this filter will appear here."
+                                if (query.isNotBlank()) "No matching tournaments" else if (selectedFilter == "ALL") "No tournaments yet" else "No ${selectedFilter.lowercase()} tournaments",
+                                if (query.isNotBlank()) "Try a different tournament name or location." else if (selectedFilter == "ALL") "Your tournaments will appear here after you register one." else "Tournaments matching this filter will appear here."
                             ),
                             blockParams(top = 12)
                         )
@@ -1580,10 +1596,56 @@ class HomeScreenView @JvmOverloads constructor(
         tab.setTextColor(if (active) Color.rgb(10, 22, 10) else Color.rgb(159, 175, 195))
     }
 
-    private fun tournamentSearch(context: Context): View = TextView(context).apply {
-        text = "⌕   Search tournament / series...                         ⚙"
-        gravity = Gravity.CENTER_VERTICAL; textSize = 11f; setTextColor(Color.rgb(145, 161, 184)); setPadding(dp(14), 0, dp(14), 0)
-        background = roundedBackground(Color.rgb(18, 29, 46), dp(12), Color.rgb(57, 86, 72))
+    private fun tournamentSearch(context: Context, onQueryChanged: (String) -> Unit): View = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(12), 0, dp(10), 0)
+        background = roundedBackground(Color.rgb(15, 26, 41), dp(13), Color.rgb(55, 77, 95))
+
+        addView(ImageView(context).apply {
+            setImageResource(R.drawable.search)
+            contentDescription = "Search tournaments"
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setColorFilter(primary)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }, LinearLayout.LayoutParams(dp(28), dp(46)))
+
+        val input = EditText(context).apply {
+            hint = "Search tournaments by name or location"
+            setHintTextColor(Color.rgb(145, 161, 184))
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            setSingleLine(true)
+            background = null
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            setPadding(dp(8), 0, dp(4), 0)
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    onQueryChanged(s?.toString().orEmpty())
+                }
+                override fun afterTextChanged(s: Editable?) = Unit
+            })
+        }
+        addView(input, LinearLayout.LayoutParams(0, dp(46), 1f))
+
+        val clear = TextView(context).apply {
+            text = "×"
+            contentDescription = "Clear tournament search"
+            gravity = Gravity.CENTER
+            textSize = 22f
+            setTextColor(Color.rgb(159, 175, 195))
+            visibility = View.GONE
+            setOnClickListener { input.text?.clear(); input.clearFocus() }
+        }
+        input.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                clear.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
+            }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+        addView(clear, LinearLayout.LayoutParams(dp(30), dp(46)))
     }
 
     private fun tournamentMessageCard(context: Context, title: String, message: String): View = LinearLayout(context).apply {
@@ -1713,6 +1775,20 @@ class HomeScreenView @JvmOverloads constructor(
         addView(TextView(context).apply { text = value; setTextColor(Color.WHITE); textSize = 11f; typeface = Typeface.DEFAULT_BOLD })
     }
 
+    private fun menuButton(context: Context, tint: Int): View = FrameLayout(context).apply {
+        contentDescription = "Open navigation drawer"
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { openDrawer() }
+        addView(
+            TopIconView(context, TopIconView.Icon.MENU).apply {
+                setTint(tint)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            },
+            FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER)
+        )
+    }
+
     private fun hostTopStrip(context: Context): View {
         return LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -1723,13 +1799,7 @@ class HomeScreenView @JvmOverloads constructor(
                 intArrayOf(Color.rgb(2, 15, 27), Color.rgb(4, 18, 38), Color.rgb(2, 9, 22))
             )
 
-            addView(TopIconView(context, TopIconView.Icon.MENU).apply {
-                setTint(Color.rgb(142, 158, 153))
-                isClickable = true
-                isFocusable = true
-                setPadding(dp(4), dp(4), dp(4), dp(4))
-                setOnClickListener { openDrawer() }
-            }, LinearLayout.LayoutParams(dp(28), dp(28)))
+            addView(menuButton(context, Color.rgb(142, 158, 153)), LinearLayout.LayoutParams(dp(48), dp(48)))
             addView(ImageView(context).apply {
                 setImageResource(R.drawable.appicon)
                 scaleType = ImageView.ScaleType.CENTER_CROP
@@ -2237,10 +2307,7 @@ class HomeScreenView @JvmOverloads constructor(
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
 
-                addView(TopIconView(context, TopIconView.Icon.MENU).apply {
-                    setTint(Color.WHITE)
-                    setOnClickListener { openDrawer() }
-                }, LinearLayout.LayoutParams(dp(22), dp(22)))
+                addView(menuButton(context, Color.WHITE), LinearLayout.LayoutParams(dp(48), dp(48)))
                 val logo = sxLogo(context).also { it.layoutParams = LinearLayout.LayoutParams(dp(64), dp(36)).apply {
                     leftMargin = dp(12)
                 } }
@@ -2334,7 +2401,7 @@ class HomeScreenView @JvmOverloads constructor(
                             ?.showSoftInput(searchInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
                     }
                 }
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)).apply {
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)).apply {
                 topMargin = dp(20)
             })
         }

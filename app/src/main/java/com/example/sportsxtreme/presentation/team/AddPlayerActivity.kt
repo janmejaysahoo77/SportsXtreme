@@ -80,7 +80,8 @@ class AddPlayerActivity : ComponentActivity() {
                             .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_ID, teamId)
                             .putExtra(ManagePlayersInsideTeamActivity.EXTRA_TEAM_NAME, teamName)
                     )
-                }
+                },
+                onContinue = ::finish
             )
         }
     }
@@ -147,7 +148,8 @@ private fun AddPlayerScreen(
     onBack: () -> Unit,
     onInvite: (Boolean) -> Unit,
     onAddByMobileNumber: () -> Unit,
-    onShowInviteQrCode: () -> Unit
+    onShowInviteQrCode: () -> Unit,
+    onContinue: () -> Unit
 ) {
     Box(
         Modifier.fillMaxSize().background(ScreenBg).drawBehind {
@@ -167,7 +169,7 @@ private fun AddPlayerScreen(
                 InfoCard(Modifier.padding(top = 22.dp))
                 Spacer(Modifier.height(28.dp))
             }
-            ContinueButton()
+            ContinueButton(onContinue)
         }
     }
 }
@@ -257,9 +259,9 @@ private fun InfoCard(modifier: Modifier) {
 }
 
 @Composable
-private fun ContinueButton() {
+private fun ContinueButton(onClick: () -> Unit) {
     Box(Modifier.fillMaxWidth().background(Color(0xF2070E18)).border(.5.dp, Color(0xFF17263A)).padding(horizontal = 20.dp, vertical = 14.dp)) {
-        Box(Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(15.dp)).background(Accent).clickable { }, contentAlignment = Alignment.Center) { Text("CONTINUE", color = Color(0xFF10170B), fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = .8.sp) }
+        Box(Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(15.dp)).background(Accent).clickable(onClick = onClick), contentAlignment = Alignment.Center) { Text("CONTINUE", color = Color(0xFF10170B), fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = .8.sp) }
     }
 }
 
