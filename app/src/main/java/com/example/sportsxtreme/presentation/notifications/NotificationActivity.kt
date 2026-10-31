@@ -105,7 +105,9 @@ class NotificationActivity : ComponentActivity() {
                     onRequestPermission = ::requestNotificationPermission,
                     onBack = ::finish,
                     onTriggerInAppCampaign = {
-                        // Trigger custom Firebase In-App Messaging event & local overlay preview
+                        // Reset impression limits, sync state & trigger custom Firebase In-App Messaging event + local overlay preview
+                        FirebaseInAppMessagingHelper.initialize(this@NotificationActivity)
+                        FirebaseInAppMessagingHelper.resetImpressionLimits(this@NotificationActivity)
                         FirebaseInAppMessagingHelper.triggerEvent("test_campaign")
                         InAppMessageManager.showInAppMessage(
                             InAppMessage(

@@ -588,6 +588,7 @@ class MainActivity : ComponentActivity() {
         openHostQuickScoringAfterReturn = false
         currentScreen = Screen.Home
         ensureComposeInitialized()
+        com.example.sportsxtreme.common.FirebaseInAppMessagingHelper.syncInAppMessagingState(firebaseUser?.uid)
         requestNotificationPermissionOnFirstHomeEntry()
         window.decorView.post {
             if (currentScreen == Screen.Home) {
@@ -630,6 +631,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         homeScreenView?.refreshAfterResume()
+        com.example.sportsxtreme.common.FirebaseInAppMessagingHelper.syncInAppMessagingState()
         if (currentScreen == Screen.EmailVerification) {
             emailVerificationScreenView?.autoCheckEmailVerification()
         }

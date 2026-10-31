@@ -19,7 +19,7 @@ class SportsXtremeApplication : Application(), Configuration.Provider {
         super.onCreate()
         AuthDependencies.initialize(this)
         PushNotificationHelper.subscribeToAllUsersTopic()
-        FirebaseInAppMessagingHelper.initialize()
+        FirebaseInAppMessagingHelper.initialize(this)
         deliverySyncScheduler.enqueue()
     }
 

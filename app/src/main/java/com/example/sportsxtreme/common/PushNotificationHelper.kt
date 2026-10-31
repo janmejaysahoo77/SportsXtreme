@@ -83,4 +83,16 @@ object PushNotificationHelper {
             }
     }
 
+    fun subscribeToUserTopic(userId: String) {
+        if (userId.isBlank()) return
+        val sanitizedTopic = "user_${userId.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")}"
+        FirebaseMessaging.getInstance().subscribeToTopic(sanitizedTopic)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    Log.d(TAG, "Subscribed to FCM user topic: $sanitizedTopic")
+                } else {
+                    Log.e(TAG, "Failed to subscribe to FCM user topic: ${task.exception?.message}")
+                }
+            }
+    }
 }

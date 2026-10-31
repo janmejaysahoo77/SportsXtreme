@@ -23,13 +23,14 @@ class SportsXtremeMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d(TAG, "New FCM Registration Token generated")
-        PushNotificationHelper.subscribeToAllUsersTopic()
+        Log.d(TAG, "New FCM Registration Token generated: $token")
+        com.example.sportsxtreme.common.FirebaseInAppMessagingHelper.syncInAppMessagingState()
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
         Log.d(TAG, "FCM Message received from: ${remoteMessage.from}")
+        com.example.sportsxtreme.common.FirebaseInAppMessagingHelper.syncInAppMessagingState()
 
         val title = remoteMessage.notification?.title
             ?: remoteMessage.data["title"]

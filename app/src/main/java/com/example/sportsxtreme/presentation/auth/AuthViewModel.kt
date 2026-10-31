@@ -196,6 +196,7 @@ class AuthViewModel(
             authenticatedUser = user,
             emailVerificationStatus = if (user.isEmailVerified) EmailVerificationStatus.Verified else state.value.emailVerificationStatus
         )
+        com.example.sportsxtreme.common.FirebaseInAppMessagingHelper.syncInAppMessagingState(user.id)
         return Resource.Success(user)
     }
 
@@ -354,6 +355,7 @@ class AuthViewModel(
             },
             errorMessage = null
         )
+        com.example.sportsxtreme.common.FirebaseInAppMessagingHelper.syncInAppMessagingState(authenticatedUser.id)
         return Resource.Success(authenticatedUser)
     }
 
