@@ -203,7 +203,9 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when (currentScreen) {
-                    Screen.Home -> finish()
+                    Screen.Home -> {
+                        if (homeScreenView?.handleBackPressed() != true) finish()
+                    }
                     Screen.PhoneAuth -> {
                         val firebaseUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
                         if (signupPhoneVerificationPending && firebaseUser != null && firebaseUser.phoneNumber.isNullOrBlank()) {

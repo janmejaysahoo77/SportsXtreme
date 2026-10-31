@@ -968,6 +968,19 @@ class HomeScreenView @JvmOverloads constructor(
         showTab(0)
     }
 
+    /** Returns top-level destinations to Home before the activity can exit. */
+    fun handleBackPressed(): Boolean {
+        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            return true
+        }
+        if (selectedIndex != 0) {
+            showTab(0)
+            return true
+        }
+        return false
+    }
+
     private fun createCommunityContent(context: Context): View {
         return ComposeView(context).apply {
             setContent {
