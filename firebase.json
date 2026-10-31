@@ -29,7 +29,8 @@
       { "source": "/tournament-invite", "destination": "/app-link-fallback.html" },
       { "source": "/scorecard", "destination": "/app-link-fallback.html" },
       { "source": "/tournament", "destination": "/app-link-fallback.html" },
-      { "source": "/post/**", "destination": "/app-link-fallback.html" },
+      { "source": "/post-image/**", "function": { "functionId": "getSharedSocialPost", "region": "us-central1" } },
+      { "source": "/post/**", "function": { "functionId": "getSharedSocialPost", "region": "us-central1" } },
       { "source": "/profile", "destination": "/app-link-fallback.html" }
     ]
   },

@@ -4340,7 +4340,7 @@ class HomeScreenView @JvmOverloads constructor(
                                 if (isNotEmpty()) append("\n\n")
                                 append("Open this post in SportsXtreme:")
                             }
-                            currentPostShareText = "$shareDescription\n${context.getString(R.string.social_post_share_base_url)}/${post.id}"
+                            currentPostShareText = "$shareDescription\n${context.getString(R.string.social_post_share_base_url)}/${post.id}?v=2"
                             val imageValue = listOf("imageUrl", "imageURL", "image", "imagePath", "storagePath")
                                 .firstNotNullOfOrNull { key -> post.getString(key)?.trim()?.takeIf(String::isNotEmpty) }
                             if (!imageValue.isNullOrBlank()) {
@@ -4605,7 +4605,7 @@ class HomeScreenView @JvmOverloads constructor(
                         val shareText = buildString {
                             append(title)
                             if (caption.isNotBlank()) append("\n\n$caption")
-                            append("\n\nOpen this post in SportsXtreme:\n${context.getString(R.string.social_post_share_base_url)}/${post.id}")
+                            append("\n\nOpen this post in SportsXtreme:\n${context.getString(R.string.social_post_share_base_url)}/${post.id}?v=2")
                         }
                         val shareIntent = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, shareText) }
                         runCatching { context.startActivity(Intent.createChooser(shareIntent, "Share SportsXtreme post")) }

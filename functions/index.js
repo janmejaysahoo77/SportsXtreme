@@ -2,8 +2,9 @@ const crypto = require("crypto");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { getStorage } = require("firebase-admin/storage");
 const { getMessaging } = require("firebase-admin/messaging");
-const { HttpsError, onCall } = require("firebase-functions/v2/https");
+const { HttpsError, onCall, onRequest } = require("firebase-functions/v2/https");
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
@@ -14,6 +15,8 @@ const { parseMatchInviteToken, hashMatchInviteSecret, matchInviteUnavailableReas
 initializeApp();
 
 const db = getFirestore();
+const PUBLIC_POST_DESTINATION = "SportsXtreme App";
+const POST_SHARE_BASE_URL = "https://sportsxtreme-95fbb.web.app/post";
 const INVITE_URL_PREFIX = "https://sportsxtreme-95fbb.web.app/team-invite?token=";
 const TOURNAMENT_INVITE_URL_PREFIX = "https://sportsxtreme-95fbb.web.app/tournament-invite?token=";
 const TEAM_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -25,6 +28,222 @@ const ROLES = Object.freeze({ ADMIN: "ADMIN", CAPTAIN: "CAPTAIN", VICE_CAPTAIN: 
 const cloudinaryCloudName = defineSecret("CLOUDINARY_CLOUD_NAME");
 const cloudinaryApiKey = defineSecret("CLOUDINARY_API_KEY");
 const cloudinaryApiSecret = defineSecret("CLOUDINARY_API_SECRET");
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>\"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[character]);
+}
+
+function sharedPostImageValue(post) {
+  for (const key of ["imageUrl", "imageURL", "image", "imagePath", "storagePath"]) {
+    const value = post[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (value && typeof value === "object") {
+      for (const nestedKey of ["url", "downloadUrl", "imageUrl", "imageURL", "path", "storagePath"]) {
+        if (typeof value[nestedKey] === "string" && value[nestedKey].trim()) return value[nestedKey].trim();
+      }
+    }
+  }
+  return "";
+}
+
+async function publicImageUrl(value) {
+  if (!value) return "";
+  if (/^https:\/\//i.test(value)) return value;
+  if (!value.startsWith("gs://") && value.includes("://")) return "";
+
+  let bucket;
+  let objectPath;
+  if (value.startsWith("gs://")) {
+    const storageUrl = new URL(value);
+    bucket = require("firebase-admin/storage").getStorage().bucket(storageUrl.hostname);
+    objectPath = decodeURIComponent(storageUrl.pathname.replace(/^\//, ""));
+  } else {
+    bucket = require("firebase-admin/storage").getStorage().bucket();
+    objectPath = value.replace(/^\/+/, "");
+  }
+  if (!objectPath) return "";
+
+  const file = bucket.file(objectPath);
+  const [metadata] = await file.getMetadata();
+  const token = metadata.metadata?.firebaseStorageDownloadTokens?.split(",")[0];
+  if (token) {
+    return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(objectPath)}?alt=media&token=${encodeURIComponent(token)}`;
+  }
+  const [signedUrl] = await file.getSignedUrl({
+    action: "read",
+    expires: Date.now() + 365 * 24 * 60 * 60 * 1000
+  });
+  return signedUrl;
+}
+
+function firebaseStorageObject(value) {
+  if (!value) return null;
+  if (value.startsWith("gs://")) {
+    const storageUrl = new URL(value);
+    return { bucketName: storageUrl.hostname, objectPath: decodeURIComponent(storageUrl.pathname.replace(/^\//, "")) };
+  }
+
+  try {
+    const imageUrl = new URL(value);
+    if (imageUrl.hostname !== "firebasestorage.googleapis.com") return null;
+    const match = imageUrl.pathname.match(/^\/v0\/b\/([^/]+)\/o\/(.+)$/);
+    return match ? { bucketName: decodeURIComponent(match[1]), objectPath: decodeURIComponent(match[2]) } : null;
+  } catch (_) {
+    // Legacy documents may store a path relative to the default Storage bucket.
+    if (value.includes("://")) return null;
+    return { bucketName: "", objectPath: value.replace(/^\/+/, "") };
+  }
+}
+
+async function servePostPreviewImage(post, postId, response) {
+  // Load the native image library only when a preview image is requested.
+  // This lets Firebase CLI analyze the function on Windows even when its
+  // Linux runtime binary is the one installed by the deployment builder.
+  const sharp = require("sharp");
+  const imageValue = sharedPostImageValue(post);
+  const storageObject = firebaseStorageObject(imageValue);
+  if (!storageObject?.objectPath) {
+    response.status(404).type("text/plain").send("Preview image not found");
+    return;
+  }
+
+  const bucket = storageObject.bucketName
+    ? getStorage().bucket(storageObject.bucketName)
+    : getStorage().bucket();
+  const file = bucket.file(storageObject.objectPath);
+  const [metadata] = await file.getMetadata();
+  const sourceSize = Number(metadata.size || 0);
+  if (sourceSize > 20 * 1024 * 1024) {
+    response.status(413).type("text/plain").send("Preview image is too large");
+    return;
+  }
+
+  const [source] = await file.download();
+  let width = 1200;
+  let quality = 78;
+  let preview;
+  for (let attempt = 0; attempt < 9; attempt += 1) {
+    preview = await sharp(source, { limitInputPixels: 40_000_000 })
+      .rotate()
+      .resize({ width, height: 630, fit: "contain", background: "#071116" })
+      .jpeg({ quality, mozjpeg: true })
+      .toBuffer();
+    if (preview.length <= 550 * 1024 || width <= 320) break;
+    width = Math.max(320, Math.floor(width * 0.82));
+    quality = Math.max(28, quality - 8);
+  }
+
+  response.set("Cache-Control", "public, max-age=86400, s-maxage=86400, immutable");
+  response.set("Content-Length", String(preview.length));
+  response.type("image/jpeg").status(200).send(preview);
+  console.info(`Served ${preview.length}-byte preview image for shared post ${postId}`);
+}
+
+/** Serves per-post social preview metadata while keeping post links app-link compatible. */
+exports.getSharedSocialPost = onRequest({ memory: "512MiB", timeoutSeconds: 60 }, async (request, response) => {
+  const imageMatch = request.path.match(/^\/post-image\/([A-Za-z0-9_-]{1,150})\.jpg\/?$/);
+  if (imageMatch) {
+    try {
+      const postId = imageMatch[1];
+      const snapshot = await db.collection("socialPosts").doc(postId).get();
+      const post = snapshot.data();
+      if (!snapshot.exists || post?.status !== "Published" || !Array.isArray(post.destinations) || !post.destinations.includes(PUBLIC_POST_DESTINATION)) {
+        response.status(404).type("text/plain").send("Post not found");
+        return;
+      }
+      await servePostPreviewImage(post, postId, response);
+    } catch (error) {
+      console.error("Unable to generate shared post preview image", error);
+      response.status(500).type("text/plain").send("Unable to load preview image");
+    }
+    return;
+  }
+
+  const match = request.path.match(/^\/post\/([A-Za-z0-9_-]{1,150})\/?$/);
+  if (!match) {
+    response.status(404).type("text/plain").send("Post not found");
+    return;
+  }
+
+  try {
+    const postId = match[1];
+    const snapshot = await db.collection("socialPosts").doc(postId).get();
+    const post = snapshot.data();
+    if (!snapshot.exists || post?.status !== "Published" || !Array.isArray(post.destinations) || !post.destinations.includes(PUBLIC_POST_DESTINATION)) {
+      response.status(404).type("text/plain").send("Post not found");
+      return;
+    }
+
+    const caption = String(post.caption || "").trim();
+    const title = String(post.title || post.tittle || "").trim() || caption.slice(0, 100) || "SportsXtreme post";
+    const description = caption || "Open this post in SportsXtreme.";
+    let image = "";
+    try {
+      const imageValue = sharedPostImageValue(post);
+      image = firebaseStorageObject(imageValue)
+        ? `${POST_SHARE_BASE_URL.replace(/\/post$/, "")}/post-image/${encodeURIComponent(postId)}.jpg`
+        : await publicImageUrl(imageValue);
+    } catch (error) {
+      console.warn(`Could not resolve preview image for shared post ${postId}`, error);
+    }
+
+    const requestedPreviewVersion = String(request.query.v || "");
+    const previewVersion = /^[A-Za-z0-9_-]{1,20}$/.test(requestedPreviewVersion)
+      ? `?v=${encodeURIComponent(requestedPreviewVersion)}`
+      : "";
+    const canonicalUrl = `${POST_SHARE_BASE_URL}/${encodeURIComponent(postId)}${previewVersion}`;
+    const safeTitle = escapeHtml(title);
+    const safeDescription = escapeHtml(description);
+    const safeUrl = escapeHtml(canonicalUrl);
+    const safeImage = escapeHtml(image);
+    const imageTags = image ? `
+      <meta property="og:image" content="${safeImage}">
+      <meta property="og:image:secure_url" content="${safeImage}">
+      <meta property="og:image:type" content="image/jpeg">
+      <meta property="og:image:width" content="1200">
+      <meta property="og:image:height" content="630">
+      <meta property="og:image:alt" content="${safeTitle}">
+      <meta name="twitter:card" content="summary_large_image">
+      <meta name="twitter:image" content="${safeImage}">` : `
+      <meta name="twitter:card" content="summary">`;
+
+    response.set("Cache-Control", "public, max-age=300, s-maxage=600");
+    response.status(200).type("html").send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="${safeDescription}">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="SportsXtreme">
+  <meta property="og:title" content="${safeTitle}">
+  <meta property="og:description" content="${safeDescription}">
+  <meta property="og:url" content="${safeUrl}">${imageTags}
+  <meta name="twitter:title" content="${safeTitle}">
+  <meta name="twitter:description" content="${safeDescription}">
+  <link rel="canonical" href="${safeUrl}">
+  <title>${safeTitle} · SportsXtreme</title>
+  <style>body{margin:0;background:#071116;color:#f4f7f8;font:16px Arial,sans-serif}main{box-sizing:border-box;max-width:680px;margin:32px auto;padding:20px}img{display:block;width:100%;max-height:70vh;object-fit:contain;border-radius:14px;background:#101a20}p{line-height:1.5;white-space:pre-wrap}a{display:inline-block;margin:8px 8px 0 0;padding:12px 18px;border-radius:10px;background:#c7ff1a;color:#071116;text-decoration:none;font-weight:700}.store{background:transparent;color:#c7ff1a;border:1px solid #405058}</style>
+</head>
+<body><main>
+  ${image ? `<img src="${safeImage}" alt="${safeTitle}">` : ""}
+  <h1>${safeTitle}</h1>
+  <p>${safeDescription}</p>
+  <a href="${safeUrl}">Open in SportsXtreme</a>
+  <a class="store" href="https://play.google.com/store/apps/details?id=com.sportsxtreme.app">Get the app</a>
+</main></body>
+</html>`);
+  } catch (error) {
+    console.error("Unable to serve shared sports post", error);
+    response.status(500).type("text/plain").send("Unable to load this post right now");
+  }
+});
 
 /** Keeps the client-readable profile projection free of account fields. */
 exports.syncPublicUserProfile = onDocumentWritten("users/{userId}", async (event) => {
