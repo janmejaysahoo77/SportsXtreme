@@ -567,6 +567,36 @@ exports.removeTournamentTeam = onCall(async (request) => {
   });
 });
 
+/** Lets a member of a registered team withdraw that team from a tournament. */
+exports.leaveTournamentTeam = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before leaving a tournament.");
+  const tournamentId = requireTeamId(request.data?.tournamentId);
+  const teamId = requireTeamId(request.data?.teamId);
+  const tournamentRef = db.collection("tournaments").doc(tournamentId);
+  const entryRef = tournamentRef.collection("teams").doc(teamId);
+  const teamRef = db.collection("teams").doc(teamId);
+  return db.runTransaction(async (transaction) => {
+    const [tournament, entry, team] = await Promise.all([
+      transaction.get(tournamentRef), transaction.get(entryRef), transaction.get(teamRef)
+    ]);
+    if (!tournament.exists) throw new HttpsError("not-found", "Tournament not found.");
+    if (!entry.exists) return { tournamentId, teamId, left: false };
+    if (tournament.get("hostUid") === request.auth.uid) {
+      throw new HttpsError("permission-denied", "The tournament organiser cannot leave a team here.");
+    }
+    const members = team.exists && Array.isArray(team.get("members")) ? team.get("members") : [];
+    if (!isManager(findMember(members, request.auth.uid))) {
+      throw new HttpsError("permission-denied", "Only the team captain or an admin can leave this tournament.");
+    }
+    transaction.delete(entryRef);
+    transaction.update(tournamentRef, {
+      teamIds: FieldValue.arrayRemove(teamId),
+      updatedAtEpochMs: Date.now()
+    });
+    return { tournamentId, teamId, left: true };
+  });
+});
+
 /** Deletes a tournament and its nested entries after verifying the organiser. */
 exports.deleteTournament = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before deleting a tournament.");

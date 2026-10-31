@@ -2914,6 +2914,9 @@ class HomeScreenView @JvmOverloads constructor(
                             val imageView = ImageView(context).apply {
                                 scaleType = ImageView.ScaleType.CENTER_CROP
                                 contentDescription = "SportsXtreme banner"
+                                // Keep a visible loading surface while Coil resolves the
+                                // image after the Firestore banner record has arrived.
+                                background = skeletonBone()
                             }
                             addView(imageView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
                             val storageRef: StorageReference? = if (
@@ -4104,6 +4107,8 @@ class HomeScreenView @JvmOverloads constructor(
 
             posterView = ImageView(context).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
+                // The feed document can arrive before its remote poster does.
+                background = skeletonBone()
                 visibility = View.GONE
             }
             addView(posterView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(260)).apply { topMargin = dp(18) })
@@ -4284,8 +4289,6 @@ class HomeScreenView @JvmOverloads constructor(
                                 }
                                 return@addSnapshotListener
                             }
-                            feedSkeleton?.visibility = View.GONE
-                            feedContent?.visibility = View.VISIBLE
                             val postRef = post.reference
                             if (currentPostRef?.id != postRef.id) {
                                 likesListener?.remove()
@@ -4390,6 +4393,11 @@ class HomeScreenView @JvmOverloads constructor(
                                         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                                 }
                             }
+                            // Keep the loading card up until the post fields and any
+                            // feed rows have been populated. Showing the content before
+                            // this point briefly exposes the empty, invisible card.
+                            feedSkeleton?.visibility = View.GONE
+                            feedContent?.visibility = View.VISIBLE
                         }
                 }
 

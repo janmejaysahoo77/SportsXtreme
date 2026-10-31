@@ -1,8 +1,8 @@
 package com.example.sportsxtreme.presentation.tournament
 
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -659,8 +659,8 @@ private fun OverviewStatsCard(teams: String, matches: String, startDate: String,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(Modifier.fillMaxWidth()) {
-            OverviewMetric("TEAMS", teams, "registered", Modifier.weight(1f))
-            OverviewMetric("MATCHES", matches, "scheduled", Modifier.weight(1f))
+            OverviewMetric("TEAMS", teams, "", Modifier.weight(1f))
+            OverviewMetric("MATCHES", matches, "", Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth()) {
             OverviewMetric("START DATE", startDate, "", Modifier.weight(1f))
@@ -684,6 +684,7 @@ private fun OverviewMetric(label: String, value: String, caption: String, modifi
 
 @Composable
 private fun SetupHelpCard() {
+    val context = LocalContext.current
     Column(
         Modifier.fillMaxWidth().shadow(7.dp, FinalCardShape).clip(FinalCardShape).background(FinalPanel).padding(16.dp)
     ) {
@@ -700,7 +701,14 @@ private fun SetupHelpCard() {
         Text("SportsXtreme helpline", color = FinalMuted, fontSize = 13.sp)
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            HelpContactButton("Call", Modifier.weight(1f))
+            HelpContactButton("Call", Modifier.weight(1f)) {
+                val phoneNumber = context.getString(R.string.tournament_helpline_phone)
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", phoneNumber, null)))
+                }.onFailure {
+                    Toast.makeText(context, "Unable to open the phone dialer", Toast.LENGTH_SHORT).show()
+                }
+            }
             HelpContactButton("WhatsApp", Modifier.weight(1f))
         }
     }
@@ -774,6 +782,16 @@ private fun TournamentDetailsCard(
         OverviewEditableDetail("Grounds", ground, isEditing, { ground = it }, locationMarker = true)
         OverviewEditableDetail("Ball type", ballType, isEditing, { ballType = it }, chip = true)
         OverviewEditableDetail("Category", tournament?.type?.ifBlank { "Tournament" } ?: "Tournament", false, {}, chip = true)
+        val requirements = tournament?.requirements
+        val prizeType = requirements?.prizeType?.takeIf(String::isNotBlank).orEmpty()
+        val winningPrize = requirements?.prizePool?.takeIf(String::isNotBlank)?.let { value ->
+            if (prizeType.isBlank()) value else "$value ($prizeType)"
+        }.orEmpty().ifBlank { "Not set" }
+        val runnersUpPrize = requirements?.runnerUpPrize?.takeIf(String::isNotBlank)?.let { value ->
+            if (prizeType.isBlank()) value else "$value ($prizeType)"
+        }.orEmpty().ifBlank { "Not set" }
+        OverviewEditableDetail("Winning prize", winningPrize, false, {})
+        OverviewEditableDetail("Runners up prize", runnersUpPrize, false, {})
         OverviewTournamentId(tournament?.id.orEmpty())
     }
 }
@@ -952,8 +970,8 @@ private fun tournamentQrBitmap(value: String): Bitmap {
 }
 
 @Composable
-private fun HelpContactButton(label: String, modifier: Modifier) {
-    Box(modifier.height(36.dp).clip(RoundedCornerShape(10.dp)).background(FinalPanelLight).border(1.dp, FinalDivider, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+private fun HelpContactButton(label: String, modifier: Modifier, onClick: () -> Unit = {}) {
+    Box(modifier.height(36.dp).clip(RoundedCornerShape(10.dp)).background(FinalPanelLight).border(1.dp, FinalDivider, RoundedCornerShape(10.dp)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
         Text(label, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -1278,9 +1296,12 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
     var isAddingTeamId by remember { mutableStateOf<String?>(null) }
     var isRemovingTeamId by remember { mutableStateOf<String?>(null) }
     var teamPendingRemoval by remember { mutableStateOf<TournamentJoinedTeam?>(null) }
+    var teamPendingLeave by remember { mutableStateOf<TournamentJoinedTeam?>(null) }
+    var isLeavingTeamId by remember { mutableStateOf<String?>(null) }
     var showAddTeamsMenu by remember { mutableStateOf(false) }
     var showManualTeamPicker by remember { mutableStateOf(false) }
     var availableTeams by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var leaveEligibleTeamIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var joinedTeams by remember(tournament?.id) { mutableStateOf(emptyList<TournamentJoinedTeam>()) }
     var teamSearchQuery by remember(tournament?.id) { mutableStateOf("") }
     DisposableEffect(tournament?.id) {
@@ -1320,6 +1341,14 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
                         .ifBlank { "Team" }
                     document.id to name
                 }.sortedBy { it.second.lowercase() }
+                leaveEligibleTeamIds = snapshots?.documents.orEmpty().filter { document ->
+                    val members = document.get("members") as? List<Map<String, Any?>> ?: emptyList()
+                    members.any { member ->
+                        member["userId"] == currentUserId &&
+                            ((member["roles"] as? List<*>)?.any { it == "ADMIN" || it == "CAPTAIN" } == true ||
+                                member["role"] == "ADMIN" || member["role"] == "CAPTAIN")
+                    } || document.getString("captainUserId") == currentUserId
+                }.map { it.id }.toSet()
             }
         onDispose { registration.remove() }
     }
@@ -1379,6 +1408,22 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
             .addOnFailureListener { error ->
                 isRemovingTeamId = null
                 Toast.makeText(context, error.message ?: "Unable to remove team", Toast.LENGTH_LONG).show()
+            }
+    }
+    fun leaveTournamentTeam(team: TournamentJoinedTeam) {
+        val tournamentId = tournament?.id.orEmpty()
+        if (canManage || tournamentId.isBlank()) return
+        isLeavingTeamId = team.id
+        FirebaseFunctions.getInstance().getHttpsCallable("leaveTournamentTeam")
+            .call(mapOf("tournamentId" to tournamentId, "teamId" to team.id))
+            .addOnSuccessListener {
+                isLeavingTeamId = null
+                teamPendingLeave = null
+                Toast.makeText(context, "${team.name} left the tournament", Toast.LENGTH_SHORT).show()
+            }
+            .addOnFailureListener { error ->
+                isLeavingTeamId = null
+                Toast.makeText(context, error.message ?: "Unable to leave tournament", Toast.LENGTH_LONG).show()
             }
     }
     Column(
@@ -1441,6 +1486,7 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
                 }
             },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             shape = RoundedCornerShape(14.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = Color.White,
@@ -1463,13 +1509,16 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
                     position = index + 1,
                     canManage = canManage,
                     isRemoving = isRemovingTeamId == team.id,
+                    canLeave = !canManage && team.id in leaveEligibleTeamIds,
+                    isLeaving = isLeavingTeamId == team.id,
                     onClick = {
                         context.startActivity(
                             Intent(context, com.example.sportsxtreme.presentation.team.TeamProfileActivity::class.java)
                                 .putExtra(com.example.sportsxtreme.presentation.team.TeamProfileActivity.EXTRA_TEAM_ID, team.id)
                         )
                     },
-                    onRemove = { teamPendingRemoval = team }
+                    onRemove = { teamPendingRemoval = team },
+                    onLeave = { teamPendingLeave = team }
                 )
                 Spacer(Modifier.height(10.dp))
             }
@@ -1547,6 +1596,19 @@ private fun TeamsTab(tournament: Tournament?, canManage: Boolean) {
                 containerColor = FinalPanel
             )
         }
+        teamPendingLeave?.let { team ->
+            AlertDialog(
+                onDismissRequest = { if (isLeavingTeamId == null) teamPendingLeave = null },
+                title = { Text("LEAVE TOURNAMENT?", color = Color.White, fontWeight = FontWeight.Black) },
+                text = { Text("Withdraw ${team.name} from this tournament?", color = FinalMuted) },
+                confirmButton = {
+                    Text(if (isLeavingTeamId == team.id) "LEAVING…" else "LEAVE", color = Color(0xFFFF625D),
+                        modifier = Modifier.clickable(enabled = isLeavingTeamId == null) { leaveTournamentTeam(team) }.padding(12.dp))
+                },
+                dismissButton = { Text("CANCEL", color = FinalMuted, modifier = Modifier.clickable(enabled = isLeavingTeamId == null) { teamPendingLeave = null }.padding(12.dp)) },
+                containerColor = FinalPanel
+            )
+        }
         Spacer(Modifier.height(20.dp))
         Text("You can edit teams and players anytime before\npublishing the tournament.", color = FinalMuted, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 17.sp)
     }
@@ -1560,8 +1622,11 @@ private fun TournamentTeamCard(
     position: Int,
     canManage: Boolean,
     isRemoving: Boolean,
+    canLeave: Boolean,
+    isLeaving: Boolean,
     onClick: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onLeave: () -> Unit
 ) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(FinalPanel).border(1.dp, FinalDivider, RoundedCornerShape(15.dp)).clickable(onClick = onClick).padding(14.dp),
@@ -1585,6 +1650,17 @@ private fun TournamentTeamCard(
                 modifier = Modifier.size(24.dp).clickable(enabled = !isRemoving, onClick = onRemove),
                 colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(if (isRemoving) FinalMuted else Color(0xFFFF625D))
             )
+        } else if (canLeave) {
+            if (isLeaving) {
+                androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(20.dp), color = FinalAccent, strokeWidth = 2.dp)
+            } else {
+                Image(
+                    painter = painterResource(R.drawable.outline_exit_to_app_24),
+                    contentDescription = "Leave ${team.name}",
+                    modifier = Modifier.size(24.dp).clickable(onClick = onLeave),
+                    colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color(0xFFFF625D))
+                )
+            }
         } else {
             Text("✓", color = FinalAccent, fontSize = 18.sp, fontWeight = FontWeight.Black)
         }
