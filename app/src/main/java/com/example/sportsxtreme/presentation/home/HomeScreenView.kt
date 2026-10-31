@@ -66,6 +66,34 @@ import android.widget.TextView
 import android.widget.Toast
 import android.widget.ViewFlipper
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dagger.hilt.android.EntryPointAccessors
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.core.view.GravityCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
@@ -2294,6 +2322,8 @@ class HomeScreenView @JvmOverloads constructor(
     private fun topBar(context: Context): View {
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            clipToPadding = false
 
             // Premium app bar style
             background = GradientDrawable().apply {
@@ -2306,6 +2336,8 @@ class HomeScreenView @JvmOverloads constructor(
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                clipChildren = false
+                clipToPadding = false
 
                 addView(menuButton(context, Color.WHITE), LinearLayout.LayoutParams(dp(48), dp(48)))
                 val logo = sxLogo(context).also { it.layoutParams = LinearLayout.LayoutParams(dp(64), dp(36)).apply {
@@ -2353,7 +2385,7 @@ class HomeScreenView @JvmOverloads constructor(
                 }
                 addView(searchButton, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
                 lateinit var closeSearch: TextView
-                lateinit var notification: ImageView
+                lateinit var notification: View
                 closeSearch = TextView(context).apply {
                     text = "×"
                     textSize = 28f
@@ -2376,15 +2408,72 @@ class HomeScreenView @JvmOverloads constructor(
                     }
                 }
                 addView(closeSearch, LinearLayout.LayoutParams(dp(32), dp(40)).apply { leftMargin = dp(6) })
-                notification = ImageView(context).apply {
-                    setImageResource(R.drawable.notification)
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                    contentDescription = "Notifications"
-                    setOnClickListener {
-                        context.startActivity(android.content.Intent(context, com.example.sportsxtreme.presentation.notifications.NotificationActivity::class.java))
+                notification = ComposeView(context).apply {
+                    clipChildren = false
+                    clipToPadding = false
+                    setContent {
+                        val entryPoint = remember(context) {
+                            EntryPointAccessors.fromApplication(
+                                context.applicationContext,
+                                com.example.sportsxtreme.data.di.NotificationEntryPoint::class.java
+                            )
+                        }
+                        val unreadCount by entryPoint.notificationDao().getUnreadCount().collectAsState(initial = 0)
+
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 4.dp, end = 8.dp)
+                                .clickable {
+                                    context.startActivity(
+                                        Intent(
+                                            context,
+                                            com.example.sportsxtreme.presentation.notifications.NotificationActivity::class.java
+                                        )
+                                    )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = "Notifications",
+                                tint = androidx.compose.ui.graphics.Color.White,
+                                modifier = Modifier.size(26.dp)
+                            )
+
+                            if (unreadCount > 0) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = androidx.compose.ui.graphics.Color(0xFFE53935),
+                                    contentColor = androidx.compose.ui.graphics.Color.White,
+                                    border = BorderStroke(1.5.dp, androidx.compose.ui.graphics.Color(0xFF060C11)),
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = 6.dp, y = (-4).dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
+                                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                                            color = androidx.compose.ui.graphics.Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.Center,
+                                            lineHeight = 10.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                addView(notification, LinearLayout.LayoutParams(dp(21), dp(21)).apply { leftMargin = dp(10) })
+                addView(notification, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                    leftMargin = dp(6)
+                    rightMargin = dp(4)
+                })
                 searchButton.setOnClickListener {
                     if (topMode != TopMode.SPORTS) return@setOnClickListener
                     logo.visibility = View.GONE

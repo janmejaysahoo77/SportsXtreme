@@ -14,6 +14,9 @@ class NotificationRepositoryImpl @Inject constructor(
     override fun getAllNotifications(): Flow<List<NotificationEntity>> =
         notificationDao.getAllNotifications()
 
+    override fun getUnreadCount(): Flow<Int> =
+        notificationDao.getUnreadCount()
+
     override suspend fun insertNotification(notification: NotificationEntity) =
         notificationDao.insertNotification(notification)
 
