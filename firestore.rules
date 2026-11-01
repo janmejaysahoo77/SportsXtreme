@@ -75,6 +75,11 @@ service cloud.firestore {
         && matchData.get('finalization', {}).get('state', '') != 'FINALIZING'
         && matchData.get('finalization', {}).get('state', '') != 'FINALIZED';
     }
+    function canManageTournamentMatch(data) {
+      return !(data.get('tournamentId', '') is string && data.get('tournamentId', '') != '')
+        || (data.get('organiserId', '') == request.auth.uid
+          && get(/databases/$(database)/documents/tournaments/$(data.tournamentId)).data.hostUid == request.auth.uid);
+    }
 
     // ---------- Matches: public scorecard read, owner write ----------
     // Public Home scorecards use a collection listener, so match score data is
@@ -82,6 +87,7 @@ service cloud.firestore {
     match /matches/{matchId} {
       allow read: if true;
       allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid
+        && canManageTournamentMatch(request.resource.data)
         && request.resource.data.get('status', '') != 'COMPLETED'
         && request.resource.data.get('status', '') != 'FINALIZATION_PENDING'
         && request.resource.data.get('status', '') != 'FINALIZING'
@@ -89,6 +95,7 @@ service cloud.firestore {
         && !request.resource.data.keys().hasAny(['finalization', 'finalizedAt', 'finalizedBy', 'finalizationRevision', 'correctionState']);
       allow update: if isSignedIn()
         && resource.data.ownerId == request.auth.uid
+        && canManageTournamentMatch(resource.data)
         && (resource.data.get('status', '') != 'COMPLETED'
           || (request.resource.data.get('status', '') == 'FINALIZATION_PENDING'
             && request.resource.data.diff(resource.data).affectedKeys().hasAny(['status'])))
@@ -206,7 +213,7 @@ service cloud.firestore {
       allow read: if request.auth != null;
       // The initial creator must be the sole, dual-role member. Every later
       // membership change runs in a Cloud Function transaction, preventing a
-      // client from granting itself ADMIN/CAPTAIN or bypassing the 18-player cap.
+      // client from granting itself ADMIN/CAPTAIN or bypassing the 15-player cap.
       allow create: if isSignedIn()
         && request.resource.data.ownerUserId == request.auth.uid
         && request.resource.data.memberIds.size() == 1
@@ -226,6 +233,15 @@ service cloud.firestore {
     // Raw tokens never reach Firestore; their SHA-256 hash is the document ID.
     match /teamInvites/{inviteId} {
       allow read, write: if false;
+    }
+
+    // Join progress is written only by the callable function and readable only
+    // by the account whose join operation is being processed.
+    match /teamInviteJoinProgress/{operationId} {
+      allow read: if isSignedIn()
+        && (!exists(/databases/$(database)/documents/teamInviteJoinProgress/$(operationId))
+          || resource.data.userId == request.auth.uid);
+      allow create, update, delete: if false;
     }
 
     // ---------- Community profiles: public posts; contact details stay private ----------
@@ -271,7 +287,22 @@ service cloud.firestore {
         && request.resource.data.profilePhotoUrl is string
         && request.resource.data.whatsappConsent == true
         && request.resource.data.createdAt == request.time));
-      allow update: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      // These documents are publicly readable, so owners may only update the
+      // public listing fields. Contact details belong in private/contact.
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.keys().hasOnly([
+          'postType', 'ownerId', 'name', 'title', 'category', 'description',
+          'date', 'time', 'location', 'format', 'organization', 'experience',
+          'groundType', 'ballType', 'chargePerMatch', 'profilePhotoUrl',
+          'whatsappConsent', 'createdAt'
+        ])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'title', 'category', 'description', 'date', 'time', 'location',
+          'format', 'organization', 'experience', 'groundType', 'ballType',
+          'chargePerMatch', 'profilePhotoUrl', 'whatsappConsent'
+        ]);
       allow delete: if (isSignedIn() && resource.data.ownerId == request.auth.uid) || isModerationAdmin();
 
       match /private/{privateDocument} {
@@ -364,22 +395,31 @@ service cloud.firestore {
         && data.id == userId;
     }
 
-    // ---------- User profiles: signed-in reads, owner writes public fields only ----------
+    // ---------- User profiles: owner reads and writes public fields only ----------
     match /users/{userId} {
-      allow read: if request.auth != null;
+      // Root documents may contain legacy email/phone fields; public display
+      // data belongs in the separately whitelisted publicProfiles projection.
+      allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null
         && request.auth.uid == userId
         && isAllowedPublicUserProfile(request.resource.data, userId)
         && request.resource.data.get('createdAt', null) == request.time
         && request.resource.data.get('updatedAt', null) == request.time;
-      allow update: if request.auth != null
-        && request.auth.uid == userId
-        && request.resource.data.id == userId
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'id', 'name', 'updatedAt', 'profilePhotoUrl', 'location', 'joinedLabel',
-          'gender', 'role', 'battingStyle', 'bowlingStyle'
-        ])
-        && request.resource.data.updatedAt == request.time;
+      allow update: if (request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.id == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'id', 'name', 'updatedAt', 'profilePhotoUrl', 'location', 'joinedLabel',
+            'gender', 'role', 'battingStyle', 'bowlingStyle'
+          ])
+          && request.resource.data.updatedAt == request.time)
+        || (isAdminUserManager()
+          && request.resource.data.id == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'updatedAt', 'profilePhotoUrl', 'location', 'joinedLabel',
+            'gender', 'role', 'battingStyle', 'bowlingStyle'
+          ])
+          && request.resource.data.updatedAt == request.time);
       allow delete: if request.auth != null && request.auth.uid == userId;
 
       // Contact data is kept private while preserving user-management access.
@@ -548,11 +588,6 @@ service cloud.firestore {
         'Marketing Manager', 'Privacy Administrator'
       ]);
       allow create, update, delete: if hasAdminPortalRole(['Super Admin']);
-    }
-
-    // ---------- SportsXtreme Admin portal: own administrator profile ----------
-    match /users/{userId} {
-      allow create, update, delete: if hasAdminPortalRole(['Super Admin', 'Support Agent', 'Moderator']);
     }
 
     match /sportsXtremeWeb/faqforms/submissions/{submissionId} {

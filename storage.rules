@@ -1,0 +1,44 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAdmin() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+    }
+
+    function canManageFeedPosts() {
+      return isAdmin()
+        && firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data.role
+          in ['Super Admin', 'Marketing Manager', 'Content Manager'];
+    }
+
+    function canManageAppBanners() {
+      return isAdmin()
+        && firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data.role
+          in ['Super Admin', 'Content Manager'];
+    }
+
+    match /admin/{fileName} {
+      allow read: if isAdmin();
+      allow write: if isAdmin()
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp|gif)|video/mp4');
+    }
+
+    match /feedPosts/{postId}/{fileName} {
+      allow read: if canManageFeedPosts();
+      allow write: if canManageFeedPosts()
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+
+    // App banners are publicly readable by SportsXtreme clients. Only banner
+    // managers can upload or replace their images.
+    match /appBanners/{bannerId}/{fileName} {
+      allow read: if true;
+      allow write: if canManageAppBanners()
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+  }
+}

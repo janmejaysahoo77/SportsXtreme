@@ -54,7 +54,7 @@ tasks.configureEach {
 }
 
 android {
-    namespace = "com.example.sportsxtreme"
+    namespace = "com.sportsxtreme.app"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -122,6 +122,8 @@ dependencies {
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-functions")
     implementation(libs.firebase.messaging)
+    implementation(libs.firebase.appcheck.playintegrity)
+    debugImplementation(libs.firebase.appcheck.debug)
     implementation(libs.firebase.inappmessaging.display)
     implementation(libs.firebase.storage)
     implementation(libs.google.play.services.auth.api.phone)

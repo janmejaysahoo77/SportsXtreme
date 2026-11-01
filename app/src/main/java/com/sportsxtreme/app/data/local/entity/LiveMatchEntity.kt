@@ -1,0 +1,52 @@
+package com.sportsxtreme.app.data.local.entity
+
+import androidx.room.Entity
+import androidx.room.ColumnInfo
+import androidx.room.PrimaryKey
+
+/**
+ * Room cache for the lightweight live match summary shown on the Home Screen.
+ *
+ * This is the offline fallback when the device has no internet connection.
+ * It mirrors the Firestore `liveScore` document so the Home Screen can render
+ * the last synced score instantly and then update in real time when the
+ * SnapshotListener reconnects.
+ */
+@Entity(tableName = "live_matches")
+data class LiveMatchEntity(
+    @PrimaryKey val matchId: String,
+    val tournamentName: String,
+    val teamAId: String,
+    val teamBId: String,
+    val battingTeamId: String?,
+    val teamAName: String,
+    val teamBName: String,
+    val teamAShortName: String,
+    val teamBShortName: String,
+    val status: String,
+    val score: Int,
+    val wickets: Int,
+    val overs: String,
+    val currentRunRate: Double,
+    val requiredRunRate: Double?,
+    val target: Int?,
+    val strikerName: String?,
+    val strikerRuns: Int,
+    val strikerBalls: Int,
+    val strikerFours: Int = 0,
+    val strikerSixes: Int = 0,
+    val nonStrikerName: String?,
+    val nonStrikerRuns: Int = 0,
+    val nonStrikerBalls: Int = 0,
+    val nonStrikerFours: Int = 0,
+    val nonStrikerSixes: Int = 0,
+    val strikerPlayerId: String? = null,
+    val nonStrikerPlayerId: String? = null,
+    val bowlerName: String?,
+    val bowlerOvers: String,
+    val bowlerRuns: Int,
+    val bowlerWickets: Int,
+    val matchStatusNote: String?,
+    val updatedAtEpochMs: Long,
+    @ColumnInfo(defaultValue = "''") val tournamentStage: String = ""
+)

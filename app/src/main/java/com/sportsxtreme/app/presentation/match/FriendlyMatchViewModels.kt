@@ -1,0 +1,622 @@
+package com.sportsxtreme.app.presentation.match
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import com.sportsxtreme.app.common.Resource
+import com.sportsxtreme.app.domain.model.Match
+import com.sportsxtreme.app.domain.model.CreatedMatchInvite
+import com.sportsxtreme.app.domain.model.MatchType
+import com.sportsxtreme.app.domain.model.Player
+import com.sportsxtreme.app.domain.model.PlayerRole
+import com.sportsxtreme.app.domain.model.TossDecision
+import com.sportsxtreme.app.domain.repository.TeamRepository
+import com.sportsxtreme.app.domain.usecase.MatchUseCases
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.functions.FirebaseFunctions
+
+data class StartMatchUiState(
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null
+)
+
+sealed interface StartMatchEvent {
+    data object NavigateToFriendlySetup : StartMatchEvent
+    data class ShowMessage(val message: String) : StartMatchEvent
+}
+
+class StartMatchViewModel(
+    private val matchUseCases: MatchUseCases
+) : ViewModel() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _uiState = MutableStateFlow(StartMatchUiState())
+    private val _events = MutableSharedFlow<StartMatchEvent>()
+
+    val uiState: StateFlow<StartMatchUiState> = _uiState.asStateFlow()
+    val events: SharedFlow<StartMatchEvent> = _events.asSharedFlow()
+
+    fun continueWith(matchType: MatchType) {
+        if (_uiState.value.isLoading) return
+        if (matchType == MatchType.FRIENDLY) {
+            scope.launch {
+                _events.emit(StartMatchEvent.NavigateToFriendlySetup)
+            }
+            return
+        }
+
+        scope.launch {
+            _uiState.value = _uiState.value.copy(errorMessage = "Coming Soon")
+            _events.emit(StartMatchEvent.ShowMessage("Coming Soon"))
+        }
+    }
+
+    override fun onCleared() {
+        scope.cancel()
+    }
+
+    private suspend fun publishError(message: String) {
+        _uiState.value = StartMatchUiState(errorMessage = message)
+        _events.emit(StartMatchEvent.ShowMessage(message))
+    }
+
+    companion object {
+        fun factory(matchUseCases: MatchUseCases): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    require(modelClass.isAssignableFrom(StartMatchViewModel::class.java))
+                    return StartMatchViewModel(matchUseCases) as T
+                }
+            }
+    }
+}
+
+data class SelectedTeam(
+    val id: String,
+    val name: String
+)
+
+data class TeamSelectionUiState(
+    val isLoading: Boolean = true,
+    val isCreatingMatch: Boolean = false,
+    val match: Match? = null,
+    val selectedTeamA: SelectedTeam? = null,
+    val selectedTeamB: SelectedTeam? = null,
+    val activeInvite: CreatedMatchInvite? = null,
+    val isCreatingInvite: Boolean = false,
+    val errorMessage: String? = null
+)
+
+class TeamSelectionViewModel(
+    matchId: String,
+    private val matchUseCases: MatchUseCases,
+    initialTeamA: SelectedTeam?,
+    initialTeamB: SelectedTeam?
+) : ViewModel() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _uiState = MutableStateFlow(
+        TeamSelectionUiState(
+            selectedTeamA = initialTeamA,
+            selectedTeamB = initialTeamB
+        )
+    )
+
+    val uiState: StateFlow<TeamSelectionUiState> = _uiState.asStateFlow()
+
+    init {
+        if (matchId.isBlank()) {
+            _uiState.value = TeamSelectionUiState(isLoading = false, errorMessage = "Match id is missing")
+        } else {
+            scope.launch {
+                matchUseCases.observeMatch(matchId).collect { result ->
+                    _uiState.value = when (result) {
+                        is Resource.Success -> _uiState.value.copy(
+                            isLoading = false,
+                            match = result.data,
+                            errorMessage = null
+                        )
+                        is Resource.Error -> _uiState.value.copy(
+                            isLoading = false,
+                            errorMessage = result.message ?: "Unable to load match"
+                        )
+                        is Resource.Loading -> _uiState.value.copy(isLoading = true)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        scope.cancel()
+    }
+
+    fun setSelectedTeamA(team: SelectedTeam) {
+        _uiState.value = _uiState.value.copy(selectedTeamA = team)
+    }
+
+    fun setSelectedTeamB(team: SelectedTeam) {
+        _uiState.value = _uiState.value.copy(selectedTeamB = team)
+    }
+
+    fun createInvite(side: com.sportsxtreme.app.domain.model.TeamSide) {
+        val matchId = _uiState.value.match?.id ?: return
+        if (_uiState.value.isCreatingInvite) return
+        scope.launch {
+            _uiState.value = _uiState.value.copy(isCreatingInvite = true, errorMessage = null)
+            when (val result = matchUseCases.createMatchInvite(matchId, side)) {
+                is Resource.Success -> _uiState.value = _uiState.value.copy(
+                    isCreatingInvite = false,
+                    activeInvite = result.data
+                )
+                is Resource.Error -> _uiState.value = _uiState.value.copy(
+                    isCreatingInvite = false,
+                    errorMessage = result.message ?: "Unable to create invitation"
+                )
+                is Resource.Loading -> Unit
+            }
+        }
+    }
+
+    fun dismissInvite() {
+        _uiState.value = _uiState.value.copy(activeInvite = null)
+    }
+
+    fun updateMatchTeams(
+        matchId: String,
+        teamAId: String,
+        teamBId: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        if (_uiState.value.isCreatingMatch) return
+        if (teamAId.isBlank() || teamBId.isBlank()) {
+            onError("Both Team A and Team B must be selected")
+            return
+        }
+        if (teamAId == teamBId) {
+            onError("Team A and Team B cannot be the same")
+            return
+        }
+        scope.launch {
+            _uiState.value = _uiState.value.copy(isCreatingMatch = true, errorMessage = null)
+            when (val result = matchUseCases.updateMatchTeams(matchId, teamAId, teamBId)) {
+                is Resource.Success -> {
+                    _uiState.value = _uiState.value.copy(isCreatingMatch = false, match = result.data)
+                    onSuccess()
+                }
+                is Resource.Error -> {
+                    val msg = result.message ?: "Failed to update match teams"
+                    _uiState.value = _uiState.value.copy(isCreatingMatch = false, errorMessage = msg)
+                    onError(msg)
+                }
+                is Resource.Loading -> Unit
+            }
+        }
+    }
+
+    companion object {
+        fun factory(
+            matchId: String,
+            matchUseCases: MatchUseCases,
+            initialTeamA: SelectedTeam?,
+            initialTeamB: SelectedTeam?
+        ): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    require(modelClass.isAssignableFrom(TeamSelectionViewModel::class.java))
+                    return TeamSelectionViewModel(matchId, matchUseCases, initialTeamA, initialTeamB) as T
+                }
+            }
+    }
+}
+
+data class MatchInviteUiState(
+    val isLoading: Boolean = true,
+    val invite: CreatedMatchInvite? = null,
+    val errorMessage: String? = null
+)
+
+class MatchInviteViewModel(
+    matchId: String,
+    teamSide: com.sportsxtreme.app.domain.model.TeamSide,
+    private val matchUseCases: MatchUseCases
+) : ViewModel() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _uiState = MutableStateFlow(MatchInviteUiState())
+    val uiState: StateFlow<MatchInviteUiState> = _uiState.asStateFlow()
+
+    init {
+        scope.launch {
+            _uiState.value = when (val result = matchUseCases.createMatchInvite(matchId, teamSide)) {
+                is Resource.Success -> MatchInviteUiState(isLoading = false, invite = result.data)
+                is Resource.Error -> MatchInviteUiState(isLoading = false, errorMessage = result.message ?: "Unable to create invitation")
+                is Resource.Loading -> MatchInviteUiState()
+            }
+        }
+    }
+
+    override fun onCleared() = scope.cancel()
+
+    companion object {
+        fun factory(matchId: String, teamSide: com.sportsxtreme.app.domain.model.TeamSide, matchUseCases: MatchUseCases): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                    MatchInviteViewModel(matchId, teamSide, matchUseCases) as T
+            }
+    }
+}
+
+data class StartMatchPreviewUiState(
+    val isLoading: Boolean = true,
+    val match: Match? = null,
+    val errorMessage: String? = null
+)
+
+class StartMatchPreviewViewModel(
+    matchId: String,
+    private val matchUseCases: MatchUseCases
+) : ViewModel() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _uiState = MutableStateFlow(StartMatchPreviewUiState())
+
+    val uiState: StateFlow<StartMatchPreviewUiState> = _uiState.asStateFlow()
+
+    init {
+        if (matchId.isBlank()) {
+            _uiState.value = StartMatchPreviewUiState(isLoading = false, errorMessage = "Match id is missing")
+        } else {
+            scope.launch {
+                matchUseCases.observeMatch(matchId).collect { result ->
+                    _uiState.value = when (result) {
+                        is Resource.Success -> StartMatchPreviewUiState(isLoading = false, match = result.data)
+                        is Resource.Error -> StartMatchPreviewUiState(
+                            isLoading = false,
+                            errorMessage = result.message ?: "Unable to load match preview"
+                        )
+                        is Resource.Loading -> StartMatchPreviewUiState(isLoading = true)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        scope.cancel()
+    }
+
+    companion object {
+        fun factory(matchId: String, matchUseCases: MatchUseCases): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    require(modelClass.isAssignableFrom(StartMatchPreviewViewModel::class.java))
+                    return StartMatchPreviewViewModel(matchId, matchUseCases) as T
+                }
+            }
+    }
+}
+
+data class TossUiState(
+    val isLoading: Boolean = true,
+    val match: Match? = null,
+    val errorMessage: String? = null,
+    val selectedWinnerId: String? = null,
+    val selectedDecision: com.sportsxtreme.app.domain.model.TossDecision? = null
+)
+
+class TossViewModel(
+    matchId: String,
+    private val matchUseCases: MatchUseCases
+) : ViewModel() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _uiState = MutableStateFlow(TossUiState())
+
+    val uiState: StateFlow<TossUiState> = _uiState.asStateFlow()
+
+    init {
+        if (matchId.isBlank()) {
+            _uiState.value = TossUiState(isLoading = false, errorMessage = "Match id is missing")
+        } else {
+            scope.launch {
+                matchUseCases.observeMatch(matchId).collect { result ->
+                    _uiState.value = when (result) {
+                        is Resource.Success -> _uiState.value.copy(isLoading = false, match = result.data)
+                        is Resource.Error -> _uiState.value.copy(
+                            isLoading = false,
+                            errorMessage = result.message ?: "Unable to load match"
+                        )
+                        is Resource.Loading -> _uiState.value.copy(isLoading = true)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        scope.cancel()
+    }
+
+    fun selectWinner(teamId: String) {
+        _uiState.value = _uiState.value.copy(selectedWinnerId = teamId)
+    }
+
+    fun selectDecision(decision: com.sportsxtreme.app.domain.model.TossDecision) {
+        _uiState.value = _uiState.value.copy(selectedDecision = decision)
+    }
+
+    fun saveToss(
+        matchId: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val winnerId = _uiState.value.selectedWinnerId
+        val decision = _uiState.value.selectedDecision
+        if (winnerId.isNullOrBlank() || decision == null) {
+            onError("Please select toss winner and their decision")
+            return
+        }
+        scope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            val toss = com.sportsxtreme.app.domain.model.Toss(
+                winnerTeamId = winnerId,
+                decision = decision,
+                completedByUserId = "current_user", // Simplification
+                completedAtEpochMs = System.currentTimeMillis()
+            )
+            when (val result = matchUseCases.saveToss(matchId, toss)) {
+                is Resource.Success -> {
+                    _uiState.value = _uiState.value.copy(isLoading = false, match = result.data)
+                    onSuccess()
+                }
+                is Resource.Error -> {
+                    val msg = result.message ?: "Failed to save toss"
+                    _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = msg)
+                    onError(msg)
+                }
+                is Resource.Loading -> Unit
+            }
+        }
+    }
+
+    companion object {
+        fun factory(matchId: String, matchUseCases: MatchUseCases): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    require(modelClass.isAssignableFrom(TossViewModel::class.java))
+                    return TossViewModel(matchId, matchUseCases) as T
+                }
+            }
+    }
+}
+
+data class OpeningPlayersUiState(
+    val isLoading: Boolean = true,
+    val match: Match? = null,
+    val battingTeamPlayers: List<Player> = emptyList(),
+    val bowlingTeamPlayers: List<Player> = emptyList(),
+    val isLoadingBattingPlayers: Boolean = false,
+    val isLoadingBowlingPlayers: Boolean = false,
+    val selectedStrikerId: String? = null,
+    val selectedNonStrikerId: String? = null,
+    val selectedBowlerId: String? = null,
+    val errorMessage: String? = null
+) {
+    val battingTeamName: String get() {
+        val match = match ?: return ""
+        val toss = match.toss ?: return match.teamA.name
+        return if (toss.decision == TossDecision.BAT) {
+            if (toss.winnerTeamId == match.teamA.teamId) match.teamA.name else match.teamB.name
+        } else {
+            if (toss.winnerTeamId == match.teamA.teamId) match.teamB.name else match.teamA.name
+        }
+    }
+    val bowlingTeamName: String get() {
+        val match = match ?: return ""
+        val toss = match.toss ?: return match.teamB.name
+        return if (toss.decision == TossDecision.FIELD) {
+            if (toss.winnerTeamId == match.teamA.teamId) match.teamA.name else match.teamB.name
+        } else {
+            if (toss.winnerTeamId == match.teamA.teamId) match.teamB.name else match.teamA.name
+        }
+    }
+}
+
+class OpeningPlayersViewModel(
+    matchId: String,
+    private val matchUseCases: MatchUseCases,
+    private val teamRepository: TeamRepository,
+    private val firestore: FirebaseFirestore
+) : ViewModel() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _uiState = MutableStateFlow(OpeningPlayersUiState())
+
+    val uiState: StateFlow<OpeningPlayersUiState> = _uiState.asStateFlow()
+
+    init {
+        if (matchId.isBlank()) {
+            _uiState.value = OpeningPlayersUiState(isLoading = false, errorMessage = "Match id is missing")
+        } else {
+            scope.launch {
+                matchUseCases.observeMatch(matchId).collect { result ->
+                    when (result) {
+                        is Resource.Success -> {
+                            val match = result.data!!
+                            _uiState.value = _uiState.value.copy(isLoading = false, match = match)
+                            loadPlayersForTeams(match)
+                        }
+                        is Resource.Error -> _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            errorMessage = result.message ?: "Unable to load match"
+                        )
+                        is Resource.Loading -> _uiState.value = _uiState.value.copy(isLoading = true)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun loadPlayersForTeams(match: Match) {
+        val toss = match.toss ?: return
+        val battingTeamId = if (toss.decision == TossDecision.BAT) {
+            toss.winnerTeamId
+        } else {
+            if (toss.winnerTeamId == match.teamA.teamId) match.teamB.teamId else match.teamA.teamId
+        }
+        val bowlingTeamId = if (battingTeamId == match.teamA.teamId) match.teamB.teamId else match.teamA.teamId
+
+        _uiState.value = _uiState.value.copy(
+            isLoadingBattingPlayers = true,
+            isLoadingBowlingPlayers = true
+        )
+        scope.launch(Dispatchers.IO) {
+            try {
+                val battingResult = teamRepository.getTeam(battingTeamId)
+                val bowlingResult = teamRepository.getTeam(bowlingTeamId)
+                val battingPlayers = loadFirestoreTeamPlayers(battingTeamId)
+                    .ifEmpty { (battingResult as? Resource.Success)?.data?.players ?: emptyList() }
+                val bowlingPlayers = loadFirestoreTeamPlayers(bowlingTeamId)
+                    .ifEmpty { (bowlingResult as? Resource.Success)?.data?.players ?: emptyList() }
+                _uiState.value = _uiState.value.copy(
+                    battingTeamPlayers = battingPlayers,
+                    bowlingTeamPlayers = bowlingPlayers
+                )
+            } finally {
+                _uiState.value = _uiState.value.copy(
+                    isLoadingBattingPlayers = false,
+                    isLoadingBowlingPlayers = false
+                )
+            }
+        }
+    }
+
+    private suspend fun loadFirestoreTeamPlayers(teamId: String): List<Player> = runCatching {
+        val team = firestore.collection("teams").document(teamId).get().await()
+        if (!team.exists()) return@runCatching emptyList()
+        // User documents may only be readable by their owner. Resolve the full roster through
+        // the existing server-side profile endpoint used by Team Profile.
+        val profiles = runCatching {
+            val data = FirebaseFunctions.getInstance().getHttpsCallable("getTeamMemberProfiles")
+                .call(mapOf("teamId" to teamId)).await().data as? Map<*, *>
+            (data?.get("members") as? List<*>).orEmpty()
+                .mapNotNull { it as? Map<*, *> }
+                .mapNotNull { profile ->
+                    val userId = profile["userId"] as? String ?: return@mapNotNull null
+                    userId to (profile["displayName"] as? String)
+                        ?.trim()
+                        ?.takeUnless { it.isBlank() || it.equals("team member", ignoreCase = true) }
+                        .orEmpty()
+                }.toMap()
+        }.getOrDefault(emptyMap())
+        buildList {
+            (team.get("members") as? List<*>).orEmpty()
+                .mapNotNull { it as? Map<*, *> }
+                .forEach { member ->
+                    val userId = member["userId"] as? String ?: return@forEach
+                    val profile = runCatching { firestore.collection("publicProfiles").document(userId).get().await() }.getOrNull()
+                    val name = (member["displayName"] as? String)
+                        ?.trim()
+                        ?.takeUnless { it.isBlank() || it.equals("team member", ignoreCase = true) }
+                        .orEmpty()
+                        .ifBlank { (member["name"] as? String).orEmpty() }
+                        .ifBlank { profiles[userId].orEmpty() }
+                        .ifBlank { profile?.getString("name").orEmpty() }
+                        .ifBlank { profile?.getString("displayName").orEmpty() }
+                        .ifBlank { "Team member" }
+                    val role = (member["playingRole"] as? String).orEmpty()
+                        .uppercase().replace(' ', '_').let { value ->
+                            runCatching { PlayerRole.valueOf(value) }.getOrDefault(PlayerRole.UNKNOWN)
+                        }
+                    add(Player(
+                        id = "$teamId::$userId",
+                        teamId = teamId,
+                        displayName = name,
+                        linkedUserId = userId,
+                        role = role,
+                        isGuestPlayer = false
+                    ))
+                }
+        }
+    }.getOrDefault(emptyList())
+
+    override fun onCleared() {
+        scope.cancel()
+    }
+
+    fun selectStriker(playerId: String) {
+        _uiState.value = _uiState.value.copy(selectedStrikerId = playerId)
+    }
+
+    fun selectNonStriker(playerId: String) {
+        _uiState.value = _uiState.value.copy(selectedNonStrikerId = playerId)
+    }
+
+    fun selectBowler(playerId: String) {
+        _uiState.value = _uiState.value.copy(selectedBowlerId = playerId)
+    }
+
+    fun saveOpeningPlayers(
+        matchId: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val strikerId = _uiState.value.selectedStrikerId
+        val nonStrikerId = _uiState.value.selectedNonStrikerId
+        val bowlerId = _uiState.value.selectedBowlerId
+
+        if (strikerId.isNullOrBlank()) { onError("Please select a striker"); return }
+        if (nonStrikerId.isNullOrBlank()) { onError("Please select a non-striker"); return }
+        if (bowlerId.isNullOrBlank()) { onError("Please select a bowler"); return }
+        if (strikerId == nonStrikerId) { onError("Striker and Non-Striker must be different players"); return }
+
+        scope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            when (val result = matchUseCases.selectOpeningPlayers(matchId, strikerId, nonStrikerId, bowlerId)) {
+                is Resource.Success -> {
+                    when (val startResult = matchUseCases.startMatch(matchId)) {
+                        is Resource.Success -> {
+                            _uiState.value = _uiState.value.copy(isLoading = false)
+                            onSuccess()
+                        }
+                        is Resource.Error -> {
+                            val msg = startResult.message ?: "Failed to start match"
+                            _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = msg)
+                            onError(msg)
+                        }
+                        is Resource.Loading -> Unit
+                    }
+                }
+                is Resource.Error -> {
+                    val msg = result.message ?: "Failed to save opening players"
+                    _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = msg)
+                    onError(msg)
+                }
+                is Resource.Loading -> Unit
+            }
+        }
+    }
+
+    companion object {
+        fun factory(matchId: String, matchUseCases: MatchUseCases, teamRepository: TeamRepository, firestore: FirebaseFirestore): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    require(modelClass.isAssignableFrom(OpeningPlayersViewModel::class.java))
+                    return OpeningPlayersViewModel(matchId, matchUseCases, teamRepository, firestore) as T
+                }
+            }
+    }
+}

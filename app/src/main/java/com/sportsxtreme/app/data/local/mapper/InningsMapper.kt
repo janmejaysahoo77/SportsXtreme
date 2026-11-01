@@ -1,0 +1,45 @@
+package com.sportsxtreme.app.data.local.mapper
+
+import com.sportsxtreme.app.data.local.entity.InningsEntity
+import com.sportsxtreme.app.domain.model.Innings
+import com.sportsxtreme.app.domain.model.InningsStatus
+
+fun Innings.toEntity(): InningsEntity = InningsEntity(
+    inningsId = id,
+    matchId = matchId,
+    number = number,
+    battingTeamId = battingTeamId,
+    bowlingTeamId = bowlingTeamId,
+    strikerId = strikerId,
+    nonStrikerId = nonStrikerId,
+    currentBowlerId = currentBowlerId,
+    score = score,
+    wickets = wickets,
+    legalBalls = legalBalls,
+    target = target,
+    status = status.name,
+    startedAtEpochMs = startedAtEpochMs,
+    completedAtEpochMs = completedAtEpochMs,
+    penaltyScoreAdjustment = this@toEntity.penaltyScoreAdjustment,
+    opponentPenaltyRuns = this@toEntity.opponentPenaltyRuns
+)
+
+fun InningsEntity.toDomain(): Innings = Innings(
+    id = inningsId,
+    matchId = matchId,
+    number = number,
+    battingTeamId = battingTeamId,
+    bowlingTeamId = bowlingTeamId,
+    strikerId = strikerId,
+    nonStrikerId = nonStrikerId,
+    currentBowlerId = currentBowlerId,
+    score = score,
+    wickets = wickets,
+    legalBalls = legalBalls,
+    target = target,
+    status = InningsStatus.valueOf(status),
+    startedAtEpochMs = startedAtEpochMs,
+    completedAtEpochMs = completedAtEpochMs,
+    penaltyScoreAdjustment = this@toDomain.penaltyScoreAdjustment,
+    opponentPenaltyRuns = this@toDomain.opponentPenaltyRuns
+)

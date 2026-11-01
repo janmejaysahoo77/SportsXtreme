@@ -23,5 +23,5 @@
 # Firestore creates these Kotlin models through reflection when calling
 # DocumentSnapshot.toObject(). Keep their constructors and properties in release
 # builds so R8 does not remove or rename members needed by the mapper.
--keep class com.example.sportsxtreme.domain.model.Tournament { *; }
--keep class com.example.sportsxtreme.domain.model.TournamentRequirements { *; }
+-keep class com.sportsxtreme.app.domain.model.Tournament { *; }
+-keep class com.sportsxtreme.app.domain.model.TournamentRequirements { *; }

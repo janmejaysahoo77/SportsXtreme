@@ -22,7 +22,7 @@ const TOURNAMENT_INVITE_URL_PREFIX = "https://sportsxtreme-95fbb.web.app/tournam
 const TEAM_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TOURNAMENT_INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const ADMIN_NOTIFICATION_TOPIC = "all_users";
-const MAX_TEAM_MEMBERS = 18;
+const MAX_TEAM_MEMBERS = 15;
 const FINALIZED = "FINALIZED";
 const ROLES = Object.freeze({ ADMIN: "ADMIN", CAPTAIN: "CAPTAIN", VICE_CAPTAIN: "VICE_CAPTAIN" });
 const cloudinaryCloudName = defineSecret("CLOUDINARY_CLOUD_NAME");
@@ -595,7 +595,7 @@ exports.addTeamPlayersByMobile = onCall(async (request) => {
   const teamId = requireTeamId(request.data?.teamId);
   const inputs = request.data?.players;
   if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_TEAM_MEMBERS) {
-    throw new HttpsError("invalid-argument", "Add between 1 and 18 players.");
+    throw new HttpsError("invalid-argument", `Add between 1 and ${MAX_TEAM_MEMBERS} players.`);
   }
 
   const players = inputs.map((input) => {
@@ -665,13 +665,35 @@ exports.joinTeamInvite = onCall(async (request) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError("invalid-argument", "Invalid invitation link.");
   const inviteRef = db.collection("teamInvites").doc(crypto.createHash("sha256").update(token, "utf8").digest("hex"));
   const uid = request.auth.uid;
+  const progressRef = db.collection("teamInviteJoinProgress")
+    .doc(crypto.createHash("sha256").update(`${uid}:${token}`, "utf8").digest("hex"));
+  const publishProgress = async (percent, stage, state = "joining") => {
+    try {
+      await progressRef.set({ userId: uid, percent, stage, state, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    } catch (progressError) {
+      // Progress is an enhancement; a progress-write failure must not block a valid join.
+      console.warn("Unable to publish team invite progress", progressError);
+    }
+  };
   try {
-    return await db.runTransaction(async (transaction) => {
+    await publishProgress(5, "Starting secure team join");
+    await publishProgress(18, "Checking your invitation");
+    const inviteSnapshot = await inviteRef.get();
+    if (!inviteSnapshot.exists) throw new HttpsError("not-found", "Invitation is invalid.");
+    const inviteStatus = inviteSnapshot.get("status") || "OPEN";
+    if (inviteStatus !== "OPEN" && inviteStatus !== "USED") throw new HttpsError("failed-precondition", "This invitation is no longer valid.");
+    const inviteExpiry = inviteSnapshot.get("expiresAt");
+    if (inviteExpiry && inviteExpiry.toDate() <= new Date()) throw new HttpsError("deadline-exceeded", "This invitation has expired.");
+    const teamId = requireTeamId(inviteSnapshot.get("teamId"));
+    await publishProgress(42, "Loading the team roster");
+    const teamSnapshot = await db.collection("teams").doc(teamId).get();
+    if (!teamSnapshot.exists) throw new HttpsError("not-found", "Team not found.");
+    await publishProgress(68, "Adding you to the team");
+    const result = await db.runTransaction(async (transaction) => {
       const invite = await transaction.get(inviteRef);
       if (!invite.exists) throw new HttpsError("not-found", "Invitation is invalid.");
       const status = invite.get("status") || "OPEN";
-      if (status === "USED" && invite.get("usedByUserId") !== uid) throw new HttpsError("failed-precondition", "This invitation has already been used.");
-      if (status === "REVOKED" || (status !== "OPEN" && status !== "USED")) throw new HttpsError("failed-precondition", "This invitation is no longer valid.");
+      if (status !== "OPEN" && status !== "USED") throw new HttpsError("failed-precondition", "This invitation is no longer valid.");
       const expiresAt = invite.get("expiresAt");
       if (expiresAt && expiresAt.toDate() <= new Date()) throw new HttpsError("deadline-exceeded", "This invitation has expired.");
       const teamId = requireTeamId(invite.get("teamId"));
@@ -680,10 +702,13 @@ exports.joinTeamInvite = onCall(async (request) => {
       if (!alreadyMember && members.length >= MAX_TEAM_MEMBERS) throw new HttpsError("failed-precondition", `A team can have at most ${MAX_TEAM_MEMBERS} players.`);
       const updated = alreadyMember ? members.map((member) => storedMember(member)) : [...members.map((member) => storedMember(member)), storedMember({ userId: uid })];
       if (!alreadyMember) transaction.update(ref, { members: updated, memberIds: updated.map((member) => member.userId), updatedAtEpochMs: Date.now() });
-      if (status === "OPEN") transaction.update(inviteRef, { status: "USED", usedByUserId: uid, usedAt: FieldValue.serverTimestamp() });
       return { teamId, alreadyMember };
     });
+    await publishProgress(92, "Finishing your team membership");
+    await publishProgress(100, "Team joined", "complete");
+    return result;
   } catch (error) {
+    await publishProgress(100, "Unable to complete team join", "failed");
     if (error instanceof HttpsError) throw error;
     console.error("joinTeamInvite failed", error);
     throw new HttpsError("internal", "Unable to join team. Please try again.");

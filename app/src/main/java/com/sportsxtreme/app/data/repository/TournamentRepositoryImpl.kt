@@ -1,0 +1,39 @@
+package com.sportsxtreme.app.data.repository
+
+import com.sportsxtreme.app.common.Resource
+import com.sportsxtreme.app.domain.model.Tournament
+import com.sportsxtreme.app.domain.model.TournamentRequirements
+import com.sportsxtreme.app.domain.repository.TournamentRepository
+import kotlinx.coroutines.flow.Flow
+
+import javax.inject.Inject
+import com.sportsxtreme.app.data.remote.firestore.FirebaseFirestoreTournamentDataSource
+
+class TournamentRepositoryImpl @Inject constructor(
+    private val dataSource: FirebaseFirestoreTournamentDataSource
+) : TournamentRepository {
+    override suspend fun createTournament(tournament: Tournament): Resource<Tournament> {
+        return dataSource.createTournament(tournament)
+    }
+
+    override suspend fun updateTournamentRequirements(tournamentId: String, requirements: TournamentRequirements): Resource<Unit> =
+        dataSource.updateTournamentRequirements(tournamentId, requirements)
+
+    override suspend fun updateTournamentDetails(
+        tournamentId: String,
+        name: String,
+        startDate: String,
+        ground: String,
+        ballType: String
+    ): Resource<Unit> = dataSource.updateTournamentDetails(tournamentId, name, startDate, ground, ballType)
+
+    override suspend fun updateTournamentImages(tournamentId: String, logoUrl: String?, bannerUrl: String?): Resource<Unit> =
+        dataSource.updateTournamentImages(tournamentId, logoUrl, bannerUrl)
+
+    override suspend fun getTournament(tournamentId: String): Resource<Tournament> = dataSource.getTournament(tournamentId)
+
+    override suspend fun deleteTournament(tournamentId: String): Resource<Unit> = dataSource.deleteTournament(tournamentId)
+
+    override fun observeHostTournaments(hostUid: String): Flow<Resource<List<Tournament>>> =
+        dataSource.observeHostTournaments(hostUid)
+}

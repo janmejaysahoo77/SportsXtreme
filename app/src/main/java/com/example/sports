@@ -1,4 +1,4 @@
-package com.example.sportsxtreme.presentation.home
+package com.sportsxtreme.app.presentation.home
 
 import android.animation.ObjectAnimator
 import android.content.Context
@@ -12,8 +12,8 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.example.sportsxtreme.domain.model.LiveMatch
-import com.example.sportsxtreme.domain.model.MatchStatus
+import com.sportsxtreme.app.domain.model.LiveMatch
+import com.sportsxtreme.app.domain.model.MatchStatus
 import java.util.Locale
 
 /**

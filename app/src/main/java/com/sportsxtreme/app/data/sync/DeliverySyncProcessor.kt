@@ -1,0 +1,172 @@
+package com.sportsxtreme.app.data.sync
+
+import android.util.Log
+import com.sportsxtreme.app.common.Resource
+import com.sportsxtreme.app.data.local.dao.BallEventDao
+import com.sportsxtreme.app.data.local.dao.MatchDao
+import com.sportsxtreme.app.data.local.dao.PlayerDao
+import com.sportsxtreme.app.data.local.dao.SyncQueueDao
+import com.sportsxtreme.app.data.local.dao.TeamDao
+import com.sportsxtreme.app.data.remote.firestore.FirebaseFirestoreMatchSyncDataSource
+import com.sportsxtreme.app.domain.repository.MatchRepository
+import com.google.firebase.functions.FirebaseFunctions
+import kotlinx.coroutines.tasks.await
+import com.sportsxtreme.app.data.local.mapper.toDomain
+import com.sportsxtreme.app.data.remote.firestore.FirestoreScoringDataSource
+import com.sportsxtreme.app.domain.model.LiveScorePayload
+import com.sportsxtreme.app.domain.model.MatchStatus
+import com.sportsxtreme.app.domain.model.SyncState
+import com.sportsxtreme.app.domain.repository.ScoringRepository
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.flow.first
+
+@Singleton
+class DeliverySyncProcessor @Inject constructor(
+    private val syncQueueDao: SyncQueueDao,
+    private val ballEventDao: BallEventDao,
+    private val scoringRepository: ScoringRepository,
+    private val firestoreScoringDataSource: FirestoreScoringDataSource,
+    private val matchDao: MatchDao,
+    private val teamDao: TeamDao,
+    private val playerDao: PlayerDao,
+    private val matchRepository: MatchRepository,
+    private val matchSyncDataSource: FirebaseFirestoreMatchSyncDataSource,
+    private val functions: FirebaseFunctions
+) {
+    suspend fun syncReadyDeliveries(limit: Int = MAX_BATCH_SIZE): Boolean {
+        while (true) {
+            val operations = syncQueueDao.getReadyOperations(System.currentTimeMillis(), limit)
+            if (operations.isEmpty()) return true
+            val blockedMatchIds = mutableSetOf<String>()
+            var hadFailures = false
+            for (operation in operations) {
+                if (operation.matchId in blockedMatchIds) continue
+                try {
+                    if (operation.entityType == "FINALIZE_MATCH") {
+                        val matchResult = matchRepository.observeMatch(operation.matchId).first()
+                        val match = (matchResult as? Resource.Success)?.data ?: error("Match is not available for finalization sync")
+                        matchSyncDataSource.sync(match).getOrThrow()
+                        functions.getHttpsCallable("finalizeMatch").call(mapOf("matchId" to operation.matchId)).await()
+                        syncQueueDao.delete(operation.operationId)
+                        continue
+                    }
+                    val delivery = ballEventDao.getBallEvent(operation.entityId)
+                    if (delivery == null) {
+                        syncQueueDao.delete(operation.operationId)
+                        continue
+                    }
+                    val scorecard = when (val result = scoringRepository
+                        .observeScorecard(delivery.matchId, delivery.inningsId)
+                        .first()
+                    ) {
+                        is Resource.Success -> requireNotNull(result.data)
+                        is Resource.Error -> error(result.message ?: "Scorecard is not available")
+                        is Resource.Loading -> error("Scorecard is still loading")
+                    }
+                    // Push the lightweight liveScore document FIRST. This is the
+                    // only document the spectator's Home screen reads, so it must
+                    // reach Firestore even if the detailed batch sync below fails
+                    // (e.g. Firestore rules restrict subcollection writes).
+                    firestoreScoringDataSource.syncLiveScore(
+                        matchId = delivery.matchId,
+                        payload = buildLiveScorePayload(delivery.matchId, scorecard)
+                    )
+                    firestoreScoringDataSource.syncDelivery(delivery.toDomain(), scorecard)
+                    ballEventDao.updateSyncState(delivery.ballId, SyncState.SYNCED.name)
+                    syncQueueDao.delete(operation.operationId)
+                } catch (error: Exception) {
+                    blockedMatchIds += operation.matchId
+                    hadFailures = true
+                    Log.e("DeliverySync", "Sync failed for ${operation.entityType} in match ${operation.matchId}", error)
+                    syncQueueDao.update(
+                        operation.copy(
+                            state = "FAILED",
+                            attemptCount = operation.attemptCount + 1,
+                            nextAttemptAtEpochMs = System.currentTimeMillis(),
+                            lastError = error.localizedMessage ?: error.javaClass.simpleName,
+                            updatedAtEpochMs = System.currentTimeMillis()
+                        )
+                    )
+                }
+            }
+            if (hadFailures) return false
+        }
+    }
+
+    /**
+     * Builds the lightweight [LiveScorePayload] from the local Room data.
+     *
+     * This is the ONLY document the Home Screen reads, so it must contain the
+     * current score, overs, run rates, current batter/bowler and match status —
+     * but never ball-by-ball data.
+     */
+    private suspend fun buildLiveScorePayload(
+        matchId: String,
+        scorecard: com.sportsxtreme.app.domain.model.InningsScorecard
+    ): LiveScorePayload {
+        val match = matchDao.getMatch(matchId)
+        val teamA = match?.teamAId?.let { teamDao.getTeam(it) }
+        val teamB = match?.teamBId?.let { teamDao.getTeam(it) }
+        val summary = scorecard.summary
+
+        val striker = summary.strikerId?.let { playerDao.getPlayer(it) }
+        val nonStriker = summary.nonStrikerId?.let { playerDao.getPlayer(it) }
+        val bowler = summary.bowlerId?.let { playerDao.getPlayer(it) }
+        val bowlerScorecard = scorecard.bowling.firstOrNull { it.playerId == summary.bowlerId }
+        val strikerCard = scorecard.batting.firstOrNull { it.playerId == summary.strikerId }
+        val nonStrikerCard = scorecard.batting.firstOrNull { it.playerId == summary.nonStrikerId }
+
+        val status = match?.status?.let { runCatching { MatchStatus.valueOf(it) }.getOrDefault(MatchStatus.CREATED) }
+            ?: MatchStatus.CREATED
+
+        return LiveScorePayload(
+            matchId = matchId,
+            tournamentName = match?.title ?: "",
+            teamAId = match?.teamAId ?: "",
+            teamBId = match?.teamBId ?: "",
+            battingTeamId = match?.battingTeamId,
+            teamAName = teamA?.teamName ?: "",
+            teamBName = teamB?.teamName ?: "",
+            teamAShortName = teamA?.shortName ?: "",
+            teamBShortName = teamB?.shortName ?: "",
+            status = status.name,
+            score = summary.totalScore,
+            wickets = summary.wickets,
+            overs = summary.overs.display,
+            currentRunRate = summary.currentRunRate,
+            requiredRunRate = summary.requiredRunRate,
+            target = summary.target,
+            strikerName = striker?.playerName,
+            strikerRuns = strikerCard?.runs ?: 0,
+            strikerBalls = strikerCard?.balls ?: 0,
+            strikerFours = strikerCard?.fours ?: 0,
+            strikerSixes = strikerCard?.sixes ?: 0,
+            nonStrikerName = nonStriker?.playerName,
+            nonStrikerRuns = nonStrikerCard?.runs ?: 0,
+            nonStrikerBalls = nonStrikerCard?.balls ?: 0,
+            nonStrikerFours = nonStrikerCard?.fours ?: 0,
+            nonStrikerSixes = nonStrikerCard?.sixes ?: 0,
+            strikerPlayerId = summary.strikerId,
+            nonStrikerPlayerId = summary.nonStrikerId,
+            bowlerName = bowler?.playerName,
+            bowlerOvers = bowlerScorecard?.overs?.display ?: "0.0",
+            bowlerRuns = bowlerScorecard?.runsConceded ?: 0,
+            bowlerWickets = bowlerScorecard?.wickets ?: 0,
+            matchStatusNote = statusNote(status),
+            updatedAtEpochMs = summary.updatedAtEpochMs
+        )
+    }
+
+    private fun statusNote(status: MatchStatus): String? = when (status) {
+        MatchStatus.LIVE -> "Powerplay"
+        MatchStatus.INNINGS_BREAK -> "Innings Break"
+        MatchStatus.COMPLETED -> "Completed"
+        MatchStatus.ABANDONED -> "Rain Delay"
+        else -> null
+    }
+
+    private companion object {
+        const val MAX_BATCH_SIZE = 25
+    }
+}

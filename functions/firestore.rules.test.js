@@ -367,6 +367,34 @@ test("only the match owner may write deliveries and required scorecard entries b
   await assertFails(setDoc(doc(otherDb, "matches/live/scorecard/batting/entries/attacker"), { runs: 999 }));
 });
 
+test("public community profiles cannot expose contact fields or change owner identity", async () => {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "communityProfiles/request-1"), {
+      postType: "request",
+      ownerId: "alice",
+      name: "Alice",
+      title: "Looking for a team",
+      category: "Batter",
+      description: "Available for local matches",
+      date: "01/11/2026",
+      time: "10:00 AM",
+      location: "Local ground",
+      format: "T20",
+      profilePhotoUrl: "",
+      whatsappConsent: true,
+      createdAt: new Date()
+    });
+  });
+
+  const ownerDb = testEnvironment.authenticatedContext("alice").firestore();
+  const otherDb = testEnvironment.authenticatedContext("bob").firestore();
+  const profile = doc(ownerDb, "communityProfiles/request-1");
+  await assertSucceeds(updateDoc(profile, { name: "Alice Batter" }));
+  await assertFails(updateDoc(profile, { whatsappNumber: "+919876543210" }));
+  await assertFails(updateDoc(profile, { ownerId: "bob" }));
+  await assertFails(updateDoc(doc(otherDb, "communityProfiles/request-1"), { name: "Hijacked" }));
+});
+
 test("correction audit records deny client reads and writes for every client role", async () => {
   const contexts = [
     testEnvironment.unauthenticatedContext(),

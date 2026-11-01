@@ -5,7 +5,7 @@ This phase supports Friendly Matches only. The model and Firestore layout are in
 ## Package Structure
 
 ```text
-com.example.sportsxtreme
+com.sportsxtreme.app
   data
     di
       FirebaseModule

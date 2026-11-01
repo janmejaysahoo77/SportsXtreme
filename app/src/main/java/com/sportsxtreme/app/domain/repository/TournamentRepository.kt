@@ -1,0 +1,22 @@
+package com.sportsxtreme.app.domain.repository
+
+import com.sportsxtreme.app.common.Resource
+import com.sportsxtreme.app.domain.model.Tournament
+import com.sportsxtreme.app.domain.model.TournamentRequirements
+import kotlinx.coroutines.flow.Flow
+
+interface TournamentRepository {
+    suspend fun createTournament(tournament: Tournament): Resource<Tournament>
+    suspend fun updateTournamentRequirements(tournamentId: String, requirements: TournamentRequirements): Resource<Unit>
+    suspend fun updateTournamentDetails(
+        tournamentId: String,
+        name: String,
+        startDate: String,
+        ground: String,
+        ballType: String
+    ): Resource<Unit>
+    suspend fun updateTournamentImages(tournamentId: String, logoUrl: String?, bannerUrl: String?): Resource<Unit>
+    suspend fun getTournament(tournamentId: String): Resource<Tournament>
+    suspend fun deleteTournament(tournamentId: String): Resource<Unit>
+    fun observeHostTournaments(hostUid: String): Flow<Resource<List<Tournament>>>
+}

@@ -1,13 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
-    <cloud-backup>
+    <!-- Require a device lock/encryption capability for Google cloud backups. -->
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
         <exclude domain="sharedpref" path="pending_email_link_prefs.xml" />
         <exclude domain="sharedpref" path="match_invite_tokens.xml" />
+        <exclude domain="sharedpref" path="community_form_drafts.xml" />
+        <exclude domain="sharedpref" path="guest_experience.xml" />
         <exclude domain="file" path="datastore/session_preferences.preferences_pb" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="pending_email_link_prefs.xml" />
         <exclude domain="sharedpref" path="match_invite_tokens.xml" />
+        <exclude domain="sharedpref" path="community_form_drafts.xml" />
+        <exclude domain="sharedpref" path="guest_experience.xml" />
         <exclude domain="file" path="datastore/session_preferences.preferences_pb" />
     </device-transfer>
 </data-extraction-rules>
