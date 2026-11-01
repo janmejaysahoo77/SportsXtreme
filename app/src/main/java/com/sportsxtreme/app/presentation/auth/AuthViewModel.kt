@@ -272,10 +272,10 @@ class AuthViewModel(
 
     suspend fun resendPhoneOtp(): Resource<PhoneAuthSession> {
         val currentSession = state.value.pendingPhoneSession
-            if (currentSession == null) {
-                Log.e(TAG, "[OTP_SYSTEM] AuthViewModel.resendPhoneOtp failed: No pendingPhoneSession in state")
-                return Resource.Error("No phone verification session is active.")
-            }
+        if (currentSession == null) {
+            Log.e(TAG, "[OTP_SYSTEM] AuthViewModel.resendPhoneOtp failed: No pendingPhoneSession in state")
+            return Resource.Error("No phone verification session is active.")
+        }
         Log.d(TAG, "[OTP_SYSTEM] AuthViewModel.resendPhoneOtp requested for verificationId: ${currentSession.verificationId}")
         _state.value = state.value.copy(
             isLoading = true,
@@ -289,10 +289,10 @@ class AuthViewModel(
 
     suspend fun verifyPhoneOtp(otpCode: String): Resource<Boolean> {
         val phoneSession = state.value.pendingPhoneSession
-            if (phoneSession == null) {
-                Log.e(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp failed: No pendingPhoneSession in state")
-                return Resource.Error("No phone verification session is active.")
-            }
+        if (phoneSession == null) {
+            Log.e(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp failed: No pendingPhoneSession in state")
+            return Resource.Error("No phone verification session is active.")
+        }
         Log.d(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp for verificationId: '${phoneSession.verificationId}', isAutoVerified: ${phoneSession.isAutoVerified}, code length: ${otpCode.length}")
         if (phoneSession.isAutoVerified) {
             Log.i(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp processing auto-verified session")
