@@ -81,7 +81,21 @@ class TournamentRegistrationViewModel @Inject constructor(
     }
 
     fun saveTournament() {
-        val current = _tournamentState.value
+        var current = _tournamentState.value
+        if (current.hostUid.isBlank()) {
+            val user = firebaseAuth.currentUser
+            if (user != null) {
+                current = current.copy(
+                    hostUid = user.uid,
+                    email = current.email.ifBlank { user.email ?: "" },
+                    phone = current.phone.ifBlank { user.phoneNumber ?: "" }
+                )
+                _tournamentState.value = current
+            } else {
+                _uiState.value = UiState.Error("Please sign in to your account before creating a tournament.")
+                return
+            }
+        }
         if (current.name.isBlank()) {
             _uiState.value = UiState.Error("Tournament Name is required")
             return
@@ -96,17 +110,21 @@ class TournamentRegistrationViewModel @Inject constructor(
         }
         _uiState.value = UiState.Loading
         viewModelScope.launch {
-            when (val result = createTournamentUseCase(current)) {
-                is Resource.Success -> {
-                    _tournamentState.value = result.data ?: _tournamentState.value
-                    _uiState.value = UiState.Success
+            try {
+                when (val result = createTournamentUseCase(current)) {
+                    is Resource.Success -> {
+                        _tournamentState.value = result.data ?: _tournamentState.value
+                        _uiState.value = UiState.Success
+                    }
+                    is Resource.Error -> {
+                        _uiState.value = UiState.Error(result.message ?: "Failed to create tournament")
+                    }
+                    is Resource.Loading -> {
+                        _uiState.value = UiState.Loading
+                    }
                 }
-                is Resource.Error -> {
-                    _uiState.value = UiState.Error(result.message ?: "Failed to create tournament")
-                }
-                is Resource.Loading -> {
-                    _uiState.value = UiState.Loading
-                }
+            } catch (e: Exception) {
+                _uiState.value = UiState.Error(e.message ?: "An unexpected error occurred")
             }
         }
     }

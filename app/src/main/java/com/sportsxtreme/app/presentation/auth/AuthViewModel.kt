@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -115,7 +116,7 @@ class AuthViewModel(
         return when (val result = useCases.signInWithEmailAndPassword(email, password)) {
             is Resource.Success -> {
                 val session = result.data ?: return Resource.Error("Login returned an empty account.")
-                completeAuthentication(session.user)
+                completeAuthenticationInBackground(session.user)
             }
             is Resource.Error -> {
                 val message = result.message ?: "Login failed"
@@ -182,7 +183,46 @@ class AuthViewModel(
     suspend fun completePendingAuthentication(): Resource<User> {
         val authSession = state.value.pendingAuthSession
             ?: return Resource.Error("No authenticated account is waiting to be completed.")
-        return completeAuthentication(authSession.user)
+        return completeAuthenticationInBackground(authSession.user)
+    }
+
+    private fun completeAuthenticationInBackground(user: User): Resource<User> {
+        _state.value = state.value.copy(
+            isLoading = false,
+            pendingAuthSession = null,
+            pendingPhoneSession = null,
+            authenticatedUser = user,
+            emailVerificationStatus = if (user.isEmailVerified) {
+                EmailVerificationStatus.Verified
+            } else {
+                state.value.emailVerificationStatus
+            },
+            errorMessage = null
+        )
+        com.sportsxtreme.app.common.FirebaseInAppMessagingHelper.syncInAppMessagingState(user.id)
+
+        scope.launch {
+            val result = withTimeoutOrNull(PROFILE_WRITE_TIMEOUT_MS) {
+                useCases.createOrUpdateUserProfile(
+                    PendingUserProfile(
+                        id = user.id,
+                        name = user.name,
+                        email = user.email,
+                        phoneNumber = user.mobileNumber,
+                        profilePhotoUrl = user.profilePhotoUrl,
+                        authProvider = user.authProvider,
+                        isEmailVerified = user.isEmailVerified,
+                        isPhoneVerified = user.isPhoneVerified
+                    )
+                )
+            }
+            when (result) {
+                is Resource.Success -> Log.d(TAG, "[AUTH] Background profile sync completed for uid=${user.id}")
+                is Resource.Error -> Log.w(TAG, "[AUTH] Background profile sync failed for uid=${user.id}: ${result.message}")
+                is Resource.Loading, null -> Log.w(TAG, "[AUTH] Background profile sync timed out for uid=${user.id}")
+            }
+        }
+        return Resource.Success(user)
     }
 
     fun restoreCurrentSession(): Resource<User>? {

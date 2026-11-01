@@ -111,19 +111,10 @@ class AuthRepositoryImpl(
                     authDataSource.deleteCurrentUserAndSignOut()
                     return@fold Resource.Error("No account found. Please register first.")
                 }
-                // A Google identity proves the email, but this app requires a verified
-                // phone before creating the app profile or completing registration.
-                if (!session.user.isPhoneVerified) {
-                    return@fold Resource.Success(session)
-                }
-                when (val seedResult = seedFirestoreProfile(session.user, "Google sign-in")) {
-                    is Resource.Success -> Resource.Success(session)
-                    is Resource.Error -> {
-                        Log.w(TAG, "[AUTH] Firestore profile seed failed during Google sign-in: ${seedResult.message}. Proceeding with session.")
-                        Resource.Success(session)
-                    }
-                    is Resource.Loading -> Resource.Loading()
-                }
+                // LoginScreen completes profile synchronization after Auth succeeds.
+                // Keep Google sign-in limited to the Auth request so it does not
+                // perform a profile write that LoginScreen immediately repeats.
+                Resource.Success(session)
             },
             onFailure = { error ->
                 Log.e(TAG, "[AUTH] signInWithGoogle FAILED: ${error.message}", error)

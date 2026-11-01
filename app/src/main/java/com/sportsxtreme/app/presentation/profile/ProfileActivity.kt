@@ -327,10 +327,17 @@ private fun ProfileScreen(
             .addSnapshotListener { snapshot, error ->
                 if (error == null && snapshot != null) {
                     hostedMatches = snapshot.documents.count { match ->
-                        match.getString("ownerId") == userId ||
+                        val isOwnedByUser = match.getString("ownerId") == userId ||
                             match.getString("ownerUserId") == userId ||
                             match.getString("organiserId") == userId ||
                             match.getString("organizerId") == userId
+                        val status = (match.getString("status")
+                            ?: (match.get("liveScore") as? Map<*, *>)?.get("status") as? String)
+                            ?.trim()?.uppercase()
+                        isOwnedByUser && status != null && status in setOf(
+                            "IN_PROGRESS", "LIVE", "PAUSED", "INNINGS_BREAK",
+                            "COMPLETED", "FINALIZATION_PENDING"
+                        )
                     }
                     publishHostedCounts()
                 }

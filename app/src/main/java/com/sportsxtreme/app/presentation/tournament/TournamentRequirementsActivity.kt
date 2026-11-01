@@ -50,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
@@ -95,6 +96,8 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Calendar
+import java.util.TimeZone
 
 @AndroidEntryPoint
 class TournamentRequirementsActivity : ComponentActivity() {
@@ -624,7 +627,13 @@ private fun OptionalReqInput(label: String, placeholder: String, value: String, 
 @Composable
 private fun RequiredDateInput(label: String, value: String, showError: Boolean, onValueChange: (String) -> Unit) {
     var showDatePicker by remember { mutableStateOf(false) }
-    val datePickerState = rememberDatePickerState()
+    val minimumDateMillis = remember { todayAtUtcMidnightMillis() }
+    val selectableDates = remember(minimumDateMillis) {
+        object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis >= minimumDateMillis
+        }
+    }
+    val datePickerState = rememberDatePickerState(selectableDates = selectableDates)
     if (showDatePicker) {
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
@@ -656,6 +665,14 @@ private fun RequiredDateInput(label: String, value: String, showError: Boolean, 
         }
         if (showError) Text("Expected end date is required", color = Color(0xFFFF8A80), fontSize = 11.sp)
     }
+}
+
+private fun todayAtUtcMidnightMillis(): Long {
+    val localToday = Calendar.getInstance()
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(localToday.get(Calendar.YEAR), localToday.get(Calendar.MONTH), localToday.get(Calendar.DAY_OF_MONTH))
+    }.timeInMillis
 }
 
 @Composable

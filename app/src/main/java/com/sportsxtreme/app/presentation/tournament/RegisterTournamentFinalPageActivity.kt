@@ -173,8 +173,13 @@ class RegisterTournamentFinalPageActivity : ComponentActivity() {
         val initialMatchTab = intent.getIntExtra(EXTRA_INITIAL_MATCH_TAB, 0).coerceIn(0, 2)
         viewModel.load(tournamentId)
         setContent {
+            val isLoading by viewModel.isLoading.collectAsState()
+            val loadError by viewModel.loadError.collectAsState()
             RegisterTournamentFinalPage(
                 tournament = viewModel.tournament.collectAsState().value,
+                isLoading = isLoading,
+                loadError = loadError,
+                onRetry = { viewModel.load(tournamentId) },
                 initialTab = initialTab,
                 initialMatchTab = initialMatchTab,
                 onBack = ::navigateBackFromTournament,
@@ -244,6 +249,9 @@ private val FinalDivider = XtremeCardBorder
 @Composable
 private fun RegisterTournamentFinalPage(
     tournament: Tournament?,
+    isLoading: Boolean,
+    loadError: String?,
+    onRetry: () -> Unit,
     initialTab: Int,
     initialMatchTab: Int,
     onBack: () -> Unit,
@@ -257,9 +265,25 @@ private fun RegisterTournamentFinalPage(
 ) {
     if (tournament == null) {
         Box(Modifier.fillMaxSize().background(FinalBg), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                androidx.compose.material3.CircularProgressIndicator(color = FinalAccent)
-                Text("Loading tournament…", color = FinalMuted, modifier = Modifier.padding(top = 12.dp))
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                if (isLoading) {
+                    androidx.compose.material3.CircularProgressIndicator(color = FinalAccent)
+                    Text("Loading tournament…", color = FinalMuted, textAlign = TextAlign.Center)
+                } else {
+                    Text(loadError ?: "Tournament was not found", color = Color(0xFFFF7A7A), fontSize = 15.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        androidx.compose.material3.TextButton(onClick = onRetry) {
+                            Text("Retry", color = FinalAccent, fontWeight = FontWeight.Bold)
+                        }
+                        androidx.compose.material3.TextButton(onClick = onBack) {
+                            Text("Go Back", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
         return

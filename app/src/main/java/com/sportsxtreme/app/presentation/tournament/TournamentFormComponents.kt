@@ -24,6 +24,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -49,7 +50,9 @@ import androidx.compose.ui.unit.sp
 import com.sportsxtreme.app.R
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Calendar
 import java.util.Locale
+import java.util.TimeZone
 
 @Composable
 internal fun FormSection(title: String, content: @Composable ColumnScope.() -> Unit) {
@@ -91,7 +94,13 @@ internal fun LabeledInput(label: String, placeholder: String, value: String, onV
 @Composable
 internal fun DateBox(label: String, value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
     var showDatePicker by remember { mutableStateOf(false) }
-    val datePickerState = rememberDatePickerState()
+    val minimumDateMillis = remember { todayAtUtcMidnightMillis() }
+    val selectableDates = remember(minimumDateMillis) {
+        object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis >= minimumDateMillis
+        }
+    }
+    val datePickerState = rememberDatePickerState(selectableDates = selectableDates)
     if (showDatePicker) {
         DatePickerDialog(onDismissRequest = { showDatePicker = false }, confirmButton = {
             TextButton(onClick = {
@@ -111,6 +120,14 @@ internal fun DateBox(label: String, value: String, onValueChange: (String) -> Un
             }
         }
     }
+}
+
+private fun todayAtUtcMidnightMillis(): Long {
+    val localToday = Calendar.getInstance()
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(localToday.get(Calendar.YEAR), localToday.get(Calendar.MONTH), localToday.get(Calendar.DAY_OF_MONTH))
+    }.timeInMillis
 }
 
 @Composable

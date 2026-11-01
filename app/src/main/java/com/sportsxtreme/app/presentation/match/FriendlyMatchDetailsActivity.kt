@@ -79,6 +79,7 @@ import androidx.core.view.WindowCompat
 import com.sportsxtreme.app.R
 import com.sportsxtreme.app.presentation.ui.theme.*
 import com.sportsxtreme.app.common.Resource
+import com.google.firebase.Timestamp
 import com.sportsxtreme.app.domain.usecase.MatchUseCases
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -249,7 +250,7 @@ private fun FriendlyMatchDetailsScreen(
                             "name" to name,
                             "location" to location,
                             "ownerId" to userId,
-                            "createdAt" to FieldValue.serverTimestamp()
+                            "createdAt" to Timestamp.now()
                         )
                     ).await()
                     val listing = if (location.isBlank()) name else "$name, $location"

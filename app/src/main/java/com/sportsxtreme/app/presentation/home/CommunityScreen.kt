@@ -16,6 +16,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -131,7 +132,9 @@ import java.util.UUID
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Query
 import com.google.firebase.Timestamp
 
@@ -231,6 +234,40 @@ fun CommunityScreen(
     var selectedContactProfile by remember { mutableStateOf<Opportunity?>(null) }
     var contactWhatsappNumber by remember { mutableStateOf<String?>(null) }
     var isLoadingContact by remember { mutableStateOf(false) }
+
+    DisposableEffect(selectedContactProfile?.id) {
+        val profileId = selectedContactProfile?.id
+        if (profileId.isNullOrBlank()) {
+            onDispose { }
+        } else {
+            val contactListener = FirebaseFirestore.getInstance()
+                .collection("communityProfiles").document(profileId)
+                .collection("private").document("contact")
+                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                    if (error != null) {
+                        isLoadingContact = false
+                        Toast.makeText(
+                            context,
+                            if (error.code == FirebaseFirestoreException.Code.UNAVAILABLE) {
+                                "Firestore is offline. Reconnect and tap Respond again."
+                            } else {
+                                "Could not load contact details (${error.code.name.lowercase()})."
+                            },
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else if (snapshot != null) {
+                        val number = snapshot.getString("whatsappNumber")?.takeIf { it.isNotBlank() }
+                        if (number != null) {
+                            contactWhatsappNumber = number
+                            isLoadingContact = false
+                        } else if (!snapshot.metadata.isFromCache) {
+                            isLoadingContact = false
+                        }
+                    }
+                }
+            onDispose { contactListener.remove() }
+        }
+    }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(currentUser?.uid) {
@@ -434,17 +471,6 @@ fun CommunityScreen(
                                 selectedContactProfile = profile
                                 contactWhatsappNumber = null
                                 isLoadingContact = true
-                                FirebaseFirestore.getInstance()
-                                    .collection("communityProfiles").document(profile.id)
-                                    .collection("private").document("contact").get()
-                                    .addOnSuccessListener { doc ->
-                                        contactWhatsappNumber = doc.getString("whatsappNumber")?.takeIf { it.isNotBlank() }
-                                        isLoadingContact = false
-                                    }
-                                    .addOnFailureListener { error ->
-                                        isLoadingContact = false
-                                        Toast.makeText(context, "Could not load contact details: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
-                                    }
                             }
                         )
                     }
@@ -550,7 +576,7 @@ fun CommunityScreen(
                                     "format" to format,
                                     "profilePhotoUrl" to photoUrl,
                                     "whatsappConsent" to whatsappConsent,
-                                    "createdAt" to FieldValue.serverTimestamp()
+                                    "createdAt" to Timestamp.now()
                                 ))
                                 batch.set(requestRef.collection("private").document("contact"), mapOf(
                                     "ownerId" to user.uid,
@@ -648,7 +674,7 @@ fun CommunityScreen(
                                     "chargePerMatch" to chargePerMatch,
                                     "profilePhotoUrl" to photoUrl,
                                     "whatsappConsent" to whatsappConsent,
-                                    "createdAt" to FieldValue.serverTimestamp()
+                                    "createdAt" to Timestamp.now()
                                 )
                                 val db = FirebaseFirestore.getInstance()
                                 val profileRef = db.collection("communityProfiles").document()
@@ -684,15 +710,18 @@ fun CommunityScreen(
                 contentColor = Color.White,
                 dragHandle = null,
             ) {
-                ContactDetailsSheet(
-                    profile = profile,
-                    photoUrl = profile.profilePhotoUrl?.takeIf { it.isNotBlank() }
-                        ?: profile.ownerId?.let { ownerPhotoUrls[it] }
-                        ?: if (profile.ownerId == currentUser?.uid) accountPhotoUrl else null,
-                    whatsappNumber = contactWhatsappNumber,
-                    isLoading = isLoadingContact,
-                    onBack = { selectedContactProfile = null }
-                )
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    ContactDetailsSheet(
+                        profile = profile,
+                        photoUrl = profile.profilePhotoUrl?.takeIf { it.isNotBlank() }
+                            ?: profile.ownerId?.let { ownerPhotoUrls[it] }
+                            ?: if (profile.ownerId == currentUser?.uid) accountPhotoUrl else null,
+                        whatsappNumber = contactWhatsappNumber,
+                        isLoading = isLoadingContact,
+                        onBack = { selectedContactProfile = null },
+                        modifier = Modifier.fillMaxWidth().heightIn(max = maxHeight * 0.82f)
+                    )
+                }
             }
         }
     }
@@ -1670,7 +1699,7 @@ private fun OpportunityCard(
                             "reason" to reason,
                             "description" to description,
                             "status" to "OPEN",
-                            "createdAt" to FieldValue.serverTimestamp()
+                            "createdAt" to Timestamp.now()
                         ))
                         .addOnSuccessListener { onComplete() }
                         .addOnFailureListener { error -> onFailure(
@@ -1847,12 +1876,13 @@ private fun ContactDetailsSheet(
     photoUrl: String?,
     whatsappNumber: String?,
     isLoading: Boolean,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     Column(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF061018)).navigationBarsPadding()
+        modifier = modifier.background(Color(0xFF061018)).navigationBarsPadding()
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 14.dp),

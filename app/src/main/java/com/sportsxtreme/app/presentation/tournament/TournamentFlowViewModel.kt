@@ -17,10 +17,33 @@ class TournamentFlowViewModel @Inject constructor(private val repository: Tourna
     private val _tournament = MutableStateFlow<Tournament?>(null)
     val tournament: StateFlow<Tournament?> = _tournament.asStateFlow()
 
+    private val _isLoading = MutableStateFlow(true)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _loadError = MutableStateFlow<String?>(null)
+    val loadError: StateFlow<String?> = _loadError.asStateFlow()
+
     fun load(tournamentId: String) = viewModelScope.launch {
-        if (tournamentId.isBlank()) return@launch
+        if (tournamentId.isBlank()) {
+            _isLoading.value = false
+            _loadError.value = "Tournament ID is missing"
+            return@launch
+        }
+        _isLoading.value = true
+        _loadError.value = null
         val result = repository.getTournament(tournamentId)
-        if (result is Resource.Success) _tournament.value = result.data
+        _isLoading.value = false
+        when (result) {
+            is Resource.Success -> {
+                _tournament.value = result.data
+            }
+            is Resource.Error -> {
+                _loadError.value = result.message ?: "Unable to load tournament"
+            }
+            is Resource.Loading -> {
+                // already loading
+            }
+        }
     }
 
     fun saveTournamentDetails(name: String, startDate: String, ground: String, ballType: String) = viewModelScope.launch {
