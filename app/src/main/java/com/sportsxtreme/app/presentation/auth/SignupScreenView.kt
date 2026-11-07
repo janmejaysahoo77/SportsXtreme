@@ -130,6 +130,21 @@ class SignupScreenView @JvmOverloads constructor(
         confirmPasswordInput = addField(content, "CONFIRM PASSWORD", "********", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD).apply {
             transformationMethod = PasswordTransformationMethod.getInstance()
         }
+        val passwordWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                val password = passwordInput.text.toString()
+                val confirmation = confirmPasswordInput.text.toString()
+                if (confirmation.isNotEmpty() && password != confirmation) {
+                    showError("Passwords do not match")
+                } else if (errorMessageView.text == "Passwords do not match") {
+                    showError(null)
+                }
+            }
+        }
+        passwordInput.addTextChangedListener(passwordWatcher)
+        confirmPasswordInput.addTextChangedListener(passwordWatcher)
 
         errorMessageView = errorMessage(context)
         content.addView(errorMessageView, fullWidthParams(bottom = dp(8)))
@@ -348,14 +363,6 @@ class SignupScreenView @JvmOverloads constructor(
 
     private fun handleGoogleSignup(context: Context) {
         if (isSignupLoading) return
-        if (!consentCheckBox.isChecked) {
-            Toast.makeText(
-                context,
-                "Please agree to the Terms of Service and acknowledge the Privacy Policy first.",
-                Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
 
         val serverClientId = googleServerClientId(context)
         if (serverClientId.isNullOrBlank()) {
@@ -378,7 +385,7 @@ class SignupScreenView @JvmOverloads constructor(
                     credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
                 ) {
                     val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                    when (val authResult = authViewModel.signInWithGoogle(googleCredential.idToken)) {
+                    when (val authResult = authViewModel.signInWithGoogle(googleCredential.idToken, existingAccountOnly = false)) {
                         is Resource.Success -> {
                             showError(null)
                             authResult.data?.user?.id?.let { userId ->
@@ -468,8 +475,8 @@ class SignupScreenView @JvmOverloads constructor(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             googleSignupButton = socialButton(context, "Sign Up With Google", R.drawable.googleicon).apply {
-                isEnabled = false
-                alpha = 0.5f
+                isEnabled = true
+                alpha = 1f
                 setOnClickListener {
                     handleGoogleSignup(context)
                 }

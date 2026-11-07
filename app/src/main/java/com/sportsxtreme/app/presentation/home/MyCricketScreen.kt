@@ -513,6 +513,7 @@ fun MyCricketScreen(
     var selectedTournamentSegment by remember { mutableIntStateOf(0) }
     var teamSearchQuery by remember { mutableStateOf("") }
     var tournamentPendingDeletion by remember { mutableStateOf<Tournament?>(null) }
+    var deletingTournamentId by remember { mutableStateOf<String?>(null) }
     var teamPendingLeave by remember { mutableStateOf<CricketTeam?>(null) }
     var isLeavingTeam by remember { mutableStateOf(false) }
     val leftTeamIds = remember { androidx.compose.runtime.mutableStateListOf<String>() }
@@ -719,15 +720,23 @@ fun MyCricketScreen(
 
         tournamentPendingDeletion?.let { tournament ->
             AlertDialog(
-                onDismissRequest = { tournamentPendingDeletion = null },
+                onDismissRequest = { if (deletingTournamentId == null) tournamentPendingDeletion = null },
                 title = { Text("Delete tournament?") },
-                text = { Text("${tournament.name} and its associated data will be deleted.") },
+                text = {
+                    if (deletingTournamentId == tournament.id) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(22.dp), color = CricketAccent, strokeWidth = 2.dp)
+                            Text("Deleting tournament…", modifier = Modifier.padding(start = 12.dp))
+                        }
+                    } else Text("${tournament.name} and its associated data will be deleted.")
+                },
                 confirmButton = {
-                    TextButton(onClick = {
+                    TextButton(enabled = deletingTournamentId == null, onClick = {
                         val viewModel = hostTournamentsViewModel
                         if (viewModel == null) {
                             Toast.makeText(context, "Unable to delete tournament", Toast.LENGTH_SHORT).show()
                         } else {
+                            deletingTournamentId = tournament.id
                             viewModel.deleteTournament(tournament.id) { result ->
                                 when (result) {
                                     is Resource.Success -> Toast.makeText(context, "Tournament deleted", Toast.LENGTH_SHORT).show()
@@ -738,13 +747,19 @@ fun MyCricketScreen(
                                     ).show()
                                     is Resource.Loading -> Unit
                                 }
+                                deletingTournamentId = null
+                                tournamentPendingDeletion = null
                             }
+                            return@TextButton
                         }
                         tournamentPendingDeletion = null
-                    }) { Text("Delete") }
+                    }) {
+                        if (deletingTournamentId == tournament.id) CircularProgressIndicator(Modifier.size(18.dp), color = CricketAccent, strokeWidth = 2.dp)
+                        else Text("Delete")
+                    }
                 },
                 dismissButton = {
-                    TextButton(onClick = { tournamentPendingDeletion = null }) { Text("Cancel") }
+                    TextButton(enabled = deletingTournamentId == null, onClick = { tournamentPendingDeletion = null }) { Text("Cancel") }
                 }
             )
         }

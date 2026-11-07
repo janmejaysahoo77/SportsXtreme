@@ -196,6 +196,8 @@ class ScorecardActivity : ComponentActivity() {
                     lastSixBalls = deliveries.lastSixBallOutcomes(),
                     scorecardBatting = scorecardDeliveries.scorecardBattingRows(current, playerNames),
                     scorecardBowling = scorecardDeliveries.scorecardBowlingRows(current, playerNames),
+                    fallOfWickets = deliveries.fallOfWickets(playerNames),
+                    highestPartnership = deliveries.highestPartnership(),
                     battedTeamIds = current.battedTeamIds + scorecardDeliveries.mapNotNull { it["battingTeamId"] as? String }
                 )
             }
@@ -579,6 +581,8 @@ private data class MatchDetail(
     val battedTeamIds: Set<String> = emptySet(),
     val scorecardBatting: Map<String, List<ScorecardBattingRow>> = emptyMap(),
     val scorecardBowling: Map<String, List<ScorecardBowlingRow>> = emptyMap(),
+    val fallOfWickets: List<WicketFall> = emptyList(),
+    val highestPartnership: Int = 0,
     val scorecardViews: Long = 0L,
     val win: String,
     val note: String
@@ -619,6 +623,7 @@ private data class CurrentBowlingFigures(
 )
 
 private data class BallOutcome(val label: String, val kind: String)
+private data class WicketFall(val wickets: Int, val runs: Int, val over: String, val batter: String)
 private data class ScorecardBattingRow(
     val playerId: String,
     val name: String,
@@ -773,6 +778,47 @@ private fun List<DocumentSnapshot>.activeInningsDeliveries(match: MatchDetail): 
         it["eventType"] != "REVERSAL" && (it["deliveryId"] as? String) !in reversedDeliveryIds
     }
     return activeDeliveries
+}
+
+private fun List<Map<String, Any?>>.fallOfWickets(playerNames: Map<String, String>): List<WicketFall> {
+    var runs = 0
+    var wickets = 0
+    var legalBalls = 0
+    return mapNotNull { delivery ->
+        val deliveryRuns = ((delivery["runs"] as? Number)?.toInt() ?: 0) +
+            ((delivery["extras"] as? Number)?.toInt() ?: 0)
+        runs += deliveryRuns
+        val dismissedId = (delivery["dismissedPlayerId"] as? String).orEmpty()
+        val dismissalType = (delivery["dismissalType"] as? String).orEmpty()
+        val isWicket = dismissedId.isNotBlank() && dismissalType.isNotBlank() &&
+            dismissalType !in setOf("NONE", "RETIRED_HURT")
+        val fall = if (isWicket) {
+            wickets += 1
+            val batter = playerNames.resolvePlayerName(
+                dismissedId,
+                (delivery["dismissedPlayerName"] as? String) ?: (delivery["batsmanName"] as? String)
+            )
+            WicketFall(wickets, runs, "${legalBalls / 6}.${legalBalls % 6}", batter)
+        } else null
+        if (delivery["isLegalDelivery"] as? Boolean ?: true) legalBalls += 1
+        fall
+    }
+}
+
+private fun List<Map<String, Any?>>.highestPartnership(): Int {
+    var stand = 0
+    var highest = 0
+    forEach { delivery ->
+        stand += ((delivery["runs"] as? Number)?.toInt() ?: 0) +
+            ((delivery["extras"] as? Number)?.toInt() ?: 0)
+        val dismissedId = (delivery["dismissedPlayerId"] as? String).orEmpty()
+        val dismissalType = (delivery["dismissalType"] as? String).orEmpty()
+        if (dismissedId.isNotBlank() && dismissalType.isNotBlank() && dismissalType !in setOf("NONE", "RETIRED_HURT")) {
+            highest = maxOf(highest, stand)
+            stand = 0
+        }
+    }
+    return maxOf(highest, stand)
 }
 
 private fun List<Map<String, Any?>>.calculateCurrentPartnership(match: MatchDetail): CurrentPartnership {
@@ -1049,7 +1095,7 @@ private fun ScorecardTabs(
             TabButton(
                 label = label,
                 selected = selectedTab == index,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f, fill = true),
                 onClick = { onTabSelected(index) }
             )
         }
@@ -1076,14 +1122,14 @@ private fun TabButton(label: String, selected: Boolean, modifier: Modifier, onCl
                 RoundedCornerShape(23.dp)
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp),
+            .padding(horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
             text = label,
             color = if (selected) Accent else Color(0xFFB7C1BD),
-            fontSize = 12.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Black,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -1242,8 +1288,18 @@ private fun MatchHero(match: MatchDetail) {
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top
         ) {
-            CompactTeam(match.leftName, match.leftScore, match.leftOvers, DetailIcon.SHIELD, Modifier.weight(1f))
-            CompactTeam(match.rightName, match.rightScore, match.rightOvers, DetailIcon.BOLT, Modifier.weight(1f))
+            val leftIsFirstBatting = when {
+                match.battingTeamIsLeft == null -> true
+                match.isFirstInnings -> match.battingTeamIsLeft
+                else -> !match.battingTeamIsLeft
+            }
+            if (leftIsFirstBatting) {
+                CompactTeam(match.leftName, match.leftScore, match.leftOvers, DetailIcon.SHIELD, Modifier.weight(1f))
+                CompactTeam(match.rightName, match.rightScore, match.rightOvers, DetailIcon.BOLT, Modifier.weight(1f))
+            } else {
+                CompactTeam(match.rightName, match.rightScore, match.rightOvers, DetailIcon.BOLT, Modifier.weight(1f))
+                CompactTeam(match.leftName, match.leftScore, match.leftOvers, DetailIcon.SHIELD, Modifier.weight(1f))
+            }
         }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1605,7 +1661,7 @@ private fun SummaryTab(match: MatchDetail) {
     CurrentBowlingCard(match)
     RunWormPanel(match)
     MatchInsights(match)
-    FallOfWicketsPremium()
+    FallOfWicketsPremium(match)
 }
 
 @Composable
@@ -2085,15 +2141,26 @@ private fun LegendLine(label: String, color: Color, dashed: Boolean) {
 @Composable
 private fun MatchInsights(match: MatchDetail) {
     SectionPanel("MATCH INSIGHTS") {
+        val battingTeamId = if (match.battingTeamIsLeft == true) match.leftTeamId else match.rightTeamId
+        val bowlingTeamId = if (battingTeamId == match.leftTeamId) match.rightTeamId else match.leftTeamId
+        val bestBowler = match.scorecardBowling[bowlingTeamId].orEmpty()
+            .maxWithOrNull(compareBy<ScorecardBowlingRow> { it.wickets }.thenBy { -(it.runs) })
+        val scheduledOvers = (match.scheduledBalls ?: 0) / 6
+        val currentRuns = (if (match.battingTeamIsLeft == true) match.leftScore else match.rightScore)
+            .substringBefore('/').toIntOrNull()
+        val projected = currentRuns?.let { runs ->
+            val rate = match.currentRunRate.toDoubleOrNull()
+            if (rate != null && scheduledOvers > 0) (rate * scheduledOvers).toInt().toString() else "—"
+        } ?: "—"
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            InsightMetric("Projected", "168", Modifier.weight(1f))
-            InsightMetric("CRR", "7.61", Modifier.weight(1f))
+            InsightMetric("Projected", projected, Modifier.weight(1f))
+            InsightMetric("CRR", match.currentRunRate, Modifier.weight(1f))
             InsightMetric("RRR", match.rrr, Modifier.weight(1f))
         }
         Spacer(Modifier.height(7.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            InsightMetric("Best Bowler", "JH 2/22", Modifier.weight(1f))
-            InsightMetric("High P'ship", "52", Modifier.weight(1f))
+            InsightMetric("Best Bowler", bestBowler?.let { "${it.name} ${it.wickets}/${it.runs}" } ?: "—", Modifier.weight(1f))
+            InsightMetric("High P'ship", if (match.highestPartnership > 0) match.highestPartnership.toString() else "—", Modifier.weight(1f))
         }
         Spacer(Modifier.height(9.dp))
         WinPredictor(match)
@@ -2118,11 +2185,18 @@ private fun InsightMetric(label: String, value: String, modifier: Modifier) {
 
 @Composable
 private fun WinPredictor(match: MatchDetail) {
-    val animated by animateFloatAsState(targetValue = 0.61f, label = "winPredictor")
+    val target = match.target.toIntOrNull()
+    val battingRuns = (if (match.battingTeamIsLeft == true) match.leftScore else match.rightScore)
+        .substringBefore('/').toIntOrNull()
+    val battingChance = if (target != null && target > 0 && battingRuns != null) {
+        (battingRuns.toFloat() / target).coerceIn(0.05f, 0.95f)
+    } else 0.5f
+    val leftChance = if (match.battingTeamIsLeft == true) battingChance else 1f - battingChance
+    val animated by animateFloatAsState(targetValue = leftChance, label = "winPredictor")
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("${match.leftName} 61%", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Black)
+        Text("${match.leftName} ${(leftChance * 100).toInt()}%", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Black)
         Spacer(Modifier.weight(1f))
-        Text("${match.rightName} 39%", color = ElectricBlue, fontSize = 10.sp, fontWeight = FontWeight.Black)
+        Text("${match.rightName} ${((1f - leftChance) * 100).toInt()}%", color = ElectricBlue, fontSize = 10.sp, fontWeight = FontWeight.Black)
     }
     Spacer(Modifier.height(5.dp))
     Row(
@@ -2138,15 +2212,18 @@ private fun WinPredictor(match: MatchDetail) {
 }
 
 @Composable
-private fun FallOfWicketsPremium() {
+private fun FallOfWicketsPremium(match: MatchDetail) {
     SectionPanel("FALL OF WICKETS") {
-        listOf(
-            Triple("1-28", "L. Shaw, 3.2", false),
-            Triple("2-45", "S. Smith, 6.4", false),
-            Triple("3-82", "K. Williamson, 12.1", false),
-            Triple("4-135", "T. Head, 16.2", true)
-        ).forEach { wicket ->
-            PremiumWicketRow(score = wicket.first, detail = wicket.second, latest = wicket.third)
+        if (match.fallOfWickets.isEmpty()) {
+            Text("Wickets will appear here as they fall.", color = SoftText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
+        } else {
+            match.fallOfWickets.forEachIndexed { index, wicket ->
+                PremiumWicketRow(
+                    score = "${wicket.wickets}-${wicket.runs}",
+                    detail = "${wicket.batter}, ${wicket.over} ov",
+                    latest = index == match.fallOfWickets.lastIndex
+                )
+            }
         }
     }
 }

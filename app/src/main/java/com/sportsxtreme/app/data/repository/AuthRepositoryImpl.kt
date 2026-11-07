@@ -86,13 +86,8 @@ class AuthRepositoryImpl(
         return authDataSource.signInWithEmailAndPassword(email, password).fold(
             onSuccess = { session ->
                 Log.i(TAG, "[AUTH] signInWithEmailAndPassword SUCCESS! User UID: ${session.user.id}, isEmailVerified: ${session.user.isEmailVerified}")
-                if (!session.user.isEmailVerified) {
-                    Log.w(TAG, "[AUTH] User email is NOT verified. Signing out.")
-                    authDataSource.signOut()
-                    Resource.Error("Please verify your email before logging in.")
-                } else {
-                    Resource.Success(session)
-                }
+                // Email verification is deferred while phone verification is handled in-app.
+                Resource.Success(session)
             },
             onFailure = { error ->
                 Log.e(TAG, "[AUTH] signInWithEmailAndPassword FAILED: ${error.message}", error)
@@ -107,18 +102,12 @@ class AuthRepositoryImpl(
         return authDataSource.signInWithCredential(credential, AuthProvider.GOOGLE).fold(
             onSuccess = { session ->
                 Log.i(TAG, "[AUTH] signInWithGoogle SUCCESS! User UID: ${session.user.id}, email: ${session.user.email}")
-                if (existingAccountOnly && session.isNewUser) {
-                    authDataSource.deleteCurrentUserAndSignOut()
-                    return@fold Resource.Error("No account found. Please register first.")
-                }
-                // LoginScreen completes profile synchronization after Auth succeeds.
-                // Keep Google sign-in limited to the Auth request so it does not
-                // perform a profile write that LoginScreen immediately repeats.
+                // Super fast login and signup: allow new users and existing users to sign in/up seamlessly with Google.
                 Resource.Success(session)
             },
             onFailure = { error ->
                 Log.e(TAG, "[AUTH] signInWithGoogle FAILED: ${error.message}", error)
-                Resource.Error(error.toAuthMessage("Google signup failed"))
+                Resource.Error(error.toAuthMessage("Google sign-in failed"))
             }
         )
     }

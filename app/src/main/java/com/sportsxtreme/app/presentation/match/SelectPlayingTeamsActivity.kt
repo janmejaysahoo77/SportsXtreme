@@ -221,6 +221,12 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                 else -> ""
             }
             if (selectedId.isBlank() || selectedName.isBlank()) return@registerForActivityResult
+            val currentSelection = viewModel.uiState.value
+            val otherTeam = if (slot == "A") currentSelection.selectedTeamB else currentSelection.selectedTeamA
+            if (otherTeam?.id == selectedId) {
+                Toast.makeText(this, "Choose a different team for each side", Toast.LENGTH_SHORT).show()
+                return@registerForActivityResult
+            }
             if (slot == "A") {
                 viewModel.setSelectedTeamA(SelectedTeam(selectedId, selectedName))
             } else {
@@ -239,24 +245,27 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
                 tournamentName = tournamentName.takeIf { isTournamentMatchFlow && it.isNotBlank() },
                 onBack = { finish() },
                 onOpenStartMatchPreview = { selectedTeamA, selectedTeamB ->
-                    viewModel.updateMatchTeams(
-                        matchId = matchId,
-                        teamAId = selectedTeamA.id,
-                        teamBId = selectedTeamB.id,
-                        onSuccess = {
-                            startActivity(
-                                Intent(this, StartMatchPreviewActivity::class.java)
-                                    .putExtra(EXTRA_MATCH_ID, matchId)
-                                    .putExtra(EXTRA_TOURNAMENT_ID, tournamentId)
-                                    .putExtra(EXTRA_TOURNAMENT_NAME, tournamentName)
-                                    .putExtra(StartMatchPreviewActivity.EXTRA_SELECTED_STAGE, intent.getStringExtra(EXTRA_SELECTED_STAGE).orEmpty())
-                            )
-                            finish()
-                        },
-                        onError = { errorMsg ->
-                            Toast.makeText(this, errorMsg, Toast.LENGTH_SHORT).show()
-                        }
-                    )
+                    if (selectedTeamA.id == selectedTeamB.id) {
+                        Toast.makeText(this, "Choose a different team for each side", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.updateMatchTeams(
+                            matchId = matchId,
+                            teamAId = selectedTeamA.id,
+                            teamBId = selectedTeamB.id,
+                            onSuccess = {
+                                startActivity(
+                                    Intent(this, StartMatchPreviewActivity::class.java)
+                                        .putExtra(EXTRA_MATCH_ID, matchId)
+                                        .putExtra(EXTRA_TOURNAMENT_ID, tournamentId)
+                                        .putExtra(EXTRA_TOURNAMENT_NAME, tournamentName)
+                                        .putExtra(StartMatchPreviewActivity.EXTRA_SELECTED_STAGE, intent.getStringExtra(EXTRA_SELECTED_STAGE).orEmpty())
+                                )
+                            },
+                            onError = { errorMsg ->
+                                Toast.makeText(this, errorMsg, Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
                 },
                 onSelectTeamA = {
                     if (isTournamentMatchFlow) openRegisteredTeams(tournamentId, "A", uiState.selectedTeamA, uiState.selectedTeamB, teamPickerLauncher)

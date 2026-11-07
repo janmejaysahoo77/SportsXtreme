@@ -50,6 +50,7 @@ class TournamentRegistrationViewModel @Inject constructor(
 
     fun updateField(field: Field, value: String) {
         val current = _tournamentState.value
+        val normalizedValue = if (field == Field.PHONE) value.filter { it.isDigit() || it == '+' }.take(13) else value
         _tournamentState.value = when (field) {
             Field.NAME -> current.copy(name = value)
             Field.LOGO_URL -> current.copy(logoUrl = value)
@@ -57,7 +58,7 @@ class TournamentRegistrationViewModel @Inject constructor(
             Field.CITY -> current.copy(city = value)
             Field.GROUND -> current.copy(ground = value)
             Field.ORGANIZER_NAME -> current.copy(organizerName = value)
-            Field.PHONE -> current.copy(phone = value)
+            Field.PHONE -> current.copy(phone = normalizedValue)
             Field.EMAIL -> current.copy(email = value)
             Field.START_DATE -> current.copy(startDate = value)
             Field.DATE_TO_BE_ANNOUNCED -> current.copy(dateToBeAnnounced = value.toBoolean())
@@ -100,6 +101,10 @@ class TournamentRegistrationViewModel @Inject constructor(
             _uiState.value = UiState.Error("Tournament Name is required")
             return
         }
+        if (!isValidIndianPhone(current.phone)) {
+            _uiState.value = UiState.Error("Enter a valid Indian mobile number (10 digits, starting with 6–9).")
+            return
+        }
         if (current.startDate.isBlank() && !current.dateToBeAnnounced) {
             _uiState.value = UiState.Error("Choose a start date or select To be announced")
             return
@@ -127,6 +132,17 @@ class TournamentRegistrationViewModel @Inject constructor(
                 _uiState.value = UiState.Error(e.message ?: "An unexpected error occurred")
             }
         }
+    }
+
+    private fun isValidIndianPhone(value: String): Boolean {
+        val digits = value.filter(Char::isDigit)
+        val normalized = when {
+            digits.length == 10 -> digits
+            digits.length == 12 && digits.startsWith("91") -> digits.substring(2)
+            else -> return false
+        }
+        return normalized.matches(Regex("[6-9]\\d{9}")) &&
+            (value.count { it == '+' } <= 1) && (!value.contains('+') || value.trim().startsWith("+"))
     }
 
     fun resetUiState() {

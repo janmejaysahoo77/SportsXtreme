@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 /**
  * UI state for the live matches section of the Home Screen.
@@ -41,6 +42,15 @@ class LiveMatchViewModel @Inject constructor(
      */
     private fun observeLiveMatches() {
         viewModelScope.launch {
+            launch {
+                delay(8_000L)
+                _uiState.update { state ->
+                    if (state.isLoading) state.copy(
+                        isLoading = false,
+                        errorMessage = "Live matches are taking too long to load"
+                    ) else state
+                }
+            }
             liveMatchRepository.observeLiveMatches().collect { resource ->
                 when (resource) {
                     is Resource.Success -> _uiState.update {

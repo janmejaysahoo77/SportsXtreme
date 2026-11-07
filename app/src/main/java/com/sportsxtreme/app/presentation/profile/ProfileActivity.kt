@@ -142,6 +142,8 @@ private enum class ProfileEditSection(val title: String) {
 
 class ProfileActivity : ComponentActivity() {
 
+    private var profileRefreshToken by mutableStateOf(0)
+
     private var selectedProfilePhotoUri by mutableStateOf<Uri?>(null)
     private val profilePhotoPicker = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -168,6 +170,7 @@ class ProfileActivity : ComponentActivity() {
                 viewedUserId = viewedUserId,
                 fallbackName = fallbackName,
                 fallbackPhotoUrl = fallbackPhotoUrl,
+                refreshToken = profileRefreshToken,
                 onBack = { finish() },
                 onLogout = {
                     FirebaseAuth.getInstance().signOut()
@@ -191,6 +194,11 @@ class ProfileActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        profileRefreshToken += 1
+    }
+
     companion object {
         const val EXTRA_USER_ID = "profile.extra.USER_ID"
         const val EXTRA_DISPLAY_NAME = "profile.extra.DISPLAY_NAME"
@@ -205,6 +213,7 @@ private fun ProfileScreen(
     viewedUserId: String,
     fallbackName: String,
     fallbackPhotoUrl: String,
+    refreshToken: Int,
     onBack: () -> Unit,
     onLogout: () -> Unit,
     selectedPhotoUri: Uri?,
@@ -269,7 +278,7 @@ private fun ProfileScreen(
         viewedUserId.isBlank() || viewedUserId == useCases.getCurrentUser()?.id
     }
 
-    LaunchedEffect(viewedUserId, isGuest) {
+    LaunchedEffect(viewedUserId, isGuest, refreshToken) {
         if (isGuest) return@LaunchedEffect
         uiState = if (isOwnProfile) {
             loadProfileUiState(useCases)
@@ -282,12 +291,18 @@ private fun ProfileScreen(
     // immediately, then calculate match totals separately.  Older accounts do not
     // have the cached /users/{id}/stats/summary document, so that document alone
     // would always render zeros for those players.
-    LaunchedEffect(viewedUserId, isOwnProfile, uiState.profile.id, isGuest) {
+    LaunchedEffect(viewedUserId, isOwnProfile, uiState.profile.id, isGuest, refreshToken) {
         if (isGuest || uiState.profile.id.isBlank()) return@LaunchedEffect
-        val refreshedStats = loadLivePlayerStats(uiState.profile.id, uiState.stats)
-        if (refreshedStats != uiState.stats) {
-            uiState = uiState.copy(stats = refreshedStats)
-        }
+        loadLivePlayerStats(uiState.profile.id, uiState.stats).fold(
+            onSuccess = { refreshedStats ->
+                if (refreshedStats != uiState.stats) {
+                    uiState = uiState.copy(stats = refreshedStats)
+                }
+            },
+            onFailure = { error ->
+                Log.w("ProfileActivity", "Live profile stats background refresh skipped", error)
+            }
+        )
     }
 
     DisposableEffect(uiState.profile.id, isGuest) {
@@ -854,18 +869,20 @@ private suspend fun loadProfileUiState(useCases: AuthUseCases): ProfileUiState {
     // behind its loading skeleton.
     val stats = storedStats
     val settings = settingsResult.successData() ?: UserProfileSettings(userId = userId)
-    val errorMessage = listOf(
-        profileResult.errorText(),
-        statsResult.errorText(),
-        settingsResult.errorText()
-    ).firstOrNull()
+
+    // Secondary subcollections (stats, settings) falling back to defaults is expected
+    // for guest users, offline usage, or new accounts. Only show an error banner
+    // if the core profile itself fails to load.
+    val errorMessage = if (profileResult is Resource.Error) {
+        "Could not refresh profile."
+    } else null
 
     return ProfileUiState(
         profile = profile,
         stats = stats,
         settings = settings,
         isLoading = false,
-        errorMessage = if (errorMessage == null) null else "Some profile data could not refresh."
+        errorMessage = errorMessage
     )
 }
 
@@ -909,29 +926,35 @@ private suspend fun loadOtherProfileUiState(
     )
 }
 
-private suspend fun loadLivePlayerStats(userId: String, stored: UserProfileStats): UserProfileStats = runCatching {
+private suspend fun loadLivePlayerStats(userId: String, stored: UserProfileStats): Result<UserProfileStats> = runCatching {
     val firestore = FirebaseFirestore.getInstance()
-    val indexedTeamDocuments = firestore.collection("teams")
-        .whereArrayContains("memberIds", userId)
-        .get()
-        .await()
-        .documents
+    val indexedTeamDocuments = runCatching {
+        firestore.collection("teams")
+            .whereArrayContains("memberIds", userId)
+            .get()
+            .await()
+            .documents
+    }.getOrElse { emptyList() }
     // Teams created before memberIds was added only contain members[].  Include
     // those documents too; otherwise phone-auth players from those teams cannot
     // be linked to their scorecard rows.
-    val legacyTeamDocuments = firestore.collection("teams")
-        .get()
-        .await()
-        .documents
-        .filter { team ->
-            (team.get("members") as? List<*>)
-                .orEmpty()
-                .filterIsInstance<Map<*, *>>()
-                .any { it["userId"] == userId }
-        }
+    val legacyTeamDocuments = runCatching {
+        firestore.collection("teams")
+            .get()
+            .await()
+            .documents
+            .filter { team ->
+                (team.get("members") as? List<*>)
+                    .orEmpty()
+                    .filterIsInstance<Map<*, *>>()
+                    .any { it["userId"] == userId }
+            }
+    }.getOrElse { emptyList() }
     val teamIds = (indexedTeamDocuments + legacyTeamDocuments).mapTo(linkedSetOf()) { it.id }
     val playerIds = teamIds.mapTo(linkedSetOf()) { "$it::$userId" }.apply { add(userId) }
-    val allMatches = firestore.collection("matches").get().await().documents
+    val allMatches = runCatching {
+        firestore.collection("matches").get().await().documents
+    }.getOrElse { emptyList() }
     val relevantMatches = allMatches.filter { match ->
         val teamA = (match.get("teamA") as? Map<*, *>)?.get("teamId") as? String ?: match.getString("teamAId")
         val teamB = (match.get("teamB") as? Map<*, *>)?.get("teamId") as? String ?: match.getString("teamBId")
@@ -1031,7 +1054,9 @@ private suspend fun loadLivePlayerStats(userId: String, stored: UserProfileStats
         bestScore = bestBatting.ifBlank { stored.bestScore },
         bestBowling = bestBowling.ifBlank { stored.bestBowling }
     )
-}.getOrDefault(stored)
+}.onFailure { error ->
+    Log.w("ProfileActivity", "Live profile stats refresh failed for user $userId", error)
+}
 
 private fun User?.toFallbackProfile(): UserProfile {
     return if (this == null) {

@@ -5,6 +5,7 @@ import com.sportsxtreme.app.domain.model.LiveScorePayload
 import com.sportsxtreme.app.domain.model.MatchStatus
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.MetadataChanges
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.channels.awaitClose
@@ -27,10 +28,16 @@ class FirebaseFirestoreLiveMatchDataSource @Inject constructor(
         // Listen to the matches collection. Each match document contains a
         // nested `liveScore` map that the scorer keeps up to date.
         val registration = firestore.collection(MATCHES_COLLECTION)
-            .addSnapshotListener { snapshot, error ->
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                 if (error != null) {
                     close(error)
                 } else {
+                    // On a fresh install, Firestore can first report an empty
+                    // local cache. Wait for the server result before declaring
+                    // that there are no live matches.
+                    if (snapshot?.let { it.metadata.isFromCache && it.documents.isEmpty() } == true) {
+                        return@addSnapshotListener
+                    }
                     val matches = snapshot?.documents.orEmpty()
                         .mapNotNull { document -> document.toLiveMatch() }
                     trySend(matches)

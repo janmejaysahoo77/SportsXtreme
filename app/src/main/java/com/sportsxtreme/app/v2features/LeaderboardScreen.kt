@@ -271,23 +271,28 @@ fun LeaderboardScreen(
                         return@addSnapshotListener
                     }
                     leaderboardError = null
-                    val documents = snapshot?.documents.orEmpty().filter { doc ->
-                        doc.getString("ballType") == ballKey &&
-                            doc.getString("format") == formatKey &&
-                            doc.getString("tournamentId").orEmpty() == activeTournamentId
-                    }
+                    val documents = snapshot?.documents.orEmpty()
                     val revision = ++teamSnapshotRevision
                     leaderboardScope.launch {
-                        val records = documents.map { doc ->
-                        val id = doc.getString("teamId").orEmpty().ifBlank { doc.id }
-                        val points = doc.getLong("points") ?: 0L
-                        val wins = doc.getLong("wins") ?: 0L
-                        val nrr = doc.getDouble("netRunRate") ?: 0.0
-                        val stats = "M ${doc.getLong("matchesPlayed") ?: 0} • W $wins • L ${doc.getLong("losses") ?: 0} • T ${doc.getLong("ties") ?: 0}"
-                        val logoUrl = listOf("logoUrl", "teamLogoUrl", "photoUrl")
-                            .firstNotNullOfOrNull { key -> doc.getString(key)?.takeIf(String::isNotBlank) }.orEmpty()
-                        Triple(points, wins, ClubRank(0, Trend(TrendType.SAME), doc.getString("shortName").orEmpty().ifBlank { id.take(3) },
-                            doc.getString("name").orEmpty(), points.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), logoUrl, "$stats • NRR ${rate(nrr)}", nrr, id) to id)
+                        val records = documents.groupBy { doc -> doc.getString("teamId").orEmpty().ifBlank { doc.id } }
+                            .map { (id, scopes) ->
+                        val total: (String) -> Long = { field -> scopes.sumOf { it.getLong(field) ?: 0L } }
+                        val points = total("points")
+                        val wins = total("wins")
+                        val runsFor = total("runsFor")
+                        val runsAgainst = total("runsAgainst")
+                        val ballsFaced = total("ballsFaced")
+                        val ballsBowled = total("ballsBowled")
+                        val nrr = (runsFor * 6.0 / ballsFaced.coerceAtLeast(1)) - (runsAgainst * 6.0 / ballsBowled.coerceAtLeast(1))
+                        val stats = "M ${total("matchesPlayed")} • W $wins • L ${total("losses")} • T ${total("ties")}"
+                        val logoUrl = scopes.firstNotNullOfOrNull { doc ->
+                            listOf("logoUrl", "teamLogoUrl", "photoUrl")
+                                .firstNotNullOfOrNull { key -> doc.getString(key)?.takeIf(String::isNotBlank) }
+                        }.orEmpty()
+                        val shortName = scopes.firstNotNullOfOrNull { it.getString("shortName")?.takeIf(String::isNotBlank) }.orEmpty()
+                        val name = scopes.firstNotNullOfOrNull { it.getString("name")?.takeIf(String::isNotBlank) }.orEmpty()
+                        Triple(points, wins, ClubRank(0, Trend(TrendType.SAME), shortName.ifBlank { id.take(3) },
+                            name, points.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), logoUrl, "$stats • NRR ${rate(nrr)}", nrr, id) to id)
                         }.sortedWith(compareByDescending<Triple<Long, Long, Pair<ClubRank, String>>> { it.first }
                             .thenByDescending { it.second }
                             .thenByDescending { if (selectedTournamentId.isNotBlank() && formatKey != "TEST") it.third.first.tieBreakValue else 0.0 }
@@ -424,8 +429,8 @@ fun LeaderboardScreen(
                     )
                 }
 
-                // 4. Filters Row & Dropdown Menus (Only for Player & Teams tabs)
-                if (selectedTab == LeaderboardTab.PLAYER || selectedTab == LeaderboardTab.TEAMS) {
+                // 4. Filters Row & Dropdown Menus (Player tab only)
+                if (selectedTab == LeaderboardTab.PLAYER) {
                     item {
                         Spacer(modifier = Modifier.height(14.dp))
                         FilterSection(

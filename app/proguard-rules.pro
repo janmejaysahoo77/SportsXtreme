@@ -23,5 +23,16 @@
 # Firestore creates these Kotlin models through reflection when calling
 # DocumentSnapshot.toObject(). Keep their constructors and properties in release
 # builds so R8 does not remove or rename members needed by the mapper.
--keep class com.sportsxtreme.app.domain.model.Tournament { *; }
--keep class com.sportsxtreme.app.domain.model.TournamentRequirements { *; }
+-keep class com.sportsxtreme.app.domain.model.** { *; }
+-keep class com.sportsxtreme.app.data.local.entity.** { *; }
+-keep class com.sportsxtreme.app.presentation.auth.** { *; }
+
+# Credential Manager & Google ID Sign-in keep rules for release builds
+-keep class androidx.credentials.** { *; }
+-keep class com.google.android.libraries.identity.googleid.** { *; }
+-keep class com.google.firebase.auth.** { *; }
+-keep class com.google.android.gms.tasks.** { *; }
+
+# Keep attributes required for reflection, serialization, and Google ID token parsing
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,SourceFile,LineNumberTable
+

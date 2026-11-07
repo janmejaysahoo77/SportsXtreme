@@ -1766,7 +1766,20 @@ private fun ReportListingSheet(
                 label = { Text("Additional details (optional)") },
                 minLines = 3,
                 maxLines = 5,
-                enabled = !isSubmitting
+                enabled = !isSubmitting,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    disabledTextColor = Color.White,
+                    cursorColor = GreenAccent,
+                    focusedBorderColor = GreenAccent,
+                    unfocusedBorderColor = Color(0xFF314656),
+                    focusedLabelColor = GreenAccent,
+                    unfocusedLabelColor = Color(0xFF8295A5),
+                    focusedContainerColor = Color(0xFF101A24),
+                    unfocusedContainerColor = Color(0xFF101A24),
+                    disabledContainerColor = Color(0xFF101A24)
+                )
             )
             errorMessage?.let { Text(it, color = Color(0xFFFF7886), fontSize = 12.sp) }
             Button(

@@ -18,6 +18,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.sportsxtreme.app.domain.model.LiveMatch
+import com.sportsxtreme.app.domain.model.MatchStatus
 import java.util.Locale
 
 /**
@@ -137,7 +138,7 @@ class LiveMatchCardView @JvmOverloads constructor(
             addView(LinearLayout(context).apply {
                 gravity = Gravity.CENTER
                 crrText = statChip("CRR", "0.00")
-                addView(crrText)
+                addView(crrText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(38)))
                 rrrText = statChip("RRR", "--")
                 addView(rrrText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)).apply {
                     leftMargin = dp(8)
@@ -146,7 +147,7 @@ class LiveMatchCardView @JvmOverloads constructor(
                 addView(targetText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)).apply {
                     leftMargin = dp(8)
                 })
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(30)).apply {
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(38)).apply {
                 topMargin = dp(9)
             })
 
@@ -341,13 +342,17 @@ class LiveMatchCardView @JvmOverloads constructor(
         })
         liveDot.visibility = if (match.isLive) View.VISIBLE else View.GONE
 
-        teamAIcon.text = match.teamAShortName.ifBlank { match.teamAName }
-        teamBIcon.text = match.teamBShortName.ifBlank { match.teamBName }
+        val firstBattingTeamId = match.battingTeamId?.let { batting ->
+            if (match.target != null) if (batting == match.teamAId) match.teamBId else match.teamAId else batting
+        }
+        val leftIsTeamA = firstBattingTeamId == null || firstBattingTeamId == match.teamAId
+        teamAIcon.text = (if (leftIsTeamA) match.teamAShortName else match.teamBShortName).ifBlank { if (leftIsTeamA) match.teamAName else match.teamBName }
+        teamBIcon.text = (if (leftIsTeamA) match.teamBShortName else match.teamAShortName).ifBlank { if (leftIsTeamA) match.teamBName else match.teamAName }
         val showScores = match.isLive || match.isCompleted || match.isPaused || match.isAbandoned
         
         if (match.battingTeamId != null) {
             val isTeamABatting = match.battingTeamId == match.teamAId
-            if (isTeamABatting) {
+            if (isTeamABatting == leftIsTeamA) {
                 teamAScore.text = "${match.score}/${match.wickets}"
                 teamAOvers.text = "${match.overs} OV"
                 
@@ -380,9 +385,27 @@ class LiveMatchCardView @JvmOverloads constructor(
         teamAScore.visibility = if (showScores) View.VISIBLE else View.GONE
         teamBScore.visibility = if (showScores) View.VISIBLE else View.GONE
 
+        val firstInningsInProgress = match.status in setOf(MatchStatus.LIVE, MatchStatus.IN_PROGRESS) && match.target == null
         crrText.text = String.format(Locale.US, "CRR %.2f", match.currentRunRate)
-        rrrText.text = match.requiredRunRate?.let { String.format(Locale.US, "RRR %.2f", it) } ?: "RRR --"
-        targetText.text = match.target?.let { "TARGET $it" } ?: "TARGET --"
+        crrText.textSize = 10f
+        crrText.setPadding(dp(12), 0, dp(12), 0)
+        crrText.background = GradientDrawable().apply {
+            cornerRadius = dp(18).toFloat()
+            setColor(Color.WHITE)
+            setStroke(dp(1), Color.argb(150, 0, 0, 0))
+        }
+        if (firstInningsInProgress) {
+            rrrText.text = "FIRST INNINGS"
+            rrrText.textSize = 9f
+            rrrText.visibility = View.VISIBLE
+            targetText.visibility = View.GONE
+        } else {
+            rrrText.text = match.requiredRunRate?.let { String.format(Locale.US, "RRR %.2f", it) } ?: "RRR --"
+            rrrText.textSize = 8f
+            rrrText.visibility = View.VISIBLE
+            targetText.text = match.target?.let { "TARGET $it" } ?: "TARGET --"
+            targetText.visibility = View.VISIBLE
+        }
 
         val batterLabel = match.strikerName?.let { "$it ${match.strikerRuns}(${match.strikerBalls})" } ?: "—"
         batterText.text = "BAT  $batterLabel"

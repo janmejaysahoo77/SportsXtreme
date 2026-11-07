@@ -37,11 +37,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -181,6 +183,7 @@ class StartMatchActivity : ComponentActivity() {
         val resolvedInitialMatchId = scheduleMatchId
         setContent {
             val uiState by viewModel.uiState.collectAsState()
+            var isOpeningNextPage by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 viewModel.events.collect { event ->
                     when (event) {
@@ -201,6 +204,7 @@ class StartMatchActivity : ComponentActivity() {
                     if (isScheduleFlow) {
                         if (!isOpeningScheduleSetup) {
                             isOpeningScheduleSetup = true
+                            isOpeningNextPage = true
                             lifecycleScope.launch {
                                 val matchId = resolvedInitialMatchId ?: when (val result = scheduleMatchCreation?.await()) {
                                     is Resource.Success -> result.data?.id
@@ -212,6 +216,7 @@ class StartMatchActivity : ComponentActivity() {
                                 }
                                 if (matchId.isNullOrBlank()) {
                                     isOpeningScheduleSetup = false
+                                    isOpeningNextPage = false
                                     return@launch
                                 }
                                 startActivity(
@@ -229,12 +234,14 @@ class StartMatchActivity : ComponentActivity() {
                             if (tournamentForMatch == null || tournamentForMatch.id.isBlank()) {
                                 Toast.makeText(this@StartMatchActivity, "Choose one of your tournaments to continue", Toast.LENGTH_SHORT).show()
                             } else {
+                                isOpeningNextPage = true
                                 lifecycleScope.launch {
                                     val tournamentResult = tournamentRepository.getTournament(tournamentForMatch.id)
                                     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
                                     val authoritativeTournament = (tournamentResult as? Resource.Success)?.data
                                     if (authoritativeTournament == null || authoritativeTournament.hostUid != currentUserId) {
                                         Toast.makeText(this@StartMatchActivity, "Only the tournament organiser can start matches", Toast.LENGTH_LONG).show()
+                                        isOpeningNextPage = false
                                         return@launch
                                     }
                                     if (TournamentStartDatePolicy.hasNotReached(authoritativeTournament.startDate)) {
@@ -243,6 +250,7 @@ class StartMatchActivity : ComponentActivity() {
                                             TournamentStartDatePolicy.NOT_STARTED_MESSAGE,
                                             Toast.LENGTH_LONG
                                         ).show()
+                                        isOpeningNextPage = false
                                         return@launch
                                     }
                                     val now = System.currentTimeMillis()
@@ -263,6 +271,7 @@ class StartMatchActivity : ComponentActivity() {
                                             val matchId = result.data?.id
                                             if (matchId.isNullOrBlank()) {
                                                 Toast.makeText(this@StartMatchActivity, "Unable to create tournament match", Toast.LENGTH_LONG).show()
+                                                isOpeningNextPage = false
                                             } else {
                                                 startActivity(
                                                     Intent(this@StartMatchActivity, LeagueMatchSetupActivity::class.java)
@@ -272,17 +281,21 @@ class StartMatchActivity : ComponentActivity() {
                                                 )
                                             }
                                         }
-                                        is Resource.Error -> Toast.makeText(this@StartMatchActivity, result.message ?: "Unable to create tournament match", Toast.LENGTH_LONG).show()
+                                        is Resource.Error -> {
+                                            Toast.makeText(this@StartMatchActivity, result.message ?: "Unable to create tournament match", Toast.LENGTH_LONG).show()
+                                            isOpeningNextPage = false
+                                        }
                                         is Resource.Loading -> Unit
                                     }
                                 }
                             }
                         } else {
+                            isOpeningNextPage = true
                             viewModel.continueWith(selectedType)
                         }
                     }
                 },
-                isLoading = uiState.isLoading,
+                isLoading = uiState.isLoading || isOpeningNextPage,
                 onSeriesClick = {
                     Toast.makeText(this@StartMatchActivity, "Coming soon", Toast.LENGTH_SHORT).show()
                 },
@@ -753,8 +766,13 @@ private fun ContinueButton(onClick: () -> Unit, enabled: Boolean) {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("CONTINUE TO TEAM SETUP", color = Color(0xFF111604), fontSize = 14.sp, fontWeight = FontWeight.Black)
-        MatchArrow(Modifier.padding(start = 12.dp).size(17.dp), right = true, tint = Color(0xFF111604))
+        if (!enabled) {
+            CircularProgressIndicator(Modifier.size(20.dp), color = Color(0xFF111604), strokeWidth = 2.dp)
+            Text("PROCESSING...", color = Color(0xFF111604), fontSize = 14.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 10.dp))
+        } else {
+            Text("CONTINUE TO TEAM SETUP", color = Color(0xFF111604), fontSize = 14.sp, fontWeight = FontWeight.Black)
+            MatchArrow(Modifier.padding(start = 12.dp).size(17.dp), right = true, tint = Color(0xFF111604))
+        }
     }
 }
 

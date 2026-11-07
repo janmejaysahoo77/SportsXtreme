@@ -259,7 +259,10 @@ class LiveMatchesSectionView @JvmOverloads constructor(
             visibleMatches.isEmpty() -> {
                 skeletonContainer.visibility = View.GONE
                 placeholderContainer.visibility = View.VISIBLE
-                if (matches.isEmpty()) {
+                if (state.errorMessage != null && matches.isEmpty()) {
+                    placeholderTitle.text = "Unable to load matches"
+                    placeholderSubtitle.text = "Check your connection and try again"
+                } else if (matches.isEmpty()) {
                     placeholderTitle.text = "No Live Matches Right Now"
                     placeholderSubtitle.text = "Check Upcoming Matches"
                 } else {

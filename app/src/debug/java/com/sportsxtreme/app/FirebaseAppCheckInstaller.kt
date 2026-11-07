@@ -6,8 +6,9 @@ import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 /** Uses Firebase's debug provider for local development and emulator runs. */
 internal object FirebaseAppCheckInstaller {
     fun install() {
-        FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
-            DebugAppCheckProviderFactory.getInstance()
-        )
+        FirebaseAppCheck.getInstance().apply {
+            installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
+            setTokenAutoRefreshEnabled(true)
+        }
     }
 }

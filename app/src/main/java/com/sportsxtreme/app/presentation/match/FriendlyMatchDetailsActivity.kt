@@ -55,6 +55,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -129,7 +130,6 @@ class FriendlyMatchDetailsActivity : ComponentActivity() {
                                 Intent(this@FriendlyMatchDetailsActivity, SelectPlayingTeamsActivity::class.java)
                                     .putExtra(SelectPlayingTeamsActivity.EXTRA_MATCH_ID, event.matchId)
                             )
-                            finish()
                         }
                         is FriendlyMatchDetailsEvent.ShowMessage -> Toast.makeText(
                             this@FriendlyMatchDetailsActivity, event.message, Toast.LENGTH_SHORT
@@ -166,23 +166,23 @@ private fun FriendlyMatchDetailsScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var ground by remember { mutableIntStateOf(-1) }
-    var date by remember { mutableIntStateOf(0) }
-    var timeMode by remember { mutableIntStateOf(1) }
-    var venue by remember { mutableStateOf("") }
-    var customVenue by remember { mutableStateOf("") }
-    var customGroundLocation by remember { mutableStateOf("") }
-    var showVenueDialog by remember { mutableStateOf(false) }
+    var ground by rememberSaveable { mutableIntStateOf(-1) }
+    var date by rememberSaveable { mutableIntStateOf(0) }
+    var timeMode by rememberSaveable { mutableIntStateOf(1) }
+    var venue by rememberSaveable { mutableStateOf("") }
+    var customVenue by rememberSaveable { mutableStateOf("") }
+    var customGroundLocation by rememberSaveable { mutableStateOf("") }
+    var showVenueDialog by rememberSaveable { mutableStateOf(false) }
     var isSavingGround by remember { mutableStateOf(false) }
-    var showGroundPicker by remember { mutableStateOf(false) }
-    var showLocationConfirmation by remember { mutableStateOf(false) }
-    var showLocationSettingsDialog by remember { mutableStateOf(false) }
-    var groundSearch by remember { mutableStateOf("") }
+    var showGroundPicker by rememberSaveable { mutableStateOf(false) }
+    var showLocationConfirmation by rememberSaveable { mutableStateOf(false) }
+    var showLocationSettingsDialog by rememberSaveable { mutableStateOf(false) }
+    var groundSearch by rememberSaveable { mutableStateOf("") }
     var registeredGrounds by remember { mutableStateOf<List<String>>(emptyList()) }
     var isLoadingGrounds by remember { mutableStateOf(false) }
     var isFetchingLocation by remember { mutableStateOf(false) }
-    var matchDateEpochMs by remember { mutableLongStateOf(startOfToday()) }
-    var matchTime by remember { mutableStateOf("06:30 PM") }
+    var matchDateEpochMs by rememberSaveable { mutableLongStateOf(startOfToday()) }
+    var matchTime by rememberSaveable { mutableStateOf("06:30 PM") }
     val applyCurrentLocation: (String?) -> Unit = { locationLabel ->
         if (locationLabel == null) {
             Toast.makeText(context, "Unable to find your current location. Please enable location services and try again.", Toast.LENGTH_LONG).show()
@@ -203,7 +203,9 @@ private fun FriendlyMatchDetailsScreen(
     }
     val loadRegisteredGrounds: () -> Unit = {
         showGroundPicker = true
-        if (!isLoadingGrounds && registeredGrounds.isEmpty()) {
+        // Refresh every time the picker opens so listings added by other users
+        // since the last visit are included alongside the cached grounds.
+        if (!isLoadingGrounds) {
             isLoadingGrounds = true
             coroutineScope.launch {
                 try {
@@ -250,7 +252,7 @@ private fun FriendlyMatchDetailsScreen(
                             "name" to name,
                             "location" to location,
                             "ownerId" to userId,
-                            "createdAt" to Timestamp.now()
+                            "createdAt" to FieldValue.serverTimestamp()
                         )
                     ).await()
                     val listing = if (location.isBlank()) name else "$name, $location"

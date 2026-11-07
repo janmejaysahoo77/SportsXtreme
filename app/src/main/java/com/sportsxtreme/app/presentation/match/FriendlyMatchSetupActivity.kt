@@ -36,7 +36,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -103,7 +103,6 @@ class FriendlyMatchSetupActivity : ComponentActivity() {
                                 Intent(this@FriendlyMatchSetupActivity, FriendlyMatchDetailsActivity::class.java)
                                     .putExtra(FriendlyMatchDetailsActivity.EXTRA_MATCH_ID, event.matchId)
                             )
-                            finish()
                         }
                         is FriendlyMatchSetupEvent.ShowMessage -> {
                             Toast.makeText(this@FriendlyMatchSetupActivity, event.message, Toast.LENGTH_SHORT).show()
@@ -132,16 +131,16 @@ private fun FriendlyMatchSetupScreen(
     onContinue: (MatchFormat, BallType, Int, Int?) -> Unit,
     isLoading: Boolean
 ) {
-    var format by remember { mutableIntStateOf(1) }
-    var ballType by remember { mutableIntStateOf(1) }
-    var selectedOvers by remember { mutableIntStateOf(2) }
-    var customOvers by remember { mutableStateOf("15") }
-    var showCustomOversDialog by remember { mutableStateOf(false) }
-    var customOversError by remember { mutableStateOf(false) }
-    var selectedBowlerOvers by remember { mutableIntStateOf(1) }
-    var customBowlerOvers by remember { mutableStateOf("") }
-    var showCustomBowlerOversDialog by remember { mutableStateOf(false) }
-    var customBowlerOversError by remember { mutableStateOf(false) }
+    var format by rememberSaveable { mutableIntStateOf(1) }
+    var ballType by rememberSaveable { mutableIntStateOf(1) }
+    var selectedOvers by rememberSaveable { mutableIntStateOf(2) }
+    var customOvers by rememberSaveable { mutableStateOf("15") }
+    var showCustomOversDialog by rememberSaveable { mutableStateOf(false) }
+    var customOversError by rememberSaveable { mutableStateOf(false) }
+    var selectedBowlerOvers by rememberSaveable { mutableIntStateOf(1) }
+    var customBowlerOvers by rememberSaveable { mutableStateOf("") }
+    var showCustomBowlerOversDialog by rememberSaveable { mutableStateOf(false) }
+    var customBowlerOversError by rememberSaveable { mutableStateOf(false) }
     val formats = listOf("Limited Overs", "T20 Match", "T10 Match", "Test Match")
     val overs = listOf("5", "10", "20", "Custom")
     val matchFormats = listOf(MatchFormat.LIMITED_OVERS, MatchFormat.T20, MatchFormat.T10, MatchFormat.TEST)

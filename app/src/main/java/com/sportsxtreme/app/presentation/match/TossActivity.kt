@@ -122,7 +122,6 @@ class TossActivity : ComponentActivity() {
                                     .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID, tournamentId)
                                     .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_NAME, tournamentName)
                             )
-                            finish()
                         },
                         onError = { msg ->
                             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()

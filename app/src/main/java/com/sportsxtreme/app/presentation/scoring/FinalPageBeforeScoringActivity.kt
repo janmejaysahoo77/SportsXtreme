@@ -123,7 +123,6 @@ class FinalPageBeforeScoringActivity : ComponentActivity() {
                                     .putExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_NAME, tournamentName)
                                     .putExtra(MainScoringActivity.EXTRA_INNINGS_ID, "${matchId}_innings_1")
                             )
-                            finish()
                         },
                         onError = { msg ->
                             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()

@@ -167,7 +167,7 @@ class MainActivity : ComponentActivity() {
         if (granted) {
             checkLocationSettingsAndUpdate()
         } else if (currentScreen == Screen.Home) {
-            publishHomeLocationLabel("Location unavailable")
+            publishHomeLocationLabel("Local Stadium")
         }
     }
     private val locationSettingsLauncher = registerForActivityResult(
@@ -177,7 +177,7 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             updateCurrentUserLocation()
         } else if (currentScreen == Screen.Home) {
-            publishHomeLocationLabel("Location unavailable")
+            publishHomeLocationLabel("Local Stadium")
         }
     }
 
@@ -255,6 +255,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showSplashDirectly() {
+        // Start public matches loading while the splash is visible so guest
+        // users already have the Firestore request in flight when Home opens.
+        liveMatchViewModel
         currentScreen = Screen.Splash
         setContentView(R.layout.activity_splash)
         val splash = findViewById<SportsSplashView>(R.id.sportsSplashView)
@@ -262,7 +265,7 @@ class MainActivity : ComponentActivity() {
             if (currentScreen == Screen.Splash) {
                 routeAfterSplash()
             }
-        }, 2800L)
+        }, HOME_SPLASH_DURATION_MS)
     }
 
     private fun initComposeContent() {
@@ -428,7 +431,7 @@ class MainActivity : ComponentActivity() {
                     SportsSplashView(context).apply {
                         postDelayed({
                             routeAfterSplash()
-                        }, 2800L)
+                        }, HOME_SPLASH_DURATION_MS)
                     }
                 }
             )
@@ -872,11 +875,11 @@ class MainActivity : ComponentActivity() {
                         )
                     }.onFailure {
                         locationSettingsCheckInProgress = false
-                        publishHomeLocationLabel("Location unavailable")
+                        publishHomeLocationLabel("Local Stadium")
                     }
                 } else {
                     locationSettingsCheckInProgress = false
-                    publishHomeLocationLabel("Location unavailable")
+                    publishHomeLocationLabel("Local Stadium")
                 }
             }
     }
@@ -886,12 +889,12 @@ class MainActivity : ComponentActivity() {
             publishHomeLocationLabel("Finding your location…")
             val location = findCurrentLocation()
             if (location == null) {
-                publishHomeLocationLabel("Location unavailable")
+                publishHomeLocationLabel("Local Stadium")
                 return@launch
             }
             val locationLabel = formatLocation(location)
             if (locationLabel.isBlank()) {
-                publishHomeLocationLabel("Location unavailable")
+                publishHomeLocationLabel("Local Stadium")
                 return@launch
             }
             publishHomeLocationLabel(locationLabel)
@@ -1011,6 +1014,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val HOME_SPLASH_DURATION_MS = 800L
         const val EXTRA_START_DESTINATION = "extra_start_destination"
         const val EXTRA_FORCE_LOGIN = "extra_force_login"
         const val EXTRA_FORCE_SIGNUP = "extra_force_signup"

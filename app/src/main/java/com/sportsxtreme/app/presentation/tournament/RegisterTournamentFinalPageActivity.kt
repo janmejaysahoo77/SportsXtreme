@@ -786,7 +786,16 @@ private fun TournamentDetailsCard(
     var name by remember(tournament?.id) { mutableStateOf(tournament?.name.orEmpty()) }
     var startDate by remember(tournament?.id) { mutableStateOf(tournament?.startDate.orEmpty()) }
     var ground by remember(tournament?.id) { mutableStateOf(tournament?.ground.orEmpty()) }
-    var ballType by remember(tournament?.id) { mutableStateOf(tournament?.ballType.orEmpty()) }
+    var ballType by remember(tournament?.id) {
+        mutableStateOf(
+            when {
+                tournament?.ballType.orEmpty().contains("tennis", ignoreCase = true) -> "Tennis"
+                tournament?.ballType.orEmpty().contains("tape", ignoreCase = true) || tournament?.ballType.orEmpty().contains("other", ignoreCase = true) -> "Tape"
+                tournament?.ballType.orEmpty().isBlank() -> ""
+                else -> "Leather"
+            }
+        )
+    }
     Column(
         Modifier.fillMaxWidth().shadow(7.dp, FinalCardShape).clip(FinalCardShape).background(FinalPanel).padding(18.dp)
     ) {
@@ -864,24 +873,67 @@ private fun OverviewEditableDetail(
     locationMarker: Boolean = false
 ) {
     if (isEditing) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text(label) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedContainerColor = FinalBg,
-                unfocusedContainerColor = FinalBg,
-                cursorColor = FinalAccent,
-                focusedBorderColor = FinalAccent,
-                unfocusedBorderColor = FinalDivider,
-                focusedLabelColor = FinalAccent,
-                unfocusedLabelColor = FinalMuted
+        if (label == "Ball type") {
+            var expanded by remember { mutableStateOf(false) }
+            val options = listOf("Tennis", "Leather", "Tape")
+            val selectedBall = when {
+                value.contains("tennis", ignoreCase = true) -> "Tennis"
+                value.contains("tape", ignoreCase = true) || value.contains("other", ignoreCase = true) -> "Tape"
+                else -> "Leather"
+            }
+            Box(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+                OutlinedTextField(
+                    value = selectedBall,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text(label) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().clickable { expanded = true },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedContainerColor = FinalBg,
+                        unfocusedContainerColor = FinalBg,
+                        cursorColor = FinalAccent,
+                        focusedBorderColor = FinalAccent,
+                        unfocusedBorderColor = FinalDivider,
+                        focusedLabelColor = FinalAccent,
+                        unfocusedLabelColor = FinalMuted
+                    )
+                )
+                Box(Modifier.matchParentSize().clickable { expanded = true })
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    options.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = {
+                                onValueChange(option)
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        } else {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                label = { Text(label) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = FinalBg,
+                    unfocusedContainerColor = FinalBg,
+                    cursorColor = FinalAccent,
+                    focusedBorderColor = FinalAccent,
+                    unfocusedBorderColor = FinalDivider,
+                    focusedLabelColor = FinalAccent,
+                    unfocusedLabelColor = FinalMuted
+                )
             )
-        )
+        }
     } else {
         val displayedValue = value.ifBlank { emptyLabel }
         if (label == "Ball type") {
@@ -1113,7 +1165,11 @@ private fun MatchesTab(tournament: Tournament?, initialMatchTab: Int, isOrganize
                             teamB = teamB,
                             date = if (dateMillis > 0L) java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(dateMillis)) else "Date not set",
                             time = document.getString("matchTime").orEmpty().ifBlank { "Time not set" },
-                            venue = document.getString("venue").orEmpty().ifBlank { "Venue not set" },
+                            venue = document.getString("venue")?.trim().orEmpty()
+                                .ifBlank { tournament?.ground?.trim().orEmpty() }
+                                .ifBlank { tournament?.requirements?.location?.trim().orEmpty() }
+                                .ifBlank { tournament?.city?.trim().orEmpty() }
+                                .ifBlank { "Venue not set" },
                             status = status,
                             scheduleStatus = document.getString("scheduleStatus").orEmpty().uppercase(),
                             teamAScore = if (liveTeamId == teamAId) liveScoreText else scoreA.first,
@@ -2237,7 +2293,7 @@ private fun GroupPointsTab(
                 Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
                     .background(FinalBg)
             ) {
-                items(teams, key = { it.id }) { team ->
+                items(teams.sortedWith(compareByDescending<PointsGroupTeam> { standings[it.id]?.points ?: 0 }.thenByDescending { standings[it.id]?.wins ?: 0 }.thenByDescending { standings[it.id]?.netRunRate ?: 0.0 }), key = { it.id }) { team ->
                     Box {
                         Row(
                             Modifier.fillMaxWidth()
@@ -2378,7 +2434,8 @@ private fun LeaderboardTab(tournamentId: String) {
             val batPoints = doc.getLong("battingPoints") ?: 0L
             val bowlPoints = doc.getLong("bowlingPoints") ?: 0L
             val score = when (category) {
-                "Bowl" -> bowlPoints
+                "Bat" -> runs
+                "Bowl" -> wickets
                 "Field" -> fieldPoints
                 "MVP" -> batPoints + bowlPoints + fieldPoints
                 else -> batPoints
@@ -2387,10 +2444,10 @@ private fun LeaderboardTab(tournamentId: String) {
             val canonicalId = doc.getString("canonicalPlayerId")?.takeIf(String::isNotBlank)
                 ?: playerId.substringAfterLast("::").ifBlank { playerId }
             val stats = when (category) {
-                "Bowl" -> "W $wickets • ECO ${String.format(java.util.Locale.US, "%.1f", conceded * 6.0 / legalBalls.coerceAtLeast(1))} • PTS $bowlPoints"
+                "Bowl" -> "ECO ${String.format(java.util.Locale.US, "%.1f", conceded * 6.0 / legalBalls.coerceAtLeast(1))}"
                 "Field" -> "PTS $fieldPoints • C ${doc.getLong("catches") ?: 0L} • RO ${doc.getLong("runOuts") ?: 0L} • ST ${doc.getLong("stumpings") ?: 0L}"
-                "MVP" -> "BAT $batPoints • BOWL $bowlPoints • FIELD $fieldPoints"
-                else -> "RUNS $runs • AVG ${String.format(java.util.Locale.US, "%.1f", runs.toDouble() / outs.coerceAtLeast(1))} • SR ${String.format(java.util.Locale.US, "%.1f", runs * 100.0 / balls.coerceAtLeast(1))}"
+                "MVP" -> "PTS ${batPoints + bowlPoints + fieldPoints} • BAT $batPoints • BOWL $bowlPoints • FIELD $fieldPoints"
+                else -> "AVG ${String.format(java.util.Locale.US, "%.1f", runs.toDouble() / outs.coerceAtLeast(1))} • SR ${String.format(java.util.Locale.US, "%.1f", runs * 100.0 / balls.coerceAtLeast(1))}"
             }
             TournamentPlayerLeader(canonicalId, doc.getString("name").orEmpty().ifBlank { "Player" }, doc.getString("teamShortName").orEmpty(), score, stats)
         }.filter { it.id.isNotBlank() }

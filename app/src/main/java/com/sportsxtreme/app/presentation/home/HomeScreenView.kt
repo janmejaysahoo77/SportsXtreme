@@ -21,6 +21,7 @@ import android.content.Context
 import android.content.Intent
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -61,6 +62,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupMenu
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -182,6 +184,7 @@ class HomeScreenView @JvmOverloads constructor(
     private var drawerProfileCompletionFill: View? = null
     private var drawerProfileCompletionBar: View? = null
     private var lastDrawerProfileCompletion: Int? = null
+    private var drawerProfileChecklist: List<Pair<String, Boolean>> = emptyList()
     private var profileCompletionToastShown = false
     private var locationLabelView: TextView? = null
     private var homeMatchSearchQuery = ""
@@ -347,20 +350,22 @@ class HomeScreenView @JvmOverloads constructor(
     }
 
     private fun updateDrawerProfileCompletion(profile: Map<String, Any?>?, user: com.google.firebase.auth.FirebaseUser) {
-        val values = listOf(
-            !((profile?.get("name") as? String).orEmpty().ifBlank { user.displayName.orEmpty() }).isBlank(),
-            !((profile?.get("profilePhotoUrl") as? String).orEmpty().ifBlank { user.photoUrl?.toString().orEmpty() }).isBlank(),
-            !((profile?.get("phoneNumber") as? String).orEmpty().ifBlank { user.phoneNumber.orEmpty() }).isBlank(),
-            !((profile?.get("email") as? String).orEmpty().ifBlank { user.email.orEmpty() }).isBlank(),
-            !(profile?.get("location") as? String).orEmpty().isBlank(),
-            !(profile?.get("gender") as? String).orEmpty().isBlank(),
-            !(profile?.get("role") as? String).orEmpty().isBlank(),
-            !(profile?.get("battingStyle") as? String).orEmpty().isBlank()
-        ).toMutableList()
+        val checklist = mutableListOf(
+            "Name" to ((profile?.get("name") as? String).orEmpty().ifBlank { user.displayName.orEmpty() }).isNotBlank(),
+            "Profile photo" to ((profile?.get("profilePhotoUrl") as? String).orEmpty().ifBlank { user.photoUrl?.toString().orEmpty() }).isNotBlank(),
+            "Phone number" to ((profile?.get("phoneNumber") as? String).orEmpty().ifBlank { user.phoneNumber.orEmpty() }).isNotBlank(),
+            "Email" to ((profile?.get("email") as? String).orEmpty().ifBlank { user.email.orEmpty() }).isNotBlank(),
+            "Location" to (profile?.get("location") as? String).orEmpty().isNotBlank(),
+            "Gender" to (profile?.get("gender") as? String).orEmpty().isNotBlank(),
+            "Playing role" to (profile?.get("role") as? String).orEmpty().isNotBlank(),
+            "Batting style" to (profile?.get("battingStyle") as? String).orEmpty().isNotBlank()
+        )
         val role = (profile?.get("role") as? String).orEmpty()
         if (role.contains("bowl", ignoreCase = true) || role.contains("all round", ignoreCase = true)) {
-            values += !(profile?.get("bowlingStyle") as? String).orEmpty().isBlank()
+            checklist += "Bowling style" to (profile?.get("bowlingStyle") as? String).orEmpty().isNotBlank()
         }
+        drawerProfileChecklist = checklist
+        val values = checklist.map { it.second }
         val completion = (values.count { it } * 100 / values.size).coerceIn(0, 100)
         val previousCompletion = lastDrawerProfileCompletion
         lastDrawerProfileCompletion = completion
@@ -389,6 +394,53 @@ class HomeScreenView @JvmOverloads constructor(
                 }, 4_000L)
             }
         }
+    }
+
+    private fun showProfileCompletionChecklist() {
+        if (drawerProfileChecklist.isEmpty()) return
+        val dialog = Dialog(context)
+        val content = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(24), dp(24), dp(32))
+            setBackgroundColor(Color.rgb(20, 25, 31))
+        }
+        content.addView(TextView(context).apply {
+            text = "Complete your profile"
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        content.addView(TextView(context).apply {
+            text = "Ticked items are already added to your profile."
+            setTextColor(Color.LTGRAY)
+            textSize = 13f
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6); bottomMargin = dp(16) })
+        drawerProfileChecklist.forEach { (label, complete) ->
+            content.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(context).apply {
+                    text = if (complete) "✓" else "○"
+                    setTextColor(if (complete) Color.rgb(66, 217, 121) else Color.GRAY)
+                    textSize = 20f
+                    typeface = Typeface.DEFAULT_BOLD
+                }, LinearLayout.LayoutParams(dp(32), -2))
+                addView(TextView(context).apply {
+                    text = label
+                    setTextColor(if (complete) Color.WHITE else Color.LTGRAY)
+                    textSize = 15f
+                })
+            }, LinearLayout.LayoutParams(-1, dp(44)))
+        }
+        dialog.setContentView(content)
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setGravity(Gravity.BOTTOM)
+            attributes = attributes.apply { windowAnimations = android.R.style.Animation_Dialog }
+        }
+        dialog.show()
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
     private fun showDrawerProfilePhoto(photoView: ImageView, storedUrl: String?) {
@@ -555,7 +607,11 @@ class HomeScreenView @JvmOverloads constructor(
                         textSize = 11f
                         typeface = Typeface.DEFAULT_BOLD
                         includeFontPadding = false
+                        isClickable = true
+                        isFocusable = true
+                        setOnClickListener { showProfileCompletionChecklist() }
                     }
+                    drawerProfileCompletionBar?.setOnClickListener { showProfileCompletionChecklist() }
                     addView(drawerProfileCompletionText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                         topMargin = dp(16)
                     })
@@ -1792,27 +1848,56 @@ class HomeScreenView @JvmOverloads constructor(
                         PopupMenu(context, anchor).apply {
                             menu.add("Delete tournament")
                             setOnMenuItemClickListener {
-                                AlertDialog.Builder(context)
+                                val progress = ProgressBar(context).apply {
+                                    isIndeterminate = true
+                                    visibility = View.GONE
+                                }
+                                val message = TextView(context).apply {
+                                    text = "This will permanently delete this tournament and its registered team entries."
+                                    setTextColor(Color.WHITE)
+                                    textSize = 14f
+                                }
+                                val dialogContent = LinearLayout(context).apply {
+                                    orientation = LinearLayout.HORIZONTAL
+                                    gravity = Gravity.CENTER_VERTICAL
+                                    setPadding(dp(24), dp(12), dp(24), dp(12))
+                                    addView(progress, LinearLayout.LayoutParams(dp(24), dp(24)).apply { rightMargin = dp(14) })
+                                    addView(message, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                                }
+                                val deleteDialog = AlertDialog.Builder(context)
                                     .setTitle("Delete tournament?")
-                                    .setMessage("This will permanently delete this tournament and its registered team entries.")
+                                    .setView(dialogContent)
                                     .setNegativeButton("Cancel", null)
-                                    .setPositiveButton("Delete") { _, _ ->
+                                    .setPositiveButton("Delete", null)
+                                    .create()
+                                deleteDialog.setOnShowListener {
+                                    val cancelButton = deleteDialog.getButton(AlertDialog.BUTTON_NEGATIVE)
+                                    val deleteButton = deleteDialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                                    deleteButton.setOnClickListener {
                                         val viewModel = hostTournamentsViewModel
                                         if (viewModel == null) {
                                             Toast.makeText(context, "Unable to delete tournament", Toast.LENGTH_LONG).show()
-                                        } else {
-                                            viewModel.deleteTournament(tournament.id) { result ->
-                                                when (result) {
-                                                    is com.sportsxtreme.app.common.Resource.Success ->
-                                                        Toast.makeText(context, "Tournament deleted", Toast.LENGTH_SHORT).show()
-                                                    is com.sportsxtreme.app.common.Resource.Error ->
-                                                        Toast.makeText(context, result.message ?: "Unable to delete tournament", Toast.LENGTH_LONG).show()
-                                                    else -> Unit
-                                                }
+                                            deleteDialog.dismiss()
+                                            return@setOnClickListener
+                                        }
+                                        progress.visibility = View.VISIBLE
+                                        message.text = "Deleting tournament…"
+                                        deleteButton.isEnabled = false
+                                        cancelButton.isEnabled = false
+                                        deleteDialog.setCancelable(false)
+                                        viewModel.deleteTournament(tournament.id) { result ->
+                                            when (result) {
+                                                is com.sportsxtreme.app.common.Resource.Success ->
+                                                    Toast.makeText(context, "Tournament deleted", Toast.LENGTH_SHORT).show()
+                                                is com.sportsxtreme.app.common.Resource.Error ->
+                                                    Toast.makeText(context, result.message ?: "Unable to delete tournament", Toast.LENGTH_LONG).show()
+                                                else -> Unit
                                             }
+                                            deleteDialog.dismiss()
                                         }
                                     }
-                                    .show()
+                                }
+                                deleteDialog.show()
                                 true
                             }
                             show()
@@ -4132,6 +4217,16 @@ class HomeScreenView @JvmOverloads constructor(
         var currentPostShareText: String? = null
         var feedSkeleton: LinearLayout? = null
         var feedContent: LinearLayout? = null
+        val feedLoadHandler = Handler(Looper.getMainLooper())
+        val feedLoadTimeout = Runnable {
+            if (isAttachedToWindow && feedContent?.visibility != View.VISIBLE) {
+                feedSkeleton?.visibility = View.GONE
+                feedContent?.visibility = View.VISIBLE
+                titleView?.text = "Welcome to SportsXtreme"
+                captionView?.text = "Explore live matches, scorecards, and tournaments near you."
+                currentPostShareText = "Welcome to SportsXtreme! Check out sports scores and matches."
+            }
+        }
         return FrameLayout(context).apply {
             val skeleton = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -4365,28 +4460,38 @@ class HomeScreenView @JvmOverloads constructor(
             addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
                     if (postListener != null) return
+                    feedLoadHandler.removeCallbacks(feedLoadTimeout)
+                    feedLoadHandler.postDelayed(feedLoadTimeout, 8_000L)
                     postListener = FirebaseFirestore.getInstance().collection("socialPosts")
                         .whereEqualTo("status", "Published")
                         .whereArrayContains("destinations", "SportsXtreme App")
-                        .addSnapshotListener { snapshot, error ->
+                        .addSnapshotListener(com.google.firebase.firestore.MetadataChanges.INCLUDE) { snapshot, error ->
                             if (error != null) {
+                                feedLoadHandler.removeCallbacks(feedLoadTimeout)
                                 Log.w("HomeScreenView", "Unable to load sports feed", error)
-                                feedContent?.visibility = View.INVISIBLE
-                                feedSkeleton?.visibility = View.VISIBLE
-                                feedSkeleton?.apply {
-                                    removeAllViews()
-                                    addView(TextView(context).apply { text = "Unable to load sports feed"; setTextColor(Color.rgb(130, 145, 142)); textSize = 11f; gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(120)))
-                                }
+                                feedSkeleton?.visibility = View.GONE
+                                feedContent?.visibility = View.VISIBLE
+                                titleView?.text = "Welcome to SportsXtreme"
+                                captionView?.text = "Explore live matches, scorecards, and tournaments near you."
+                                currentPostShareText = "Welcome to SportsXtreme! Check out sports scores and matches."
                                 return@addSnapshotListener
                             }
                             if (snapshot == null || !isAttachedToWindow) return@addSnapshotListener
+                            if (!snapshot.metadata.isFromCache || snapshot.documents.isNotEmpty()) {
+                                feedLoadHandler.removeCallbacks(feedLoadTimeout)
+                            }
+                            if (snapshot.documents.isEmpty() && snapshot.metadata.isFromCache) {
+                                // A clean install has no Firestore disk cache.
+                                // Keep the skeleton until the server confirms
+                                // that the published feed is actually empty.
+                                return@addSnapshotListener
+                            }
                             if (snapshot.documents.isEmpty()) {
-                                feedContent?.visibility = View.INVISIBLE
-                                feedSkeleton?.visibility = View.VISIBLE
-                                feedSkeleton?.apply {
-                                    removeAllViews()
-                                    addView(TextView(context).apply { text = "No sports updates right now"; setTextColor(Color.rgb(130, 145, 142)); textSize = 11f; gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(120)))
-                                }
+                                feedSkeleton?.visibility = View.GONE
+                                feedContent?.visibility = View.VISIBLE
+                                titleView?.text = "Welcome to SportsXtreme"
+                                captionView?.text = "Explore live matches, scorecards, and tournaments near you."
+                                currentPostShareText = "Welcome to SportsXtreme! Check out sports scores and matches."
                                 return@addSnapshotListener
                             }
                             val post = requestedFeedPostId?.let { requestedId ->
@@ -4529,6 +4634,7 @@ class HomeScreenView @JvmOverloads constructor(
                 }
 
                 override fun onViewDetachedFromWindow(view: View) {
+                    feedLoadHandler.removeCallbacks(feedLoadTimeout)
                     postListener?.remove()
                     postListener = null
                     likesListener?.remove()

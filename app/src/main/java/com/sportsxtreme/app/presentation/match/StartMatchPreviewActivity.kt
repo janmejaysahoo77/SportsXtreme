@@ -13,6 +13,7 @@ import com.sportsxtreme.app.presentation.profile.*
 import com.sportsxtreme.app.presentation.store.*
 import android.os.Bundle
 import android.content.Intent
+import android.util.Log
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -111,6 +112,17 @@ class StartMatchPreviewActivity : ComponentActivity() {
         val viewModel: StartMatchPreviewViewModel by viewModels {
             StartMatchPreviewViewModel.factory(matchId, matchUseCases)
         }
+        val tournamentDetails = androidx.compose.runtime.mutableStateOf<com.sportsxtreme.app.domain.model.Tournament?>(null)
+        val tournamentDetailsLoaded = androidx.compose.runtime.mutableStateOf(tournamentId.isBlank())
+        if (tournamentId.isNotBlank()) {
+            lifecycleScope.launch {
+                when (val result = tournamentRepository.getTournament(tournamentId)) {
+                    is Resource.Success -> tournamentDetails.value = result.data
+                    is Resource.Error, is Resource.Loading -> Unit
+                }
+                tournamentDetailsLoaded.value = true
+            }
+        }
         val teams = androidx.compose.runtime.mutableStateOf<Map<String, Team>>(emptyMap())
         val teamLogos = androidx.compose.runtime.mutableStateOf<Map<String, String>>(emptyMap())
         val firestore = FirebaseFirestore.getInstance()
@@ -137,7 +149,9 @@ class StartMatchPreviewActivity : ComponentActivity() {
             }
         }
         lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
-            override fun onDestroy(owner: androidx.lifecycle.LifecycleOwner) { teamListeners.values.forEach { it.remove() } }
+            override fun onDestroy(owner: androidx.lifecycle.LifecycleOwner) {
+                teamListeners.values.forEach { it.remove() }
+            }
         })
         setContent {
             val uiState by viewModel.uiState.collectAsState()
@@ -147,9 +161,41 @@ class StartMatchPreviewActivity : ComponentActivity() {
                 teamLogos = teamLogos.value,
                 tournamentName = tournamentName,
                 selectedStage = selectedStage,
+                groundName = when {
+                    !tournamentDetailsLoaded.value -> "Loading ground…"
+                    else -> tournamentDetails.value?.ground?.trim().orEmpty().ifBlank { "Ground not set" }
+                },
                 onBack = { finish() },
                 onContinue = {
                     lifecycleScope.launch {
+                        val matchDocument = runCatching {
+                            firestore.collection("matches").document(matchId).get().await()
+                        }.getOrNull()
+                        if (matchDocument == null || !matchDocument.exists()) {
+                            Toast.makeText(this@StartMatchPreviewActivity, "Unable to verify match teams and roles", Toast.LENGTH_LONG).show()
+                            return@launch
+                        }
+                        val matchType = uiState.match?.matchType?.name ?: matchDocument.getString("matchType").orEmpty()
+                        if (matchType.equals("FRIENDLY", ignoreCase = true)) {
+                            val squads = matchDocument.get("matchSquads") as? Map<*, *>
+                            val requiredRoles = setOf("CAPTAIN", "VICE_CAPTAIN", "WICKET_KEEPER")
+                            val incompleteSides = listOf("A", "B").filter { slot ->
+                                val squad = squads?.get(slot) as? Map<*, *>
+                                val players = (squad?.get("players") as? List<*>).orEmpty()
+                                val selectedRoles = players.mapNotNull { it as? Map<*, *> }
+                                    .flatMap { (it["matchRoles"] as? List<*>).orEmpty().filterIsInstance<String>() }
+                                    .toSet()
+                                requiredRoles.any { it !in selectedRoles }
+                            }
+                            if (incompleteSides.isNotEmpty()) {
+                                Toast.makeText(
+                                    this@StartMatchPreviewActivity,
+                                    "Choose a captain, vice-captain, and wicket-keeper for both teams before starting the match",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                return@launch
+                            }
+                        }
                         if (tournamentId.isNotBlank()) {
                             val tournament = (tournamentRepository.getTournament(tournamentId) as? Resource.Success)?.data
                             val currentUid = FirebaseAuth.getInstance().currentUser?.uid
@@ -207,6 +253,7 @@ private fun StartMatchPreviewScreen(
     teamLogos: Map<String, String>,
     tournamentName: String,
     selectedStage: String,
+    groundName: String,
     onBack: () -> Unit,
     onContinue: () -> Unit
 ) {
@@ -241,10 +288,9 @@ private fun StartMatchPreviewScreen(
                     TournamentStageSummary(tournamentName, selectedStage)
                 }
                 MatchInformation(match = match)
-                MatchVenue(match = match)
+                MatchVenue(groundName = groundName)
                 BallTypeSection(match = match)
                 AdvancedSettingsCard(onClick = { showAdvancedSettings = true })
-                ScheduleMatchSection(match = match)
                 Spacer(Modifier.height(100.dp))
             }
         }
@@ -524,12 +570,11 @@ private fun MatchInfoTile(title: String, label: String?, selected: Boolean, modi
 }
 
 @Composable
-private fun MatchVenue(match: Match?) {
-    val venueName = match?.venue.orEmpty().ifBlank { "Venue not set" }
+private fun MatchVenue(groundName: String) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PreviewPinIcon(Modifier.size(16.dp), Color(0xFFFF5F9E))
-            Text(" Match Venue", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+            Text(" Tournament Ground", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
         }
         Column(
             modifier = Modifier
@@ -540,7 +585,7 @@ private fun MatchVenue(match: Match?) {
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            VenueField("MATCH VENUE", venueName) { PreviewGroundIcon(Modifier.size(18.dp), PreviewAccent) }
+            VenueField("GROUND", groundName) { PreviewGroundIcon(Modifier.size(18.dp), PreviewAccent) }
         }
     }
 }

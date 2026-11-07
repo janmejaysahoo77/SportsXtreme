@@ -432,8 +432,8 @@ private fun TournamentDetailsSection(requirements: TournamentRequirements, onLoc
     ReqSection("Tournament Details", "ENTRY") {
         ReqInput("Tournament Location", "Bhubaneswar, Odisha", requirements.location, showError = showErrors && requirements.location.isBlank(), trailingIcon = { androidx.compose.material3.Icon(painterResource(R.drawable.baseline_edit_location_24), "Use current location", tint = ReqCyan, modifier = Modifier.size(20.dp).clickable { onLocationClick { onChange(requirements.copy(location = it)) } }) }) { onChange(requirements.copy(location = it)) }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ReqInput("Entry Fee", "Rs 999", requirements.entryFee, Modifier.weight(1f), showError = showErrors && requirements.entryFee.isBlank(), keyboardType = KeyboardType.Number) { onChange(requirements.copy(entryFee = it)) }
-            ReqInput("Number of Teams", "10", requirements.numberOfTeams, Modifier.weight(1f), showError = showErrors && requirements.numberOfTeams.isBlank(), keyboardType = KeyboardType.Number) { onChange(requirements.copy(numberOfTeams = it)) }
+            ReqInput("Entry Fee", "Rs 999", requirements.entryFee, Modifier.weight(1f), showError = showErrors && !requirements.entryFee.isValidPositiveAmount(), errorMessage = "Enter a valid fee greater than 0", keyboardType = KeyboardType.Number) { onChange(requirements.copy(entryFee = it.filter(Char::isDigit))) }
+            ReqInput("Number of Teams", "10", requirements.numberOfTeams, Modifier.weight(1f), showError = showErrors && (requirements.numberOfTeams.toPositiveIntOrNull() ?: 0) < 2, errorMessage = "Enter at least 2 teams", keyboardType = KeyboardType.Number) { onChange(requirements.copy(numberOfTeams = it.filter(Char::isDigit))) }
         }
         RequiredDateInput("Expected End Date", requirements.expectedEndDate, showErrors && requirements.expectedEndDate.isBlank()) { onChange(requirements.copy(expectedEndDate = it)) }
     }
@@ -443,8 +443,8 @@ private fun TournamentDetailsSection(requirements: TournamentRequirements, onLoc
 private fun WinningPrizeSection(requirements: TournamentRequirements, showErrors: Boolean, onChange: (TournamentRequirements) -> Unit) {
     ReqSection("Winning Prize", "REWARDS", iconRes = R.drawable.tournamentlogo) {
         OptionalCheckLine("Trophy Included (Optional)", requirements.trophyIncluded) { onChange(requirements.copy(trophyIncluded = !requirements.trophyIncluded)) }
-        ReqInput("Prize Pool", "Rs 50,000", requirements.prizePool, showError = showErrors && requirements.prizePool.isBlank(), keyboardType = KeyboardType.Number) { onChange(requirements.copy(prizePool = it)) }
-        ReqInput("Runner-up Prize", "Rs 10,000", requirements.runnerUpPrize, showError = showErrors && requirements.runnerUpPrize.isBlank(), keyboardType = KeyboardType.Number) { onChange(requirements.copy(runnerUpPrize = it)) }
+        ReqInput("Prize Pool", "Rs 50,000", requirements.prizePool, showError = showErrors && (!requirements.prizePool.isValidPositiveAmount() || !requirements.prizePool.isGreaterThan(requirements.entryFee)), errorMessage = "Prize pool must be valid and greater than entry fee", keyboardType = KeyboardType.Number) { onChange(requirements.copy(prizePool = it.filter(Char::isDigit))) }
+        ReqInput("Runner-up Prize", "Rs 10,000", requirements.runnerUpPrize, showError = showErrors && (!requirements.runnerUpPrize.isValidPositiveAmount() || !requirements.runnerUpPrize.isLessThan(requirements.prizePool)), errorMessage = "Runner-up prize must be valid and less than prize pool", keyboardType = KeyboardType.Number) { onChange(requirements.copy(runnerUpPrize = it.filter(Char::isDigit))) }
     }
 }
 
@@ -561,7 +561,7 @@ private fun ReqSection(
 }
 
 @Composable
-private fun ReqInput(label: String, placeholder: String, value: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp, showError: Boolean = false, trailingIcon: (@Composable (() -> Unit))? = null, keyboardType: KeyboardType = KeyboardType.Text, onValueChange: (String) -> Unit) {
+private fun ReqInput(label: String, placeholder: String, value: String, modifier: Modifier = Modifier, minHeight: Dp = 52.dp, showError: Boolean = false, errorMessage: String = "This field is required", trailingIcon: (@Composable (() -> Unit))? = null, keyboardType: KeyboardType = KeyboardType.Text, onValueChange: (String) -> Unit) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
         RequiredLabel(label)
         BasicTextField(
@@ -589,7 +589,7 @@ private fun ReqInput(label: String, placeholder: String, value: String, modifier
                 }
             }
         )
-        if (showError) Text("This field is required", color = Color(0xFFFF8A80), fontSize = 11.sp)
+        if (showError) Text(errorMessage, color = Color(0xFFFF8A80), fontSize = 11.sp)
     }
 }
 
@@ -704,8 +704,22 @@ private fun RequiredLabel(label: String) {
 }
 
 private fun TournamentRequirements.isComplete(): Boolean =
-    location.isNotBlank() && entryFee.isNotBlank() && numberOfTeams.isNotBlank() &&
-        expectedEndDate.isNotBlank() && prizePool.isNotBlank() && runnerUpPrize.isNotBlank()
+    location.isNotBlank() && entryFee.isValidPositiveAmount() && (numberOfTeams.toPositiveIntOrNull() ?: 0) >= 2 &&
+        expectedEndDate.isNotBlank() && prizePool.isValidPositiveAmount() && prizePool.isGreaterThan(entryFee) &&
+        runnerUpPrize.isValidPositiveAmount() && runnerUpPrize.isLessThan(prizePool)
+
+private fun String.toPositiveIntOrNull(): Int? = trim().toIntOrNull()?.takeIf { it > 0 }
+private fun String.isValidPositiveAmount(): Boolean = trim().toLongOrNull()?.let { it > 0 } == true
+private fun String.isGreaterThan(other: String): Boolean {
+    val amount = trim().toLongOrNull() ?: return false
+    val comparison = other.trim().toLongOrNull() ?: return false
+    return amount > comparison
+}
+private fun String.isLessThan(other: String): Boolean {
+    val amount = trim().toLongOrNull() ?: return false
+    val comparison = other.trim().toLongOrNull() ?: return false
+    return amount < comparison
+}
 
 @Composable
 private fun SelectBox(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {

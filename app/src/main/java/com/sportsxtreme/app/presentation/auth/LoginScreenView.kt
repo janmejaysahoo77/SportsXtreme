@@ -16,6 +16,7 @@ import com.sportsxtreme.app.presentation.profile.*
 import com.sportsxtreme.app.presentation.store.*
 import android.content.Context
 import android.util.Log
+import android.os.SystemClock
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -229,8 +230,11 @@ class LoginScreenView @JvmOverloads constructor(
 
         setLoading(true)
         loginScope.launch {
+            val authStartedAt = SystemClock.elapsedRealtime()
             Log.d("LoginScreenView", "[AUTH] Calling authViewModel.signInWithEmailAndPassword...")
-            when (val result = authViewModel.signInWithEmailAndPassword(email, password)) {
+            val result = authViewModel.signInWithEmailAndPassword(email, password)
+            Log.i("LoginScreenView", "[AUTH] Email/password Firebase sign-in completed in ${SystemClock.elapsedRealtime() - authStartedAt}ms")
+            when (result) {
                 is Resource.Success -> {
                     Log.i("LoginScreenView", "[AUTH] handleLogin SUCCESS! User UID: ${result.data?.id}, name: ${result.data?.name}")
                     showError(null)
@@ -330,12 +334,14 @@ class LoginScreenView @JvmOverloads constructor(
         setLoading(true)
         loginScope.launch {
             try {
+                val credentialStartedAt = SystemClock.elapsedRealtime()
                 val googleSignInOption = GetSignInWithGoogleOption.Builder(serverClientId)
                     .build()
                 val request = GetCredentialRequest.Builder()
                     .addCredentialOption(googleSignInOption)
                     .build()
                 val result = credentialManager.getCredential(context, request)
+                Log.i("LoginScreenView", "[AUTH] Google credential acquisition completed in ${SystemClock.elapsedRealtime() - credentialStartedAt}ms")
                 val credential = result.credential
 
                 if (credential is CustomCredential &&
@@ -343,19 +349,20 @@ class LoginScreenView @JvmOverloads constructor(
                 ) {
                     val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
                     Log.d("LoginScreenView", "[AUTH] Google ID token received. Calling signInWithGoogle...")
-                    when (val authResult = authViewModel.signInWithGoogle(
+                    val authStartedAt = SystemClock.elapsedRealtime()
+                    val authResult = authViewModel.signInWithGoogle(
                         googleCredential.idToken,
-                        existingAccountOnly = true
-                    )) {
+                        existingAccountOnly = false
+                    )
+                    Log.i("LoginScreenView", "[AUTH] Google Firebase sign-in completed in ${SystemClock.elapsedRealtime() - authStartedAt}ms")
+                    when (authResult) {
                         is Resource.Success -> {
-                            Log.i("LoginScreenView", "[AUTH] signInWithGoogle SUCCESS! User UID: ${authResult.data?.user?.id}")
+                            val user = authResult.data?.user
+                            Log.i("LoginScreenView", "[AUTH] signInWithGoogle SUCCESS! User UID: ${user?.id}")
                             showError(null)
-                            GuestExperiencePreferences.clearPhoneSignupPending(context, authResult.data?.user?.id)
-                            when (val profileResult = authViewModel.completePendingAuthentication()) {
-                                is Resource.Success -> (context as? MainActivity)?.showHomeScreen()
-                                is Resource.Error -> showError(profileResult.message ?: "Google login failed")
-                                is Resource.Loading -> Unit
-                            }
+                            GuestExperiencePreferences.clearPhoneSignupPending(context, user?.id)
+                            // Immediately navigate to home screen on success for super fast login/signup
+                            (context as? MainActivity)?.showHomeScreen()
                         }
                         is Resource.Error -> {
                             Log.e("LoginScreenView", "[AUTH] signInWithGoogle FAILED: ${authResult.message}")

@@ -259,6 +259,7 @@ private fun FinalSquadScreen(
             }
         })
     }
+    var roleValidationMessage by remember(members) { mutableStateOf<String?>(null) }
     fun setRole(userId: String, role: String) {
         val alreadySelected = role in matchRoles[userId].orEmpty()
         matchRoles = matchRoles.mapValues { (memberId, roles) ->
@@ -268,6 +269,7 @@ private fun FinalSquadScreen(
                 else -> roles - role // Captain, VC and WK are unique for this match only.
             }
         }
+        roleValidationMessage = null
     }
     Box(
         modifier = Modifier
@@ -316,6 +318,15 @@ private fun FinalSquadScreen(
                         )
                     }
                 }
+                roleValidationMessage?.let { message ->
+                    Text(
+                        message,
+                        color = Color(0xFFFF8A80),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                }
                 Spacer(Modifier.height(110.dp))
             }
         }
@@ -331,7 +342,17 @@ private fun FinalSquadScreen(
                     .fillMaxWidth()
                     .height(64.dp)
                     .bounceClick {
-                        if (!squadState.isLoading && members.isNotEmpty()) onNext(matchRoles)
+                        if (!squadState.isLoading && members.isNotEmpty()) {
+                            val selectedRoles = matchRoles.values.flatten().toSet()
+                            val missingRoles = listOf("CAPTAIN", "VICE_CAPTAIN", "WICKET_KEEPER")
+                                .filterNot(selectedRoles::contains)
+                            if (missingRoles.isEmpty()) {
+                                roleValidationMessage = null
+                                onNext(matchRoles)
+                            } else {
+                                roleValidationMessage = "Choose a captain, vice-captain, and wicket-keeper before continuing."
+                            }
+                        }
                     }
                     .clip(RoundedCornerShape(12.dp))
                     .background(SquadAccent.copy(alpha = if (squadState.isLoading || members.isEmpty()) 0.55f else 1f)),

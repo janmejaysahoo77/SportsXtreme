@@ -61,6 +61,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -638,7 +639,14 @@ private fun AddTeamContent(
     onShareInvite: (String) -> Unit
 ) {
     var addTeamTab by rememberSaveable { mutableIntStateOf(0) }
-    AddTeamSubTabs(addTeamTab) { addTeamTab = it }
+    val context = LocalContext.current
+    AddTeamSubTabs(addTeamTab) {
+        if (it == 1) {
+            Toast.makeText(context, "Coming soon", Toast.LENGTH_SHORT).show()
+        } else {
+            addTeamTab = it
+        }
+    }
     if (addTeamTab == 0) {
         MatchInviteCard(invite, inviteError, onCopyInvite, onShareInvite)
         return
