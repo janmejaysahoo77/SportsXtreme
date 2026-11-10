@@ -45,17 +45,18 @@ class RegisteredTeamsOfATournament : ComponentActivity() {
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val tournamentId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TOURNAMENT_ID).orEmpty()
         val slot = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_TEAM_SLOT).orEmpty()
+        val otherTeamId = intent.getStringExtra(SelectPlayingTeamsActivity.EXTRA_OTHER_TEAM_ID).orEmpty()
         val selectedTeamId = intent.getStringExtra(
             if (slot == "A") SelectPlayingTeamsActivity.EXTRA_TEAM_A_ID else SelectPlayingTeamsActivity.EXTRA_TEAM_B_ID
         ).orEmpty()
         setContent {
             val teams = rememberTournamentTeams(tournamentId)
             var selected by remember { mutableStateOf<RegisteredTournamentTeam?>(null) }
-            LaunchedEffect(teams, selectedTeamId) {
-                if (selectedTeamId.isNotBlank()) selected = teams.firstOrNull { it.id == selectedTeamId }
+            LaunchedEffect(teams, selectedTeamId, otherTeamId) {
+                selected = teams.firstOrNull { it.id == selectedTeamId && it.id != otherTeamId }
             }
             RegisteredTeamsScreen(
-                teams = teams,
+                teams = teams.filterNot { it.id == otherTeamId },
                 selected = selected,
                 onSelect = { selected = it },
                 onDone = {
@@ -119,7 +120,7 @@ private fun RegisteredTeamsScreen(
         Text("Choose one team for this match", color = Color(0xFF91A0AF), fontSize = 12.sp)
         Spacer(Modifier.height(18.dp))
         if (teams.isEmpty()) {
-            Text("No teams are registered for this tournament yet.", color = Color.White, fontSize = 14.sp)
+            Text("No different registered team is available for the other side.", color = Color.White, fontSize = 14.sp)
         } else {
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(teams, key = { it.id }) { team ->

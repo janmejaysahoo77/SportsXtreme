@@ -2527,7 +2527,7 @@ private fun GroundSelectionDialog(
     onCancel: () -> Unit
 ) {
     var selectedOffset by remember { mutableStateOf<Offset?>(null) }
-    var selectedDirectionName by remember { mutableStateOf("Straight") }
+    var selectedDirectionName by remember { mutableStateOf<String?>(null) }
 
     Dialog(
         onDismissRequest = onCancel,
@@ -2618,7 +2618,8 @@ private fun GroundSelectionDialog(
                 Spacer(Modifier.height(10.dp))
 
                 Text(
-                    text = "Selected: $selectedDirectionName${if (selectedOffset != null) " (Tap ground to change)" else " (Tap ground to select direction)"}",
+                    text = selectedDirectionName?.let { "Selected: $it (Tap ground to change)" }
+                        ?: "Tap the ground to select a shot direction",
                     color = ScoringMuted,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -2644,14 +2645,15 @@ private fun GroundSelectionDialog(
                         Text("Cancel", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
                     }
 
+                    val canConfirm = selectedDirectionName != null
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .height(46.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(ScoringAccent)
-                            .clickable(onClick = {
-                                val direction = selectedDirectionName
+                            .background(if (canConfirm) ScoringAccent else Color(0xFF252E3A))
+                            .clickable(enabled = canConfirm, onClick = {
+                                val direction = selectedDirectionName ?: return@clickable
                                 val meta = mapOf(
                                     "shotDirection" to direction,
                                     "shotX" to (selectedOffset?.x?.toString() ?: "0"),
@@ -2661,7 +2663,7 @@ private fun GroundSelectionDialog(
                             }),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Confirm", color = ScoringBg, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                        Text("Confirm", color = if (canConfirm) ScoringBg else ScoringMuted, fontSize = 13.sp, fontWeight = FontWeight.Black)
                     }
                 }
             }

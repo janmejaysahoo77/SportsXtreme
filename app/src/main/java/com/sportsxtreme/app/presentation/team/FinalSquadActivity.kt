@@ -262,6 +262,15 @@ private fun FinalSquadScreen(
     var roleValidationMessage by remember(members) { mutableStateOf<String?>(null) }
     fun setRole(userId: String, role: String) {
         val alreadySelected = role in matchRoles[userId].orEmpty()
+        val conflictingLeadershipRole = when (role) {
+            "CAPTAIN" -> "VICE_CAPTAIN"
+            "VICE_CAPTAIN" -> "CAPTAIN"
+            else -> null
+        }
+        if (!alreadySelected && conflictingLeadershipRole != null && conflictingLeadershipRole in matchRoles[userId].orEmpty()) {
+            roleValidationMessage = "Captain and vice-captain must be different players."
+            return
+        }
         matchRoles = matchRoles.mapValues { (memberId, roles) ->
             when {
                 memberId == userId && alreadySelected -> roles - role
@@ -343,10 +352,14 @@ private fun FinalSquadScreen(
                     .height(64.dp)
                     .bounceClick {
                         if (!squadState.isLoading && members.isNotEmpty()) {
+                            val captainId = matchRoles.entries.firstOrNull { "CAPTAIN" in it.value }?.key
+                            val viceCaptainId = matchRoles.entries.firstOrNull { "VICE_CAPTAIN" in it.value }?.key
                             val selectedRoles = matchRoles.values.flatten().toSet()
                             val missingRoles = listOf("CAPTAIN", "VICE_CAPTAIN", "WICKET_KEEPER")
                                 .filterNot(selectedRoles::contains)
-                            if (missingRoles.isEmpty()) {
+                            if (captainId != null && viceCaptainId != null && captainId == viceCaptainId) {
+                                roleValidationMessage = "Captain and vice-captain must be different players."
+                            } else if (missingRoles.isEmpty()) {
                                 roleValidationMessage = null
                                 onNext(matchRoles)
                             } else {

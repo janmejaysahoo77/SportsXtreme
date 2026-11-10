@@ -56,7 +56,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
 import java.util.Locale
 import com.sportsxtreme.app.R
 import com.sportsxtreme.app.presentation.components.SportsXtremeAppBar
@@ -747,7 +749,7 @@ private fun FilterSection(
     onSelectFormat: (String) -> Unit,
     onSelectTournament: (String) -> Unit
 ) {
-    Column {
+    Box {
         // Pills Row
         Row(
             modifier = Modifier
@@ -790,70 +792,73 @@ private fun FilterSection(
             }
         }
 
-        // Expanded Dropdown Overlay (Image 2)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Skill Dropdown Box
-            if (showSkill && isSkillDropdownOpen) {
-                DropdownMenuCard(
-                    items = skills.map { skill ->
-                        DropdownItemData(
-                            label = skill,
-                            iconType = when (skill) {
-                                "Batting" -> FilterIconType.PERSON
-                                "Bowling" -> FilterIconType.BALL
-                                else -> FilterIconType.STAR
+        val dropdownOpen = (showSkill && isSkillDropdownOpen) || isTypeDropdownOpen ||
+            isFormatDropdownOpen || (showTournament && isTournamentDropdownOpen)
+        if (dropdownOpen) {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            Popup(
+                alignment = Alignment.TopStart,
+                offset = with(density) { IntOffset(0, 40.dp.roundToPx()) }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (showSkill && isSkillDropdownOpen) {
+                        DropdownMenuCard(
+                            items = skills.map { skill ->
+                                DropdownItemData(
+                                    label = skill,
+                                    iconType = when (skill) {
+                                        "Batting" -> FilterIconType.PERSON
+                                        "Bowling" -> FilterIconType.BALL
+                                        else -> FilterIconType.STAR
+                                    },
+                                    isSelected = skill == selectedSkill
+                                )
                             },
-                            isSelected = skill == selectedSkill
+                            onItemClick = { onSelectSkill(it.label) },
+                            modifier = Modifier.weight(1f)
                         )
-                    },
-                    onItemClick = { onSelectSkill(it.label) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            // Type Dropdown Box
-            if (isTypeDropdownOpen) {
-                DropdownMenuCard(
-                    items = types.map { type ->
-                        DropdownItemData(
-                            label = type,
-                            iconType = when (type) {
-                                "Leather Ball", "Tennis Ball" -> FilterIconType.BALL
-                                else -> FilterIconType.MORE
+                    }
+                    if (isTypeDropdownOpen) {
+                        DropdownMenuCard(
+                            items = types.map { type ->
+                                DropdownItemData(
+                                    label = type,
+                                    iconType = when (type) {
+                                        "Leather Ball", "Tennis Ball" -> FilterIconType.BALL
+                                        else -> FilterIconType.MORE
+                                    },
+                                    isSelected = type == selectedType
+                                )
                             },
-                            isSelected = type == selectedType
+                            onItemClick = { onSelectType(it.label) },
+                            modifier = Modifier.weight(1f)
                         )
-                    },
-                    onItemClick = { onSelectType(it.label) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            // Format Dropdown Box
-            if (isFormatDropdownOpen) {
-                DropdownMenuCard(
-                    items = formats.map { format ->
-                        DropdownItemData(
-                            label = format,
-                            iconType = FilterIconType.TROPHY,
-                            isSelected = format == selectedFormat,
+                    }
+                    if (isFormatDropdownOpen) {
+                        DropdownMenuCard(
+                            items = formats.map { format ->
+                                DropdownItemData(
+                                    label = format,
+                                    iconType = FilterIconType.TROPHY,
+                                    isSelected = format == selectedFormat
+                                )
+                            },
+                            onItemClick = { onSelectFormat(it.label) },
+                            modifier = Modifier.weight(1f)
                         )
-                    },
-                    onItemClick = { onSelectFormat(it.label) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            if (showTournament && isTournamentDropdownOpen) {
-                DropdownMenuCard(
-                    items = tournaments.map { DropdownItemData(it, FilterIconType.TROPHY, it == selectedTournament) },
-                    onItemClick = { onSelectTournament(it.label) },
-                    modifier = Modifier.weight(1f)
-                )
+                    }
+                    if (showTournament && isTournamentDropdownOpen) {
+                        DropdownMenuCard(
+                            items = tournaments.map { DropdownItemData(it, FilterIconType.TROPHY, it == selectedTournament) },
+                            onItemClick = { onSelectTournament(it.label) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
         }
     }

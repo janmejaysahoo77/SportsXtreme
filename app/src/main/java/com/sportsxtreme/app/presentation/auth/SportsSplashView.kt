@@ -40,6 +40,9 @@ class SportsSplashView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
+    /** Called after the full branded animation has completed. */
+    var onAnimationFinished: (() -> Unit)? = null
+
     private val graphite = Color.rgb(3, 6, 15)
     private val inkBlue = Color.rgb(6, 16, 42)
     private val electricBlue = Color.rgb(22, 72, 230)
@@ -233,6 +236,11 @@ class SportsSplashView @JvmOverloads constructor(
 
         animatorSet = AnimatorSet().apply {
             playTogether(logoAnim, textAnim, subtitleAnim, bottomAnim)
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    onAnimationFinished?.invoke()
+                }
+            })
             start()
         }
     }

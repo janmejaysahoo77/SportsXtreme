@@ -175,6 +175,20 @@ class StartMatchPreviewActivity : ComponentActivity() {
                             Toast.makeText(this@StartMatchPreviewActivity, "Unable to verify match teams and roles", Toast.LENGTH_LONG).show()
                             return@launch
                         }
+                        val teamAId = matchDocument.getString("teamAId")
+                            ?: (matchDocument.get("teamA") as? Map<*, *>)?.get("teamId") as? String
+                            ?: uiState.match?.teamA?.teamId.orEmpty()
+                        val teamBId = matchDocument.getString("teamBId")
+                            ?: (matchDocument.get("teamB") as? Map<*, *>)?.get("teamId") as? String
+                            ?: uiState.match?.teamB?.teamId.orEmpty()
+                        if (teamAId.isBlank() || teamBId.isBlank() || teamAId == teamBId) {
+                            Toast.makeText(
+                                this@StartMatchPreviewActivity,
+                                "Select two different teams before starting the match",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@launch
+                        }
                         val matchType = uiState.match?.matchType?.name ?: matchDocument.getString("matchType").orEmpty()
                         if (matchType.equals("FRIENDLY", ignoreCase = true)) {
                             val squads = matchDocument.get("matchSquads") as? Map<*, *>

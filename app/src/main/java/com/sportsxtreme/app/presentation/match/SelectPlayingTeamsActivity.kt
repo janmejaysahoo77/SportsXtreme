@@ -306,6 +306,7 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
         launcher.launch(Intent(this, RegisteredTeamsOfATournament::class.java)
             .putExtra(EXTRA_TOURNAMENT_ID, tournamentId)
             .putExtra(EXTRA_TEAM_SLOT, slot)
+            .putExtra(EXTRA_OTHER_TEAM_ID, if (slot == "A") teamB?.id else teamA?.id)
             .putExtra(EXTRA_TEAM_A_ID, teamA?.id)
             .putExtra(EXTRA_TEAM_A_NAME, teamA?.name)
             .putExtra(EXTRA_TEAM_B_ID, teamB?.id)
@@ -315,6 +316,7 @@ class SelectPlayingTeamsActivity : ComponentActivity() {
     companion object {
         const val EXTRA_MATCH_ID = "match_id"
         const val EXTRA_TEAM_SLOT = "team_slot"
+        const val EXTRA_OTHER_TEAM_ID = "other_team_id"
         const val EXTRA_SELECTED_TEAM_ID = "selected_team_id"
         const val EXTRA_SELECTED_TEAM_NAME = "selected_team_name"
         const val EXTRA_TEAM_A_ID = "team_a_id"
@@ -374,7 +376,7 @@ private fun SelectPlayingTeamsScreen(
     val displayedTeamB = claimedTeamB ?: teamB
     val onTeamAClick: () -> Unit = if (claimedTeamA == null) onSelectTeamA else ({})
     val onTeamBClick: () -> Unit = if (claimedTeamB == null) onSelectTeamB else ({})
-    val bothTeamsSelected = displayedTeamA != null && displayedTeamB != null
+    val bothTeamsSelected = displayedTeamA != null && displayedTeamB != null && displayedTeamA.id != displayedTeamB.id
     var showStartMatchFade by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(displayedTeamA?.id, displayedTeamB?.id) {

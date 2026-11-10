@@ -316,6 +316,7 @@ class MatchRepositoryImpl @Inject constructor(
     override suspend fun startMatch(matchId: String): Resource<MatchState> = runCatching {
         database.withTransaction {
             val match = requireMatch(matchId)
+            require(match.teamAId != match.teamBId) { "Team A and Team B cannot be the same team" }
             val battingTeamId = requireNotNull(match.battingTeamId) { "Toss must be completed first" }
             val bowlingTeamId = requireNotNull(match.bowlingTeamId) { "Toss must be completed first" }
             val now = System.currentTimeMillis()

@@ -157,6 +157,7 @@ class MainActivity : ComponentActivity() {
     private var homeLocationLabel by mutableStateOf("Finding your location…")
     private var returnToHomeAfterAuthCancel = false
     private var currentScreen by mutableStateOf(Screen.Splash)
+    private var splashHandoffStarted = false
     private var pendingSharedFeedPostId: String? = null
     private var pendingSharedTeamId: String? = null
     private val locationPermissionLauncher = registerForActivityResult(
@@ -258,14 +259,11 @@ class MainActivity : ComponentActivity() {
         // Start public matches loading while the splash is visible so guest
         // users already have the Firestore request in flight when Home opens.
         liveMatchViewModel
+        splashHandoffStarted = false
         currentScreen = Screen.Splash
         setContentView(R.layout.activity_splash)
         val splash = findViewById<SportsSplashView>(R.id.sportsSplashView)
-        splash?.postDelayed({
-            if (currentScreen == Screen.Splash) {
-                routeAfterSplash()
-            }
-        }, HOME_SPLASH_DURATION_MS)
+        splash?.onAnimationFinished = { routeAfterSplashOnce() }
     }
 
     private fun initComposeContent() {
@@ -429,9 +427,7 @@ class MainActivity : ComponentActivity() {
                 factory = { context ->
                     homeScreenView = null
                     SportsSplashView(context).apply {
-                        postDelayed({
-                            routeAfterSplash()
-                        }, HOME_SPLASH_DURATION_MS)
+                        onAnimationFinished = { routeAfterSplashOnce() }
                     }
                 }
             )
@@ -544,6 +540,12 @@ class MainActivity : ComponentActivity() {
         } else {
             showMainScreen()
         }
+    }
+
+    private fun routeAfterSplashOnce() {
+        if (currentScreen != Screen.Splash || splashHandoffStarted) return
+        splashHandoffStarted = true
+        routeAfterSplash()
     }
 
     private fun returnFromAuthFlow() {
@@ -1014,7 +1016,6 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val HOME_SPLASH_DURATION_MS = 800L
         const val EXTRA_START_DESTINATION = "extra_start_destination"
         const val EXTRA_FORCE_LOGIN = "extra_force_login"
         const val EXTRA_FORCE_SIGNUP = "extra_force_signup"
