@@ -30,6 +30,14 @@
           }
         },
         {
+          "client_id": "896267230604-vvtgtrlcrgnjjv2b51j9ssh9dlmd4v36.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.sportsxtreme",
+            "certificate_hash": "c460c06c98b974db079b30e4b930c66be3362612"
+          }
+        },
+        {
           "client_id": "896267230604-egaaibb3i3ven1bs99a2to47mf29qucq.apps.googleusercontent.com",
           "client_type": 3
         }

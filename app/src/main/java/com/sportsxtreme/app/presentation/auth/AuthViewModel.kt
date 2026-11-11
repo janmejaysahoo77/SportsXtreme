@@ -9,6 +9,7 @@ import com.sportsxtreme.app.domain.model.PhoneAuthSession
 import com.sportsxtreme.app.domain.model.User
 import com.sportsxtreme.app.domain.usecase.AuthUseCases
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.functions.FirebaseFunctions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.tasks.await
 
 class AuthViewModel(
     private val useCases: AuthUseCases
@@ -108,6 +110,13 @@ class AuthViewModel(
     suspend fun signInWithGoogle(idToken: String, existingAccountOnly: Boolean = false): Resource<AuthSession> {
         setLoading()
         val result = useCases.signInWithGoogle(idToken, existingAccountOnly)
+        if (result is Resource.Success) {
+            val access = assertAccountAccess()
+            if (access is Resource.Error) {
+                val denied = Resource.Error<AuthSession>(access.message ?: "This account cannot be used.")
+                return denied.also { updateAuthSession(it) }
+            }
+        }
         return result.also { updateAuthSession(it) }
     }
 
@@ -116,6 +125,12 @@ class AuthViewModel(
         return when (val result = useCases.signInWithEmailAndPassword(email, password)) {
             is Resource.Success -> {
                 val session = result.data ?: return Resource.Error("Login returned an empty account.")
+                val access = assertAccountAccess()
+                if (access is Resource.Error) {
+                    val denied = Resource.Error<User>(access.message ?: "This account cannot be used.")
+                    setError(denied.message ?: "This account cannot be used.")
+                    return denied
+                }
                 completeAuthenticationInBackground(session.user)
             }
             is Resource.Error -> {
@@ -186,7 +201,12 @@ class AuthViewModel(
         return completeAuthenticationInBackground(authSession.user)
     }
 
-    private fun completeAuthenticationInBackground(user: User): Resource<User> {
+    private suspend fun completeAuthenticationInBackground(user: User): Resource<User> {
+        val access = assertAccountAccess()
+        if (access is Resource.Error) {
+            setError(access.message ?: "This account cannot be used.")
+            return Resource.Error(access.message ?: "This account cannot be used.")
+        }
         _state.value = state.value.copy(
             isLoading = false,
             pendingAuthSession = null,
@@ -225,8 +245,28 @@ class AuthViewModel(
         return Resource.Success(user)
     }
 
-    fun restoreCurrentSession(): Resource<User>? {
+    private suspend fun assertAccountAccess(): Resource<Unit> = try {
+        FirebaseFunctions.getInstance()
+            .getHttpsCallable("assertAccountAccess")
+            .call()
+            .await()
+        Resource.Success(Unit)
+    } catch (error: Exception) {
+        FirebaseAuth.getInstance().signOut()
+        _state.value = state.value.copy(
+            isLoading = false,
+            authenticatedUser = null,
+            pendingAuthSession = null,
+            pendingPhoneSession = null,
+            errorMessage = error.localizedMessage ?: "This account cannot be used."
+        )
+        Resource.Error(error.localizedMessage ?: "This account cannot be used.")
+    }
+
+    suspend fun restoreCurrentSession(): Resource<User>? {
         val user = state.value.authenticatedUser ?: useCases.getCurrentUser() ?: return null
+        val access = assertAccountAccess()
+        if (access is Resource.Error) return Resource.Error(access.message ?: "This account cannot be used.")
         if (!user.isEmailVerified && !user.isPhoneVerified) {
             FirebaseAuth.getInstance().signOut()
             _state.value = state.value.copy(authenticatedUser = null, pendingAuthSession = null)
@@ -413,6 +453,8 @@ class AuthViewModel(
         status: PhoneVerificationStatus,
         isNewPhoneUser: Boolean = false
     ): Resource<Unit> {
+        val access = assertAccountAccess()
+        if (access is Resource.Error) return access
         val verifiedUser = state.value.pendingAuthSession?.user?.copy(
             mobileNumber = phoneNumber,
             isPhoneVerified = true

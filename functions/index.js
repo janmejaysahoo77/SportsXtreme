@@ -39,6 +39,27 @@ function escapeHtml(value) {
   })[character]);
 }
 
+function accountDeletionKey(kind, value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized ? crypto.createHash("sha256").update(`${kind}:${normalized}`).digest("hex") : null;
+}
+
+exports.assertAccountAccess = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in to continue.");
+  const token = request.auth.token || {};
+  const keys = [
+    `uid_${accountDeletionKey("uid", uid)}`,
+    `email_${accountDeletionKey("email", token.email)}`,
+    `phone_${accountDeletionKey("phone", token.phone_number)}`,
+  ].filter((key) => !key.endsWith("null"));
+  const snapshots = await Promise.all(keys.map((key) => db.collection("deletedAccountIdentities").doc(key).get()));
+  if (snapshots.some((snapshot) => snapshot.exists)) {
+    throw new HttpsError("permission-denied", "This account was deleted and can no longer be used.");
+  }
+  return { allowed: true };
+});
+
 function sharedPostImageValue(post) {
   for (const key of ["imageUrl", "imageURL", "image", "imagePath", "storagePath"]) {
     const value = post[key];
@@ -908,6 +929,8 @@ exports.deleteAccount = onCall({
     throw new HttpsError("failed-precondition", "Cloudinary is not configured on the server.");
   }
 
+  const authUser = await getAuth().getUser(uid);
+
   const publicId = `profile_photos/${uid}`;
   const timestamp = Math.floor(Date.now() / 1000);
   const invalidate = "true";
@@ -996,6 +1019,19 @@ exports.deleteAccount = onCall({
     }
   }
 
+  const identityKeys = [
+    [`uid_${accountDeletionKey("uid", uid)}`, "uid"],
+    [`email_${accountDeletionKey("email", authUser.email)}`, "email"],
+    [`phone_${accountDeletionKey("phone", authUser.phoneNumber)}`, "phone"],
+  ].filter(([key]) => !key.endsWith("null"));
+  const deletionBatch = db.batch();
+  for (const [key, kind] of identityKeys) {
+    deletionBatch.set(db.collection("deletedAccountIdentities").doc(key), {
+      kind,
+      deletedAt: FieldValue.serverTimestamp(),
+    });
+  }
+  await deletionBatch.commit();
   await getAuth().deleteUser(uid);
   return { deleted: true };
 });

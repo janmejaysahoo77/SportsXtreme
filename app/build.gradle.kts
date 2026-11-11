@@ -65,7 +65,7 @@ android {
         applicationId = "com.sportsxtreme.app"
         minSdk = 28
         targetSdk = 36
-        versionCode = 2
+        versionCode = 4
         versionName = "1.0.1"
         resourceConfigurations += setOf("en")
 

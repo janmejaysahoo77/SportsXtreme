@@ -352,7 +352,7 @@ class LoginScreenView @JvmOverloads constructor(
                     val authStartedAt = SystemClock.elapsedRealtime()
                     val authResult = authViewModel.signInWithGoogle(
                         googleCredential.idToken,
-                        existingAccountOnly = false
+                        existingAccountOnly = true
                     )
                     Log.i("LoginScreenView", "[AUTH] Google Firebase sign-in completed in ${SystemClock.elapsedRealtime() - authStartedAt}ms")
                     when (authResult) {

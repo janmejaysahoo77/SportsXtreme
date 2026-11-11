@@ -528,10 +528,12 @@ class MainActivity : ComponentActivity() {
                 showPhoneAuthScreen(forSignupCompletion = true)
                 return
             }
-            when (authViewModel.restoreCurrentSession()) {
-                is Resource.Success -> showHomeScreen()
-                is Resource.Error -> showLoginScreen()
-                is Resource.Loading, null -> showMainScreen()
+            locationScope.launch {
+                when (authViewModel.restoreCurrentSession()) {
+                    is Resource.Success -> showHomeScreen()
+                    is Resource.Error -> showLoginScreen()
+                    is Resource.Loading, null -> showMainScreen()
+                }
             }
         } else if (GuestExperiencePreferences.selectedSport(this) != null) {
             showHomeScreen()

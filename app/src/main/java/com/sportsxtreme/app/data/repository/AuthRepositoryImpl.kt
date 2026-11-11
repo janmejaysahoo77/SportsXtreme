@@ -25,6 +25,8 @@ import com.google.firebase.auth.FirebaseAuthActionCodeException
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.functions.FirebaseFunctions
+import kotlinx.coroutines.tasks.await
 
 class AuthRepositoryImpl(
     context: Context,
@@ -44,6 +46,12 @@ class AuthRepositoryImpl(
         return authDataSource.createEmailAccount(request).fold(
             onSuccess = { session ->
                 Log.i(TAG, "[AUTH] createEmailAccount SUCCESS! User UID: ${session.user.id}, isNewUser: ${session.isNewUser}")
+                try {
+                    FirebaseFunctions.getInstance().getHttpsCallable("assertAccountAccess").call().await()
+                } catch (error: Exception) {
+                    authDataSource.signOut()
+                    return@fold Resource.Error(error.localizedMessage ?: "This account was deleted and cannot be used.")
+                }
                 when (val seedResult = seedFirestoreProfile(session.user, "email signup")) {
                     is Resource.Success -> Resource.Success(session)
                     is Resource.Error -> {
@@ -97,12 +105,16 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun signInWithGoogle(idToken: String, existingAccountOnly: Boolean): Resource<AuthSession> {
-        Log.d(TAG, "[AUTH] signInWithGoogle requested (idToken length: ${idToken.length})")
+        Log.d(TAG, "[AUTH] signInWithGoogle requested (idToken length: ${idToken.length}, existingAccountOnly=$existingAccountOnly)")
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         return authDataSource.signInWithCredential(credential, AuthProvider.GOOGLE).fold(
             onSuccess = { session ->
-                Log.i(TAG, "[AUTH] signInWithGoogle SUCCESS! User UID: ${session.user.id}, email: ${session.user.email}")
-                // Super fast login and signup: allow new users and existing users to sign in/up seamlessly with Google.
+                Log.i(TAG, "[AUTH] signInWithGoogle SUCCESS! User UID: ${session.user.id}, email: ${session.user.email}, isNewUser: ${session.isNewUser}")
+                if (existingAccountOnly && session.isNewUser) {
+                    Log.w(TAG, "[AUTH] Google login rejected: User UID ${session.user.id} is new, but existingAccountOnly=true")
+                    authDataSource.deleteCurrentUserAndSignOut()
+                    return@fold Resource.Error("No account found for this Google account. Please sign up first.")
+                }
                 Resource.Success(session)
             },
             onFailure = { error ->
