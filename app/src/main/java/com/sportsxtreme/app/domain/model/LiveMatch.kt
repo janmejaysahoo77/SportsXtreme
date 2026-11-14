@@ -17,6 +17,8 @@ data class LiveMatch(
     val teamBName: String,
     val teamAShortName: String,
     val teamBShortName: String,
+    val teamALogoUrl: String = "",
+    val teamBLogoUrl: String = "",
     val status: MatchStatus,
     val score: Int,
     val wickets: Int,
@@ -42,13 +44,21 @@ data class LiveMatch(
     val bowlerWickets: Int,
     val matchStatusNote: String?,
     val updatedAtEpochMs: Long,
-    val tournamentStage: String = ""
+    val tournamentStage: String = "",
+    val firstInningsScore: Int? = null,
+    val firstInningsWickets: Int? = null
 ) {
     /** True while play is active, including the transition between innings. */
     val isLive: Boolean get() = status in setOf(
         MatchStatus.LIVE,
         MatchStatus.IN_PROGRESS,
         MatchStatus.INNINGS_BREAK
+    )
+
+    /** True only while a live scoring innings is actively being played. */
+    val isActivelyPlaying: Boolean get() = status in setOf(
+        MatchStatus.LIVE,
+        MatchStatus.IN_PROGRESS
     )
 
     /** True when the match has finished. */
@@ -85,6 +95,8 @@ data class LiveScorePayload(
     val teamBName: String,
     val teamAShortName: String,
     val teamBShortName: String,
+    val teamALogoUrl: String = "",
+    val teamBLogoUrl: String = "",
     val status: String,
     val score: Int,
     val wickets: Int,
@@ -110,7 +122,9 @@ data class LiveScorePayload(
     val bowlerWickets: Int,
     val matchStatusNote: String?,
     val updatedAtEpochMs: Long,
-    val tournamentStage: String = ""
+    val tournamentStage: String = "",
+    val firstInningsScore: Int? = null,
+    val firstInningsWickets: Int? = null
 ) {
     fun toDomain(): LiveMatch = LiveMatch(
         matchId = matchId,
@@ -122,6 +136,8 @@ data class LiveScorePayload(
         teamBName = teamBName,
         teamAShortName = teamAShortName,
         teamBShortName = teamBShortName,
+        teamALogoUrl = teamALogoUrl,
+        teamBLogoUrl = teamBLogoUrl,
         status = runCatching { MatchStatus.valueOf(status) }.getOrDefault(MatchStatus.CREATED),
         score = score,
         wickets = wickets,
@@ -147,6 +163,8 @@ data class LiveScorePayload(
         bowlerWickets = bowlerWickets,
         matchStatusNote = matchStatusNote,
         updatedAtEpochMs = updatedAtEpochMs,
-        tournamentStage = tournamentStage
+        tournamentStage = tournamentStage,
+        firstInningsScore = firstInningsScore,
+        firstInningsWickets = firstInningsWickets
     )
 }

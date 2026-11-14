@@ -348,14 +348,16 @@ private fun DocumentSnapshot.toPlayerCricketMatch(teamLogosById: Map<String, Str
     val battingTeamId = liveScore?.get("battingTeamId") as? String
     val leftScore = liveScoreText.takeIf { battingTeamId != null && battingTeamId == teamAId }
     val innings = get("innings") as? List<*>
-    fun inningsScore(teamId: String?): String? = innings.orEmpty()
-        .mapNotNull { it as? Map<*, *> }
-        .lastOrNull { it["battingTeamId"] == teamId }
+    val inningsEntries = innings.orEmpty().mapNotNull { it as? Map<*, *> }
+    fun inningsScore(teamId: String?): String? = inningsEntries
+        .filter { it["battingTeamId"] == teamId }
+        .minByOrNull { (it["number"] as? Number)?.toInt() ?: Int.MAX_VALUE }
         ?.let { entry ->
-            val runs = (entry["score"] as? Number)?.toInt() ?: return@let null
+            val runs = ((entry["score"] ?: entry["totalScore"]) as? Number)?.toInt() ?: return@let null
             val wickets = (entry["wickets"] as? Number)?.toInt() ?: 0
             val balls = (entry["legalBalls"] as? Number)?.toInt() ?: 0
-            "$runs/$wickets (${balls / 6}.${balls % 6})"
+            val overs = entry["overs"] as? String ?: "${balls / 6}.${balls % 6}"
+            "$runs/$wickets ($overs)"
         }
     val finalLeftScore = leftScore ?: inningsScore(teamAId)
     val rightScore = liveScoreText.takeIf { battingTeamId != null && battingTeamId == teamBId }

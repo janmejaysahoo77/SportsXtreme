@@ -23,10 +23,9 @@ class FirebaseFirestoreUserDataSource(
     override suspend fun createOrUpdateUser(profile: PendingUserProfile): Result<User> {
         return suspendCancellableCoroutine { continuation ->
             val document = firestore.collection(USERS_COLLECTION).document(profile.id)
-            val now = com.google.firebase.Timestamp.now()
             val publicPayload = mutableMapOf<String, Any?>(
                 "id" to profile.id,
-                "updatedAt" to now
+                "updatedAt" to FieldValue.serverTimestamp()
             )
             if (profile.name.isNotBlank()) {
                 publicPayload["name"] = profile.name
@@ -36,7 +35,7 @@ class FirebaseFirestoreUserDataSource(
                 .addOnSuccessListener { existingProfile ->
                     val isNew = !existingProfile.exists()
                     if (isNew) {
-                        publicPayload["createdAt"] = now
+                        publicPayload["createdAt"] = FieldValue.serverTimestamp()
                     }
                     val publicProfile = publicProfilePayload(
                         id = profile.id,
@@ -49,8 +48,8 @@ class FirebaseFirestoreUserDataSource(
                         battingStyle = existingProfile.getString("battingStyle").orEmpty(),
                         bowlingStyle = existingProfile.getString("bowlingStyle").orEmpty()
                     ) + mapOf(
-                        "createdAt" to (existingProfile.getTimestamp("createdAt") ?: now),
-                        "updatedAt" to now
+                        "createdAt" to (existingProfile.getTimestamp("createdAt") ?: FieldValue.serverTimestamp()),
+                        "updatedAt" to FieldValue.serverTimestamp()
                     )
                     firestore.runBatch { batch ->
                         batch.set(document, publicPayload, SetOptions.merge())
@@ -68,13 +67,13 @@ class FirebaseFirestoreUserDataSource(
                             continuation.resume(Result.success(profile.toUser()))
                         }
                         .addOnFailureListener { exception ->
-                            android.util.Log.w("FirebaseFirestoreUserDataSource", "Profile batch write failed, proceeding with auth: ${exception.message}")
-                            continuation.resume(Result.success(profile.toUser()))
+                            android.util.Log.e("FirebaseFirestoreUserDataSource", "Profile batch write failed for uid=${profile.id}", exception)
+                            continuation.resume(Result.failure(exception))
                         }
                 }
                 .addOnFailureListener { exception ->
-                    android.util.Log.w("FirebaseFirestoreUserDataSource", "User document check failed, proceeding with auth: ${exception.message}")
-                    continuation.resume(Result.success(profile.toUser()))
+                    android.util.Log.e("FirebaseFirestoreUserDataSource", "User document check failed for uid=${profile.id}", exception)
+                    continuation.resume(Result.failure(exception))
                 }
         }
     }

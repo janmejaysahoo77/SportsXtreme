@@ -16,6 +16,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.PagerSnapHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.sportsxtreme.app.common.NestedHorizontalScrollHelper
 import com.sportsxtreme.app.domain.model.LiveMatch
@@ -102,6 +103,7 @@ class LiveMatchesSectionView @JvmOverloads constructor(
         // RecyclerView for the live match cards (vertical list).
         recyclerView = RecyclerView(context).apply {
             layoutManager = LinearLayoutManager(context, LinearLayoutManager.HORIZONTAL, false)
+            PagerSnapHelper().attachToRecyclerView(this)
             isNestedScrollingEnabled = false
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
@@ -123,12 +125,10 @@ class LiveMatchesSectionView @JvmOverloads constructor(
             clipToPadding = false
             setPadding(0, 0, dp(12), 0)
 
-            // Add 2 skeleton cards to fill the viewport.
-            repeat(2) { idx ->
+            // Add 2 full-width skeleton cards for the swipeable scorecard pager.
+            repeat(2) {
                 val skeleton = SkeletonMatchCardView(context).apply {
-                    layoutParams = LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                        if (idx > 0) leftMargin = dp(12)
-                    }
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                 }
                 addView(skeleton)
             }
@@ -206,6 +206,7 @@ class LiveMatchesSectionView @JvmOverloads constructor(
         ).apply {
             topMargin = dp(6)
         })
+
     }
 
     /**
@@ -231,7 +232,7 @@ class LiveMatchesSectionView @JvmOverloads constructor(
     }
 
     private fun render(state: LiveMatchesUiState) {
-        val matches = state.matches
+        val matches = state.matches.ifEmpty { state.recentMatches }
         val query = searchQuery
         val visibleMatches = if (query.isBlank()) matches else matches.filter { match ->
             sequenceOf(
@@ -242,14 +243,15 @@ class LiveMatchesSectionView @JvmOverloads constructor(
                 match.teamBShortName
             ).any { it.contains(query, ignoreCase = true) }
         }
-        viewAllButton.visibility = if (matches.size > 2) View.VISIBLE else View.GONE
+        val hasLiveMatches = state.matches.isNotEmpty()
+        viewAllButton.visibility = if (hasLiveMatches && state.matches.size > 2) View.VISIBLE else View.GONE
 
         // Offline note: show only when we still have cached matches but Firestore failed.
-        offlineNote.visibility = if (state.isOffline && matches.isNotEmpty()) View.VISIBLE else View.GONE
+        offlineNote.visibility = if (state.isOffline && (state.matches.isNotEmpty() || state.recentMatches.isNotEmpty())) View.VISIBLE else View.GONE
 
         when {
             // Loading: show skeleton shimmer cards when we have nothing cached yet.
-            state.isLoading && matches.isEmpty() -> {
+            state.isLoading && state.matches.isEmpty() && state.recentMatches.isEmpty() -> {
                 skeletonContainer.visibility = View.VISIBLE
                 placeholderContainer.visibility = View.GONE
                 recyclerView.visibility = View.GONE
@@ -259,10 +261,10 @@ class LiveMatchesSectionView @JvmOverloads constructor(
             visibleMatches.isEmpty() -> {
                 skeletonContainer.visibility = View.GONE
                 placeholderContainer.visibility = View.VISIBLE
-                if (state.errorMessage != null && matches.isEmpty()) {
+                if (state.errorMessage != null && state.matches.isEmpty() && state.recentMatches.isEmpty()) {
                     placeholderTitle.text = "Unable to load matches"
                     placeholderSubtitle.text = "Check your connection and try again"
-                } else if (matches.isEmpty()) {
+                } else if (state.matches.isEmpty() && state.recentMatches.isEmpty()) {
                     placeholderTitle.text = "No Live Matches Right Now"
                     placeholderSubtitle.text = "Check Upcoming Matches"
                 } else {

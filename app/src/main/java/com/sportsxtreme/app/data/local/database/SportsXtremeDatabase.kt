@@ -43,7 +43,7 @@ import com.sportsxtreme.app.data.local.entity.TeamEntity
         LiveMatchEntity::class,
         NotificationEntity::class
     ],
-    version = 12,
+    version = 14,
     exportSchema = true
 )
 abstract class SportsXtremeDatabase : RoomDatabase() {
@@ -339,6 +339,20 @@ abstract class SportsXtremeDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
+            }
+        }
+
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN teamALogoUrl TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN teamBLogoUrl TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN firstInningsScore INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE live_matches ADD COLUMN firstInningsWickets INTEGER DEFAULT NULL")
             }
         }
     }

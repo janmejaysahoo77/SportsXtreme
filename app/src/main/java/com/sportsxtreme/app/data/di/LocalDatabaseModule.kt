@@ -40,7 +40,9 @@ object LocalDatabaseModule {
                 SportsXtremeDatabase.MIGRATION_8_9,
                 SportsXtremeDatabase.MIGRATION_9_10,
                 SportsXtremeDatabase.MIGRATION_10_11,
-                SportsXtremeDatabase.MIGRATION_11_12
+                SportsXtremeDatabase.MIGRATION_11_12,
+                SportsXtremeDatabase.MIGRATION_12_13,
+                SportsXtremeDatabase.MIGRATION_13_14
             )
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()

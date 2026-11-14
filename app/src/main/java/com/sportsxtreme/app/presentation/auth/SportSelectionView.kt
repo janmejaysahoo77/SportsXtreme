@@ -81,7 +81,7 @@ class SportSelectionView @JvmOverloads constructor(
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(10), 0, dp(22))
-            WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = false)
+            WindowInsetsUtils.applySystemBarsPadding(this, applyBottom = true)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -103,13 +103,13 @@ class SportSelectionView @JvmOverloads constructor(
                 orientation = LinearLayout.HORIZONTAL
             }
             rowSports.forEachIndexed { index, sport ->
-                row.addView(sportCard(context, sport), LinearLayout.LayoutParams(0, dp(160), 1f).apply {
+                row.addView(sportCard(context, sport), LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply {
                     leftMargin = if (index == 0) dp(14) else dp(5)
                     rightMargin = if (index == 0) dp(5) else dp(14)
                     bottomMargin = dp(10)
                 })
             }
-            grid.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(170)))
+            grid.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
 
         content.addView(grid)
@@ -148,7 +148,7 @@ class SportSelectionView @JvmOverloads constructor(
     }
 
     private fun sportCard(context: Context, sport: SportItem): View {
-        return FrameLayout(context).apply {
+        return ResponsiveSportCard(context).apply {
             clipToOutline = true
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
@@ -188,9 +188,9 @@ class SportSelectionView @JvmOverloads constructor(
                 })
             }
             addView(cardLabel(context, sport), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
-                leftMargin = dp(16)
-                rightMargin = dp(16)
-                bottomMargin = dp(16)
+                leftMargin = dp(12)
+                rightMargin = dp(12)
+                bottomMargin = dp(12)
             })
             addView(check, LayoutParams(dp(27), dp(27), Gravity.TOP or Gravity.END).apply {
                 topMargin = dp(16)
@@ -239,6 +239,7 @@ class SportSelectionView @JvmOverloads constructor(
                 textSize = if (sport.name.length > 10) 18f else 24f
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
                 includeFontPadding = false
+                maxLines = 2
                 setShadowLayer(dp(3).toFloat(), dp(2).toFloat(), dp(2).toFloat(), Color.BLACK)
             })
             addView(TextView(context).apply {
@@ -248,6 +249,7 @@ class SportSelectionView @JvmOverloads constructor(
                 letterSpacing = 0.09f
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD_ITALIC)
                 includeFontPadding = false
+                maxLines = 2
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = dp(4)
             })
@@ -303,6 +305,22 @@ class SportSelectionView @JvmOverloads constructor(
 
     private fun dp(value: Int): Int {
         return (value * resources.displayMetrics.density + 0.5f).toInt()
+    }
+
+    /** Keeps the image cards proportional to their available width while reserving room for scaled text. */
+    private inner class ResponsiveSportCard(context: Context) : FrameLayout(context) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val availableWidth = MeasureSpec.getSize(widthMeasureSpec)
+            val fontScale = resources.configuration.fontScale.coerceAtLeast(1f)
+            val proportionalHeight = (availableWidth * 0.92f).toInt()
+            val textHeight = (dp(132) * fontScale).toInt()
+            val desiredHeight = max(dp(140), max(proportionalHeight, textHeight))
+            val resolvedHeight = resolveSize(desiredHeight, heightMeasureSpec)
+            super.onMeasure(
+                widthMeasureSpec,
+                MeasureSpec.makeMeasureSpec(resolvedHeight, MeasureSpec.EXACTLY)
+            )
+        }
     }
 
     private class CardShadeView(context: Context) : View(context) {

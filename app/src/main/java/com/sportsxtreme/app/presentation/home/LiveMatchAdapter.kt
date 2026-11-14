@@ -18,9 +18,7 @@ class LiveMatchAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): LiveMatchViewHolder {
         val cardView = LiveMatchCardView(parent.context).apply {
-            layoutParams = RecyclerView.LayoutParams(dp(parent, 320), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                rightMargin = dp(parent, 12)
-            }
+            layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         return LiveMatchViewHolder(
             cardView,
@@ -43,9 +41,6 @@ class LiveMatchAdapter(
     }
 
     companion object {
-        private fun dp(parent: ViewGroup, value: Int): Int =
-            (value * parent.resources.displayMetrics.density).toInt()
-
         private val DIFF = object : DiffUtil.ItemCallback<LiveMatch>() {
             override fun areItemsTheSame(oldItem: LiveMatch, newItem: LiveMatch): Boolean {
                 return oldItem.matchId == newItem.matchId

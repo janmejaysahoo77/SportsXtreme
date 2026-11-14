@@ -15,10 +15,12 @@ import android.view.Gravity
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.sportsxtreme.app.domain.model.LiveMatch
 import com.sportsxtreme.app.domain.model.MatchStatus
+import coil3.load
 import java.util.Locale
 
 /**
@@ -43,6 +45,10 @@ class LiveMatchCardView @JvmOverloads constructor(
     private lateinit var liveDot: View
     private lateinit var teamAIcon: TextView
     private lateinit var teamBIcon: TextView
+    private lateinit var teamAAvatar: ImageView
+    private lateinit var teamBAvatar: ImageView
+    private lateinit var teamAFallback: TextView
+    private lateinit var teamBFallback: TextView
     private lateinit var teamAScore: TextView
     private lateinit var teamBScore: TextView
     private lateinit var teamAOvers: TextView
@@ -85,7 +91,7 @@ class LiveMatchCardView @JvmOverloads constructor(
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
                     leagueText = TextView(context).apply {
-                        text = "LIVE MATCH"
+                        text = "Match"
                         setTextColor(Color.rgb(204, 217, 229))
                         textSize = 11f
                         letterSpacing = 0.08f
@@ -189,6 +195,7 @@ class LiveMatchCardView @JvmOverloads constructor(
                 setColor(Color.TRANSPARENT)
             }
             liveDot = View(context).apply {
+                visibility = View.GONE
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(Color.rgb(255, 62, 70))
@@ -198,7 +205,7 @@ class LiveMatchCardView @JvmOverloads constructor(
                 rightMargin = dp(5)
             })
             statusText = TextView(context).apply {
-                text = "LIVE"
+                text = "Upcoming"
                 setTextColor(Color.WHITE)
                 textSize = 8.5f
                 typeface = Typeface.DEFAULT_BOLD
@@ -224,7 +231,7 @@ class LiveMatchCardView @JvmOverloads constructor(
                 gravity = Gravity.CENTER
                 setPadding(dp(6), dp(6), dp(6), dp(6))
 
-                addView(TextView(context).apply {
+                val fallback = TextView(context).apply {
                     text = if (isTeamA) "A" else "B"
                     gravity = Gravity.CENTER
                     setTextColor(iconAccent)
@@ -235,6 +242,18 @@ class LiveMatchCardView @JvmOverloads constructor(
                         setColor(Color.argb(42, Color.red(iconAccent), Color.green(iconAccent), Color.blue(iconAccent)))
                         setStroke(dp(1), Color.argb(140, Color.red(iconAccent), Color.green(iconAccent), Color.blue(iconAccent)))
                     }
+                }
+                val avatar = ImageView(context).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    visibility = View.GONE
+                    background = fallback.background
+                    clipToOutline = true
+                }
+                if (isTeamA) { teamAAvatar = avatar; teamAFallback = fallback }
+                else { teamBAvatar = avatar; teamBFallback = fallback }
+                addView(FrameLayout(context).apply {
+                    addView(fallback, LayoutParams(dp(32), dp(32), Gravity.CENTER))
+                    addView(avatar, LayoutParams(dp(32), dp(32), Gravity.CENTER))
                 }, LinearLayout.LayoutParams(dp(32), dp(32)))
 
                 if (isTeamA) {
@@ -320,7 +339,9 @@ class LiveMatchCardView @JvmOverloads constructor(
 
     /** Binds a [LiveMatch] to this card and starts/stops the LIVE pulse. */
     fun bind(match: LiveMatch) {
-        leagueText.text = match.tournamentName.ifBlank { "LIVE MATCH" }
+        bindTeamLogo(teamAAvatar, teamAFallback, match.teamALogoUrl)
+        bindTeamLogo(teamBAvatar, teamBFallback, match.teamBLogoUrl)
+        leagueText.text = match.tournamentName.ifBlank { "Match" }
         stageText.text = match.tournamentStage.ifBlank {
             if (match.tournamentName.isNotBlank() && !match.tournamentName.equals("Friendly Match", ignoreCase = true)) {
                 "Tournament Match"
@@ -329,18 +350,19 @@ class LiveMatchCardView @JvmOverloads constructor(
             }
         }
         statusText.text = when {
-            match.isLive -> "LIVE"
+            match.isActivelyPlaying -> "LIVE"
+            match.status == MatchStatus.INNINGS_BREAK -> "BREAK"
             match.isCompleted -> "Completed"
             match.isPaused -> "PAUSED"
             match.isAbandoned -> "ABANDONED"
             else -> "Upcoming"
         }
         statusText.setTextColor(when {
-            match.isLive || match.isAbandoned -> Color.rgb(255, 62, 70)
-            match.isPaused -> Color.rgb(255, 190, 70)
+            match.isActivelyPlaying || match.isAbandoned -> Color.rgb(255, 62, 70)
+            match.isPaused || match.status == MatchStatus.INNINGS_BREAK -> Color.rgb(255, 190, 70)
             else -> Color.WHITE
         })
-        liveDot.visibility = if (match.isLive) View.VISIBLE else View.GONE
+        liveDot.visibility = if (match.isActivelyPlaying) View.VISIBLE else View.GONE
 
         val firstBattingTeamId = match.battingTeamId?.let { batting ->
             if (match.target != null) if (batting == match.teamAId) match.teamBId else match.teamAId else batting
@@ -350,14 +372,22 @@ class LiveMatchCardView @JvmOverloads constructor(
         teamBIcon.text = (if (leftIsTeamA) match.teamBShortName else match.teamAShortName).ifBlank { if (leftIsTeamA) match.teamBName else match.teamAName }
         val showScores = match.isLive || match.isCompleted || match.isPaused || match.isAbandoned
         
-        if (match.battingTeamId != null) {
+        if (match.battingTeamId != null || match.isCompleted) {
             val isTeamABatting = match.battingTeamId == match.teamAId
             if (isTeamABatting == leftIsTeamA) {
                 teamAScore.text = "${match.score}/${match.wickets}"
                 teamAOvers.text = "${match.overs} OV"
                 
-                if (match.target != null) {
-                    teamBScore.text = "${match.target - 1}"
+                if (match.target != null || match.isCompleted) {
+                    teamBScore.text = match.firstInningsScore?.let { runs ->
+                        match.firstInningsWickets?.let { wickets ->
+                            "$runs/$wickets"
+                        } ?: "$runs"
+                    } ?: match.target?.let { target ->
+                        match.firstInningsWickets?.let { wickets ->
+                            "${target - 1}/$wickets"
+                        } ?: "${target - 1}"
+                    } ?: "${match.score}/${match.wickets}"
                     teamBOvers.text = ""
                 } else {
                     teamBScore.text = "--/--"
@@ -367,8 +397,16 @@ class LiveMatchCardView @JvmOverloads constructor(
                 teamBScore.text = "${match.score}/${match.wickets}"
                 teamBOvers.text = "${match.overs} OV"
                 
-                if (match.target != null) {
-                    teamAScore.text = "${match.target - 1}"
+                if (match.target != null || match.isCompleted) {
+                    teamAScore.text = match.firstInningsScore?.let { runs ->
+                        match.firstInningsWickets?.let { wickets ->
+                            "$runs/$wickets"
+                        } ?: "$runs"
+                    } ?: match.target?.let { target ->
+                        match.firstInningsWickets?.let { wickets ->
+                            "${target - 1}/$wickets"
+                        } ?: "${target - 1}"
+                    } ?: "${match.score}/${match.wickets}"
                     teamAOvers.text = ""
                 } else {
                     teamAScore.text = "--/--"
@@ -415,19 +453,35 @@ class LiveMatchCardView @JvmOverloads constructor(
         bowlerText.text = "BOWL  $bowlerLabel"
 
         noteText.text = when {
-            match.isLive && match.target != null && match.score < match.target ->
+            match.isActivelyPlaying && match.target != null && match.score < match.target ->
                 "Need ${match.target - match.score} runs from ${remainingBallsText(match)}"
-            match.isLive -> match.matchStatusNote ?: "Powerplay"
+            match.isActivelyPlaying -> match.matchStatusNote ?: "Powerplay"
+            match.status == MatchStatus.INNINGS_BREAK -> match.matchStatusNote ?: "Innings break"
             match.isCompleted -> "Match Completed"
             match.isUpcoming -> match.matchStatusNote ?: "Upcoming match"
             else -> ""
         }
 
         // Start the pulse only when LIVE.
-        if (match.isLive) {
+        if (match.isActivelyPlaying) {
             startLivePulse()
         } else {
             stopLivePulse()
+        }
+    }
+
+    private fun bindTeamLogo(image: ImageView, fallback: TextView, url: String) {
+        if (url.isBlank()) {
+            image.setImageDrawable(null)
+            image.visibility = View.GONE
+            fallback.visibility = View.VISIBLE
+            return
+        }
+        image.load(url) {
+            listener(
+                onSuccess = { _, _ -> image.visibility = View.VISIBLE; fallback.visibility = View.GONE },
+                onError = { _, _ -> image.visibility = View.GONE; fallback.visibility = View.VISIBLE }
+            )
         }
     }
 

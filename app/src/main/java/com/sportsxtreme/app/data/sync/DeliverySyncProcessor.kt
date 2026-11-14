@@ -3,6 +3,7 @@ package com.sportsxtreme.app.data.sync
 import android.util.Log
 import com.sportsxtreme.app.common.Resource
 import com.sportsxtreme.app.data.local.dao.BallEventDao
+import com.sportsxtreme.app.data.local.dao.InningsDao
 import com.sportsxtreme.app.data.local.dao.MatchDao
 import com.sportsxtreme.app.data.local.dao.PlayerDao
 import com.sportsxtreme.app.data.local.dao.SyncQueueDao
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.first
 class DeliverySyncProcessor @Inject constructor(
     private val syncQueueDao: SyncQueueDao,
     private val ballEventDao: BallEventDao,
+    private val inningsDao: InningsDao,
     private val scoringRepository: ScoringRepository,
     private val firestoreScoringDataSource: FirestoreScoringDataSource,
     private val matchDao: MatchDao,
@@ -120,6 +122,12 @@ class DeliverySyncProcessor @Inject constructor(
         val status = match?.status?.let { runCatching { MatchStatus.valueOf(it) }.getOrDefault(MatchStatus.CREATED) }
             ?: MatchStatus.CREATED
 
+        val allInnings = matchDao.getMatch(matchId)?.let { inningsDao.getInningsForMatch(matchId) }.orEmpty()
+        val firstInnings = allInnings.firstOrNull { it.number == 1 }
+        val isSecondInnings = summary.target != null || allInnings.size > 1
+        val firstInningsScore = if (isSecondInnings) firstInnings?.score else null
+        val firstInningsWickets = if (isSecondInnings) firstInnings?.wickets else null
+
         return LiveScorePayload(
             matchId = matchId,
             tournamentName = match?.title ?: "",
@@ -154,7 +162,9 @@ class DeliverySyncProcessor @Inject constructor(
             bowlerRuns = bowlerScorecard?.runsConceded ?: 0,
             bowlerWickets = bowlerScorecard?.wickets ?: 0,
             matchStatusNote = statusNote(status),
-            updatedAtEpochMs = summary.updatedAtEpochMs
+            updatedAtEpochMs = summary.updatedAtEpochMs,
+            firstInningsScore = firstInningsScore,
+            firstInningsWickets = firstInningsWickets
         )
     }
 

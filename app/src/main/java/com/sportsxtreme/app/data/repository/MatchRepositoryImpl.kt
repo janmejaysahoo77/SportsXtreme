@@ -870,7 +870,11 @@ class MatchRepositoryImpl @Inject constructor(
     }
 
     private suspend fun Match.toInitialLiveScore(): LiveScorePayload {
+        val firstInnings = innings.firstOrNull { it.number == 1 }
         val currentInnings = innings.lastOrNull()
+        val isSecondInnings = (currentInnings != null && currentInnings.number > 1) || status == MatchStatus.COMPLETED
+        val firstInningsScore = if (isSecondInnings || currentInnings?.target != null) firstInnings?.score else null
+        val firstInningsWickets = if (isSecondInnings || currentInnings?.target != null) firstInnings?.wickets else null
         val legalBalls = currentInnings?.legalBalls ?: 0
         val score = currentInnings?.score ?: 0
         val striker = currentInnings?.strikerId?.let { playerDao.getPlayer(it) }
@@ -903,7 +907,9 @@ class MatchRepositoryImpl @Inject constructor(
             bowlerRuns = 0,
             bowlerWickets = 0,
             matchStatusNote = "Powerplay",
-            updatedAtEpochMs = updatedAtEpochMs
+            updatedAtEpochMs = updatedAtEpochMs,
+            firstInningsScore = firstInningsScore,
+            firstInningsWickets = firstInningsWickets
         )
     }
 

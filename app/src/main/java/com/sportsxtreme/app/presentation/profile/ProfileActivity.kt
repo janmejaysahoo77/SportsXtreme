@@ -18,6 +18,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +27,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -142,8 +146,6 @@ private enum class ProfileEditSection(val title: String) {
 
 class ProfileActivity : ComponentActivity() {
 
-    private var profileRefreshToken by mutableStateOf(0)
-
     private var selectedProfilePhotoUri by mutableStateOf<Uri?>(null)
     private val profilePhotoPicker = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -155,7 +157,7 @@ class ProfileActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AuthDependencies.initialize(applicationContext)
-        WindowCompat.setDecorFitsSystemWindows(window, true)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.splash_window_bg)
         val viewedUserId = intent.getStringExtra(EXTRA_USER_ID)?.trim().orEmpty()
@@ -170,7 +172,6 @@ class ProfileActivity : ComponentActivity() {
                 viewedUserId = viewedUserId,
                 fallbackName = fallbackName,
                 fallbackPhotoUrl = fallbackPhotoUrl,
-                refreshToken = profileRefreshToken,
                 onBack = { finish() },
                 onLogout = {
                     FirebaseAuth.getInstance().signOut()
@@ -194,11 +195,6 @@ class ProfileActivity : ComponentActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        profileRefreshToken += 1
-    }
-
     companion object {
         const val EXTRA_USER_ID = "profile.extra.USER_ID"
         const val EXTRA_DISPLAY_NAME = "profile.extra.DISPLAY_NAME"
@@ -213,7 +209,6 @@ private fun ProfileScreen(
     viewedUserId: String,
     fallbackName: String,
     fallbackPhotoUrl: String,
-    refreshToken: Int,
     onBack: () -> Unit,
     onLogout: () -> Unit,
     selectedPhotoUri: Uri?,
@@ -278,7 +273,7 @@ private fun ProfileScreen(
         viewedUserId.isBlank() || viewedUserId == useCases.getCurrentUser()?.id
     }
 
-    LaunchedEffect(viewedUserId, isGuest, refreshToken) {
+    LaunchedEffect(viewedUserId, isGuest) {
         if (isGuest) return@LaunchedEffect
         uiState = if (isOwnProfile) {
             loadProfileUiState(useCases)
@@ -291,7 +286,7 @@ private fun ProfileScreen(
     // immediately, then calculate match totals separately.  Older accounts do not
     // have the cached /users/{id}/stats/summary document, so that document alone
     // would always render zeros for those players.
-    LaunchedEffect(viewedUserId, isOwnProfile, uiState.profile.id, isGuest, refreshToken) {
+    LaunchedEffect(viewedUserId, isOwnProfile, uiState.profile.id, isGuest) {
         if (isGuest || uiState.profile.id.isBlank()) return@LaunchedEffect
         loadLivePlayerStats(uiState.profile.id, uiState.stats).fold(
             onSuccess = { refreshedStats ->
@@ -417,6 +412,8 @@ private fun ProfileScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .then(if (isGuest) Modifier.blur(10.dp) else Modifier)
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 10.dp, vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -855,11 +852,37 @@ private suspend fun loadProfileUiState(useCases: AuthUseCases): ProfileUiState {
         isLoading = false,
         errorMessage = "Could not find logged-in user."
     )
-    val (profileResult, statsResult, settingsResult) = coroutineScope {
+    val (initialProfileResult, statsResult, settingsResult) = coroutineScope {
         val profile = async { useCases.getUserProfile(userId) }
         val stats = async { useCases.getUserProfileStats(userId) }
         val settings = async { useCases.getUserProfileSettings(userId) }
         Triple(profile.await(), stats.await(), settings.await())
+    }
+
+    var profileResult = initialProfileResult
+    if (profileResult.errorText()?.contains("User profile not found", ignoreCase = true) == true) {
+        // Some older sign-up paths allowed authentication to finish even when
+        // the initial Firestore profile write failed. Repair that document from
+        // the signed-in Firebase user before showing the missing-profile error.
+        val repairResult = useCases.createOrUpdateUserProfile(
+            PendingUserProfile(
+                id = currentUser.id,
+                name = currentUser.name,
+                email = currentUser.email,
+                phoneNumber = currentUser.mobileNumber,
+                profilePhotoUrl = currentUser.profilePhotoUrl,
+                authProvider = currentUser.authProvider,
+                isEmailVerified = currentUser.isEmailVerified,
+                isPhoneVerified = currentUser.isPhoneVerified
+            )
+        )
+        profileResult = when (repairResult) {
+            is Resource.Success -> useCases.getUserProfile(userId)
+            is Resource.Error -> Resource.Error(
+                repairResult.message ?: "Could not initialize the user profile."
+            )
+            is Resource.Loading -> Resource.Loading()
+        }
     }
 
     val profile = profileResult.successData() ?: fallbackProfile
@@ -874,7 +897,7 @@ private suspend fun loadProfileUiState(useCases: AuthUseCases): ProfileUiState {
     // for guest users, offline usage, or new accounts. Only show an error banner
     // if the core profile itself fails to load.
     val errorMessage = if (profileResult is Resource.Error) {
-        "Could not refresh profile."
+        profileResult.errorText() ?: "Could not refresh profile."
     } else null
 
     return ProfileUiState(
@@ -1179,6 +1202,7 @@ private fun TopIcon(text: String, onClick: () -> Unit) {
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun HeroProfileCard(
     profile: UserProfile,
     stats: UserProfileStats,
@@ -1199,7 +1223,7 @@ private fun HeroProfileCard(
                 )
             )
             .border(1.dp, Color(0xCCFFD66B), RoundedCornerShape(24.dp))
-            .padding(horizontal = 22.dp, vertical = 24.dp)
+            .padding(horizontal = 16.dp, vertical = 22.dp)
     ) {
         Canvas(Modifier.fillMaxSize()) {
             drawRect(
@@ -1212,7 +1236,14 @@ private fun HeroProfileCard(
             drawCircle(Color(0x25FFD66B), radius = size.minDimension * 0.42f, center = Offset(size.width * 0.5f, size.height * 0.36f))
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-            Text("SPORTSXTREME PLAYER PASS", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.Black)
+            Text(
+                "SPORTSXTREME PLAYER PASS",
+                color = Gold,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+                maxLines = 2
+            )
             Spacer(Modifier.height(15.dp))
             Avatar(
                 photoUrl = profile.profilePhotoUrl,
@@ -1222,8 +1253,21 @@ private fun HeroProfileCard(
                 onEditAvatar = onEditAvatar
             )
             Spacer(Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                Text(profile.name, color = Platinum, fontSize = 27.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    profile.name,
+                    modifier = Modifier.weight(1f, fill = false),
+                    color = Platinum,
+                    fontSize = 27.sp,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
                 if (editEnabled) {
                     Box(
                         modifier = Modifier
@@ -1252,7 +1296,11 @@ private fun HeroProfileCard(
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Pill("Verified Player", Lime, Color.Black)
                 Pill(profile.role.ifBlank { "Player" }, Color(0xFF18252B), Platinum)
             }
@@ -1447,8 +1495,8 @@ private fun HeroMetric(value: String, label: String, accent: Color, modifier: Mo
             Box(Modifier.size(18.dp).clip(CircleShape).background(accent))
             Spacer(Modifier.height(4.dp))
         }
-        Text(value, color = accent, fontSize = if (showDot) 13.sp else 23.sp, fontWeight = FontWeight.Black, maxLines = 1)
-        Text(label, color = SoftText, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = accent, fontSize = if (showDot) 13.sp else 23.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        Text(label, color = SoftText, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center)
     }
 }
 

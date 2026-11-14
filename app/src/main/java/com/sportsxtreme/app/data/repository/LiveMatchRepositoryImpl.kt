@@ -28,7 +28,14 @@ class LiveMatchRepositoryImpl @Inject constructor(
     override fun observeLiveMatches(): Flow<Resource<List<LiveMatch>>> = channelFlow {
         launch {
             liveMatchDao.observeAll()
-                .map { entities -> entities.map { it.toDomain() } }
+                .map { entities ->
+                    val nowEpochMs = System.currentTimeMillis()
+                    entities.asSequence()
+                        .filterNot { it.matchId == PLACEHOLDER_MATCH_ID }
+                        .map { it.toDomain() }
+                        .toList()
+                        .toHomeFeed(nowEpochMs)
+                }
                 .collect { cached ->
                     // A fresh install has an empty Room table. Keep the home
                     // section loading until Firestore supplies its first result
@@ -38,88 +45,14 @@ class LiveMatchRepositoryImpl @Inject constructor(
         }
         launch {
             firestoreLiveMatchDataSource.observeLiveMatches()
-                .catch { _ ->
-                    val fallbackMatch = LiveMatch(
-                        matchId = "mock-live-match-1",
-                        tournamentName = "City Premier League",
-                        teamAId = "team-a",
-                        teamBId = "team-b",
-                        battingTeamId = "team-a",
-                        teamAName = "Mumbai Warriors",
-                        teamBName = "Delhi Challengers",
-                        teamAShortName = "MUM",
-                        teamBShortName = "DEL",
-                        status = MatchStatus.LIVE,
-                        score = 142,
-                        wickets = 3,
-                        overs = "14.2",
-                        currentRunRate = 9.93,
-                        requiredRunRate = null,
-                        target = null,
-                        strikerName = "Rohit S.",
-                        strikerRuns = 68,
-                        strikerBalls = 42,
-                        strikerFours = 7,
-                        strikerSixes = 3,
-                        nonStrikerName = "Virat K.",
-                        nonStrikerRuns = 45,
-                        nonStrikerBalls = 30,
-                        nonStrikerFours = 5,
-                        nonStrikerSixes = 2,
-                        bowlerName = "Bumrah J.",
-                        bowlerOvers = "3.2",
-                        bowlerRuns = 28,
-                        bowlerWickets = 1,
-                        matchStatusNote = "Mumbai Warriors elected to bat",
-                        updatedAtEpochMs = System.currentTimeMillis(),
-                        tournamentStage = "Group Stage"
-                    )
-                    send(Resource.Success(listOf(fallbackMatch)))
-                }
+                .catch { error -> send(Resource.Error(error.message ?: "Unable to load live matches")) }
                 .collect { remoteMatches ->
-                    val matchesToEmit = if (remoteMatches.isEmpty()) {
-                        listOf(
-                            LiveMatch(
-                                matchId = "mock-live-match-1",
-                                tournamentName = "City Premier League",
-                                teamAId = "team-a",
-                                teamBId = "team-b",
-                                battingTeamId = "team-a",
-                                teamAName = "Mumbai Warriors",
-                                teamBName = "Delhi Challengers",
-                                teamAShortName = "MUM",
-                                teamBShortName = "DEL",
-                                status = MatchStatus.LIVE,
-                                score = 142,
-                                wickets = 3,
-                                overs = "14.2",
-                                currentRunRate = 9.93,
-                                requiredRunRate = null,
-                                target = null,
-                                strikerName = "Rohit S.",
-                                strikerRuns = 68,
-                                strikerBalls = 42,
-                                strikerFours = 7,
-                                strikerSixes = 3,
-                                nonStrikerName = "Virat K.",
-                                nonStrikerRuns = 45,
-                                nonStrikerBalls = 30,
-                                nonStrikerFours = 5,
-                                nonStrikerSixes = 2,
-                                bowlerName = "Bumrah J.",
-                                bowlerOvers = "3.2",
-                                bowlerRuns = 28,
-                                bowlerWickets = 1,
-                                matchStatusNote = "Mumbai Warriors elected to bat",
-                                updatedAtEpochMs = System.currentTimeMillis(),
-                                tournamentStage = "Group Stage"
-                            )
-                        )
-                    } else {
-                        remoteMatches
-                    }
-                    liveMatchDao.replaceAll(matchesToEmit.map { it.toEntity() })
-                    send(Resource.Success(matchesToEmit))
+                    val nowEpochMs = System.currentTimeMillis()
+                    val homeMatches = remoteMatches
+                        .filterNot { it.matchId == PLACEHOLDER_MATCH_ID }
+                        .toHomeFeed(nowEpochMs)
+                    liveMatchDao.replaceAll(homeMatches.map { it.toEntity() })
+                    send(Resource.Success(homeMatches))
                 }
         }
     }
@@ -152,9 +85,13 @@ class LiveMatchRepositoryImpl @Inject constructor(
         teamBName = teamBName,
         teamAShortName = teamAShortName,
         teamBShortName = teamBShortName,
+        teamALogoUrl = teamALogoUrl,
+        teamBLogoUrl = teamBLogoUrl,
         status = status.name,
         score = score,
         wickets = wickets,
+        firstInningsScore = firstInningsScore,
+        firstInningsWickets = firstInningsWickets,
         overs = overs,
         currentRunRate = currentRunRate,
         requiredRunRate = requiredRunRate,
@@ -190,9 +127,13 @@ class LiveMatchRepositoryImpl @Inject constructor(
         teamBName = teamBName,
         teamAShortName = teamAShortName,
         teamBShortName = teamBShortName,
+        teamALogoUrl = teamALogoUrl,
+        teamBLogoUrl = teamBLogoUrl,
         status = runCatching { MatchStatus.valueOf(status) }.getOrDefault(MatchStatus.CREATED),
         score = score,
         wickets = wickets,
+        firstInningsScore = firstInningsScore,
+        firstInningsWickets = firstInningsWickets,
         overs = overs,
         currentRunRate = currentRunRate,
         requiredRunRate = requiredRunRate,
@@ -217,4 +158,33 @@ class LiveMatchRepositoryImpl @Inject constructor(
         updatedAtEpochMs = updatedAtEpochMs,
         tournamentStage = tournamentStage
     )
+
+    private fun isFreshLiveMatch(match: LiveMatch, nowEpochMs: Long): Boolean =
+        match.isActivelyPlaying &&
+            match.updatedAtEpochMs > 0L &&
+            nowEpochMs - match.updatedAtEpochMs <= MAX_LIVE_SCORE_AGE_MS
+
+    private fun List<LiveMatch>.toHomeFeed(nowEpochMs: Long): List<LiveMatch> {
+        val activeMatches = filter { isFreshLiveMatch(it, nowEpochMs) }
+        val recentNonLiveMatches = asSequence()
+            .filter { match ->
+                match.isCompleted || match.isAbandoned || match.isPaused ||
+                    match.status == MatchStatus.INNINGS_BREAK
+            }
+            .filter { it.updatedAtEpochMs > 0L }
+            .filter { match ->
+                match.isCompleted || match.isAbandoned ||
+                    nowEpochMs - match.updatedAtEpochMs <= MAX_LIVE_SCORE_AGE_MS
+            }
+            .sortedByDescending { it.updatedAtEpochMs }
+            .take(MAX_RECENT_MATCHES)
+            .toList()
+        return activeMatches + recentNonLiveMatches
+    }
+
+    private companion object {
+        const val PLACEHOLDER_MATCH_ID = "mock-live-match-1"
+        const val MAX_LIVE_SCORE_AGE_MS = 2 * 60 * 60 * 1000L
+        const val MAX_RECENT_MATCHES = 5
+    }
 }

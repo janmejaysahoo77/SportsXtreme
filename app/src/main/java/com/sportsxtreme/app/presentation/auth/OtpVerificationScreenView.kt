@@ -185,20 +185,24 @@ class OtpVerificationScreenView @JvmOverloads constructor(
     }
 
     private fun fillOtp(otp: String) {
-        distributeOtp(otp, 0)
+        distributeOtp(otp)
     }
 
-    private fun distributeOtp(value: String, startIndex: Int) {
-        if (startIndex !in otpInputs.indices) return
-        val digits = value.filter(Char::isDigit).take(otpInputs.size - startIndex)
+    private fun distributeOtp(value: String) {
+        // SMS autofill and some keyboards paste the whole code into one box. Treat
+        // that as a replacement so stale digits cannot be combined with the new OTP.
+        val digits = value.mapNotNull { char ->
+            Character.digit(char, 10).takeIf { it >= 0 }?.let { ('0'.code + it).toChar() }
+        }.take(otpInputs.size)
         if (digits.isEmpty()) return
         isDistributingOtp = true
         try {
-            digits.forEachIndexed { offset, digit -> otpInputs[startIndex + offset].setText(digit.toString()) }
+            otpInputs.forEach { it.text.clear() }
+            digits.forEachIndexed { offset, digit -> otpInputs[offset].setText(digit.toString()) }
         } finally {
             isDistributingOtp = false
         }
-        otpInputs[(startIndex + digits.length).coerceAtMost(otpInputs.lastIndex)].requestFocus()
+        otpInputs[digits.size.coerceAtMost(otpInputs.lastIndex)].requestFocus()
         refreshVerifyState()
         if (otpInputs.all { it.text.length == 1 }) verifyOtp(context)
     }
@@ -388,9 +392,28 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                     clearError()
                     val entered = s?.toString().orEmpty()
                     if (entered.length > 1) {
-                        distributeOtp(entered, index)
+                        distributeOtp(entered)
                     } else if (entered.length == 1 && index < otpInputs.lastIndex) {
+                        val normalized = otpDigits(entered)
+                        if (normalized.isEmpty()) {
+                            s?.clear()
+                            return
+                        }
+                        if (normalized != entered) {
+                            otpInputs[index].setText(normalized)
+                            return
+                        }
                         otpInputs[index + 1].requestFocus()
+                    } else if (entered.length == 1) {
+                        val normalized = otpDigits(entered)
+                        if (normalized.isEmpty()) {
+                            s?.clear()
+                            return
+                        }
+                        if (normalized != entered) {
+                            otpInputs[index].setText(normalized)
+                            return
+                        }
                     }
                     refreshVerifyState()
                     if (otpInputs.all { it.text.length == 1 }) verifyOtp(context)
@@ -506,7 +529,7 @@ class OtpVerificationScreenView @JvmOverloads constructor(
 
     private fun verifyOtp(context: Context) {
         if (isVerifying) return
-        val code = otpInputs.joinToString(separator = "") { it.text.toString() }
+        val code = otpDigits(otpInputs.joinToString(separator = "") { it.text.toString() })
         Log.d("OTP_SYSTEM", "[UI] verifyOtp triggered with code length: ${code.length}")
         if (code.length != 6) {
             Log.w("OTP_SYSTEM", "[UI] verifyOtp validation failed: Incomplete OTP code (length=${code.length})")
@@ -536,6 +559,13 @@ class OtpVerificationScreenView @JvmOverloads constructor(
                 is Resource.Loading -> Unit
             }
             setVerifying(false)
+        }
+    }
+
+    private fun otpDigits(value: String): String = buildString {
+        value.forEach { char ->
+            val digit = Character.digit(char, 10)
+            if (digit >= 0) append(('0'.code + digit).toChar())
         }
     }
 

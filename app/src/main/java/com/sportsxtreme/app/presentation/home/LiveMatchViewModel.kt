@@ -21,7 +21,8 @@ data class LiveMatchesUiState(
     val isLoading: Boolean = true,
     val isOffline: Boolean = false,
     val errorMessage: String? = null,
-    val matches: List<LiveMatch> = emptyList()
+    val matches: List<LiveMatch> = emptyList(),
+    val recentMatches: List<LiveMatch> = emptyList()
 )
 
 @HiltViewModel
@@ -53,13 +54,27 @@ class LiveMatchViewModel @Inject constructor(
             }
             liveMatchRepository.observeLiveMatches().collect { resource ->
                 when (resource) {
-                    is Resource.Success -> _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            isOffline = false,
-                            errorMessage = null,
-                            matches = resource.data.orEmpty().sortedByDescending { match -> match.updatedAtEpochMs }
-                        )
+                    is Resource.Success -> {
+                        val matches = resource.data.orEmpty()
+                        val liveMatches = matches
+                            .filter { match -> match.isActivelyPlaying }
+                            .sortedByDescending { match -> match.updatedAtEpochMs }
+                        val recentMatches = matches
+                            .filter { match ->
+                                match.isCompleted || match.isAbandoned || match.isPaused ||
+                                    match.status == com.sportsxtreme.app.domain.model.MatchStatus.INNINGS_BREAK
+                            }
+                            .sortedByDescending { match -> match.updatedAtEpochMs }
+                            .take(5)
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                isOffline = false,
+                                errorMessage = null,
+                                matches = liveMatches,
+                                recentMatches = recentMatches
+                            )
+                        }
                     }
 
                     is Resource.Loading -> _uiState.update { it.copy(isLoading = true) }
@@ -68,7 +83,7 @@ class LiveMatchViewModel @Inject constructor(
                         it.copy(
                             isLoading = false,
                             // Keep showing cached matches while offline.
-                            isOffline = it.matches.isNotEmpty(),
+                            isOffline = it.matches.isNotEmpty() || it.recentMatches.isNotEmpty(),
                             errorMessage = resource.message
                         )
                     }

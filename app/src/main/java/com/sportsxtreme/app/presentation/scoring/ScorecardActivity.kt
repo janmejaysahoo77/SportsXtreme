@@ -82,6 +82,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -175,6 +178,7 @@ class ScorecardActivity : ComponentActivity() {
             var deliveryDocuments = emptyList<DocumentSnapshot>()
             val playerNames = mutableMapOf<String, String>()
             val playerNameLookups = mutableSetOf<String>()
+            val teamLogoLookups = mutableSetOf<String>()
             val pendingPlayerNameLookups = mutableSetOf<String>()
             fun refreshPartnership() {
                 val current = match.value.copy(
@@ -214,6 +218,22 @@ class ScorecardActivity : ComponentActivity() {
                     match.value = snapshot.toMatchDetail(match.value)
                     val teamIds = listOf(match.value.leftTeamId, match.value.rightTeamId)
                         .filter(String::isNotBlank)
+                    teamIds.filter(teamLogoLookups::add).forEach { teamId ->
+                        lifecycleScope.launch {
+                            val logoUrl = runCatching {
+                                val teamDoc = firestore.collection("teams").document(teamId).get().await()
+                                listOf("logoUrl", "teamLogoUrl", "photoUrl")
+                                    .firstNotNullOfOrNull { key -> teamDoc.getString(key)?.takeIf(String::isNotBlank) }
+                            }.getOrNull().orEmpty()
+                            if (logoUrl.isNotBlank() && !isFinishing && !isDestroyed) {
+                                match.value = when (teamId) {
+                                    match.value.leftTeamId -> match.value.copy(leftLogoUrl = match.value.leftLogoUrl.ifBlank { logoUrl })
+                                    match.value.rightTeamId -> match.value.copy(rightLogoUrl = match.value.rightLogoUrl.ifBlank { logoUrl })
+                                    else -> match.value
+                                }
+                            }
+                        }
+                    }
                     val lookupsToStart = teamIds.filter { teamId ->
                         playerNameLookups.add(teamId).also { isNew ->
                             if (isNew) pendingPlayerNameLookups.add(teamId)
@@ -327,6 +347,12 @@ class ScorecardActivity : ComponentActivity() {
             ?: previous.leftName
         val teamBName = teamB?.displayName("teamBShortName", "teamBName", liveScore)
             ?: previous.rightName
+        val teamALogoUrl = (teamA?.get("logoUrl") as? String)?.takeIf(String::isNotBlank)
+            ?: (teamA?.get("teamLogoUrl") as? String)?.takeIf(String::isNotBlank)
+            ?: (liveScore?.get("teamALogoUrl") as? String).orEmpty()
+        val teamBLogoUrl = (teamB?.get("logoUrl") as? String)?.takeIf(String::isNotBlank)
+            ?: (teamB?.get("teamLogoUrl") as? String)?.takeIf(String::isNotBlank)
+            ?: (liveScore?.get("teamBLogoUrl") as? String).orEmpty()
         val innings = (get("innings") as? List<*>)?.filterIsInstance<Map<*, *>>().orEmpty()
         val currentBattingTeamId = (liveScore?.get("battingTeamId") as? String)
             ?: (innings.lastOrNull()?.get("battingTeamId") as? String)
@@ -435,10 +461,12 @@ class ScorecardActivity : ComponentActivity() {
                 ?: getString("selectedStage") ?: previous.round).orEmpty(),
             leftName = teamAName,
             leftTeamId = teamAId,
+            leftLogoUrl = teamALogoUrl,
             leftScore = leftScore,
             leftOvers = leftOvers,
             rightName = teamBName,
             rightTeamId = teamBId,
+            rightLogoUrl = teamBLogoUrl,
             rightScore = rightScore,
             rightOvers = rightOvers,
             venue = getString("venue")?.takeIf(String::isNotBlank).orEmpty(),
@@ -514,10 +542,12 @@ class ScorecardActivity : ComponentActivity() {
             round = intent.getStringExtra(EXTRA_ROUND)?.takeIf(String::isNotBlank).orEmpty(),
             leftName = intent.getStringExtra(EXTRA_LEFT_NAME)?.takeIf(String::isNotBlank) ?: "TEAM A",
             leftTeamId = "",
+            leftLogoUrl = "",
             leftScore = intent.getStringExtra(EXTRA_LEFT_SCORE) ?: "—",
             leftOvers = intent.getStringExtra(EXTRA_LEFT_OVERS).orEmpty(),
             rightName = intent.getStringExtra(EXTRA_RIGHT_NAME)?.takeIf(String::isNotBlank) ?: "TEAM B",
             rightTeamId = "",
+            rightLogoUrl = "",
             rightScore = intent.getStringExtra(EXTRA_RIGHT_SCORE) ?: "—",
             rightOvers = intent.getStringExtra(EXTRA_RIGHT_OVERS).orEmpty(),
             target = intent.getStringExtra(EXTRA_TARGET) ?: "—",
@@ -553,10 +583,12 @@ private data class MatchDetail(
     val round: String,
     val leftName: String,
     val leftTeamId: String,
+    val leftLogoUrl: String = "",
     val leftScore: String,
     val leftOvers: String,
     val rightName: String,
     val rightTeamId: String,
+    val rightLogoUrl: String = "",
     val rightScore: String,
     val rightOvers: String,
     val venue: String,
@@ -1294,11 +1326,11 @@ private fun MatchHero(match: MatchDetail) {
                 else -> !match.battingTeamIsLeft
             }
             if (leftIsFirstBatting) {
-                CompactTeam(match.leftName, match.leftScore, match.leftOvers, DetailIcon.SHIELD, Modifier.weight(1f))
-                CompactTeam(match.rightName, match.rightScore, match.rightOvers, DetailIcon.BOLT, Modifier.weight(1f))
+                CompactTeam(match.leftName, match.leftScore, match.leftOvers, match.leftLogoUrl, DetailIcon.SHIELD, Modifier.weight(1f))
+                CompactTeam(match.rightName, match.rightScore, match.rightOvers, match.rightLogoUrl, DetailIcon.BOLT, Modifier.weight(1f))
             } else {
-                CompactTeam(match.rightName, match.rightScore, match.rightOvers, DetailIcon.BOLT, Modifier.weight(1f))
-                CompactTeam(match.leftName, match.leftScore, match.leftOvers, DetailIcon.SHIELD, Modifier.weight(1f))
+                CompactTeam(match.rightName, match.rightScore, match.rightOvers, match.rightLogoUrl, DetailIcon.BOLT, Modifier.weight(1f))
+                CompactTeam(match.leftName, match.leftScore, match.leftOvers, match.leftLogoUrl, DetailIcon.SHIELD, Modifier.weight(1f))
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -1316,7 +1348,7 @@ private fun MatchHero(match: MatchDetail) {
 }
 
 @Composable
-private fun CompactTeam(name: String, score: String, detail: String, icon: DetailIcon, modifier: Modifier) {
+private fun CompactTeam(name: String, score: String, detail: String, logoUrl: String, icon: DetailIcon, modifier: Modifier) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -1331,6 +1363,14 @@ private fun CompactTeam(name: String, score: String, detail: String, icon: Detai
             contentAlignment = Alignment.Center
         ) {
             DetailIconView(icon, Color(0xFFE2E9E6), Modifier.size(18.dp))
+            if (logoUrl.isNotBlank()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(logoUrl).build(),
+                    contentDescription = "$name team logo",
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
+                )
+            }
         }
         Spacer(Modifier.height(4.dp))
         Text(name, color = SoftText, fontSize = 8.sp, fontWeight = FontWeight.Black)

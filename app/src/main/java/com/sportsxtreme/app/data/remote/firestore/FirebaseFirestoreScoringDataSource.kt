@@ -167,6 +167,8 @@ class FirebaseFirestoreScoringDataSource @Inject constructor(
         "bowlerWickets" to bowlerWickets,
         "matchStatusNote" to matchStatusNote,
         "updatedAtEpochMs" to updatedAtEpochMs,
+        "firstInningsScore" to firstInningsScore,
+        "firstInningsWickets" to firstInningsWickets,
         "syncedAt" to FieldValue.serverTimestamp()
     )
 
