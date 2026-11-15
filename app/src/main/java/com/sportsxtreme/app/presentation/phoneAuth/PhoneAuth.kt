@@ -271,21 +271,37 @@ fun PhoneAuth() {
                     }
 
                     isLoading = true
-                    val sendOtp: () -> Unit = {
-                        coroutineScope.launch {
-                            when (val result = authViewModel.sendPhoneOtp(fullPhoneNumber)) {
-                                is Resource.Success -> {
-                                    (context as? MainActivity)?.showOtpVerificationScreen(
-                                        result.data?.phoneNumber ?: fullPhoneNumber
-                                    )
+                    coroutineScope.launch {
+                        when (val registration = authViewModel.isPhoneNumberRegistered(fullPhoneNumber)) {
+                            is Resource.Success -> {
+                                if (registration.data == true) {
+                                    errorMessage = "Number is already registered. Go to login."
+                                    isLoading = false
+                                } else {
+                                    val sendOtp: () -> Unit = {
+                                        coroutineScope.launch {
+                                            when (val result = authViewModel.sendPhoneOtp(fullPhoneNumber)) {
+                                                is Resource.Success -> {
+                                                    (context as? MainActivity)?.showOtpVerificationScreen(
+                                                        result.data?.phoneNumber ?: fullPhoneNumber
+                                                    )
+                                                }
+                                                is Resource.Error -> errorMessage = result.message ?: "Could not send OTP"
+                                                is Resource.Loading -> Unit
+                                            }
+                                            isLoading = false
+                                        }
+                                    }
+                                    (context as? MainActivity)?.startOtpSmsListening(sendOtp) ?: sendOtp()
                                 }
-                                is Resource.Error -> errorMessage = result.message ?: "Could not send OTP"
-                                is Resource.Loading -> Unit
                             }
-                            isLoading = false
+                            is Resource.Error -> {
+                                errorMessage = registration.message ?: "Could not verify this phone number. Try again."
+                                isLoading = false
+                            }
+                            is Resource.Loading -> Unit
                         }
                     }
-                    (context as? MainActivity)?.startOtpSmsListening(sendOtp) ?: sendOtp()
                 },
                 enabled = !isLoading,
                 modifier = Modifier

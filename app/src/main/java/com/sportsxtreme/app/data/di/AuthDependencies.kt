@@ -79,7 +79,11 @@ object AuthDependencies {
     }
 
     private val authViewModel: AuthViewModel by lazy {
-        AuthViewModel(useCases)
+        AuthViewModel(useCases).also { vm ->
+            phoneAuthManager.onAutoVerifiedListener = { session ->
+                vm.onAutoVerified(session)
+            }
+        }
     }
 
     fun authViewModel(): AuthViewModel {

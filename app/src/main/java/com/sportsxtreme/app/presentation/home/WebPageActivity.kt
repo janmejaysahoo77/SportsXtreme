@@ -110,7 +110,7 @@ class WebPageActivity : Activity() {
     companion object {
         private const val EXTRA_URL = "sportsxtreme.web_page.url"
         private const val EXTRA_TITLE = "sportsxtreme.web_page.title"
-        private const val BASE_URL = "https://sportsxtremeweb.netlify.app"
+        private const val BASE_URL = "https://www.sportsxtremeapp.com"
 
         fun intent(context: Context, path: String): Intent {
             val title = when (path) {

@@ -675,6 +675,13 @@ class OtpVerificationScreenView @JvmOverloads constructor(
     }
 
     private fun showError(message: String) {
+        if (authViewModel.state.value.authenticatedUser?.isPhoneVerified == true ||
+            authViewModel.state.value.phoneVerificationStatus == PhoneVerificationStatus.AutoVerified ||
+            authViewModel.state.value.phoneVerificationStatus == PhoneVerificationStatus.VerificationSuccess
+        ) {
+            Log.d("OTP_SYSTEM", "[UI] Suppressing error message '$message' because phone verification is already completed.")
+            return
+        }
         errorView.setTextColor(Color.rgb(255, 112, 112))
         errorView.text = message
         errorView.visibility = View.VISIBLE

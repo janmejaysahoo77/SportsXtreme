@@ -10,6 +10,7 @@ import com.sportsxtreme.app.domain.model.User
 import com.sportsxtreme.app.domain.usecase.AuthUseCases
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.functions.FirebaseFunctions
+import com.google.firebase.functions.FirebaseFunctionsException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -310,6 +311,28 @@ class AuthViewModel(
         return result.also { updatePhoneSession(it) }
     }
 
+    suspend fun isPhoneNumberRegistered(phoneNumber: String): Resource<Boolean> {
+        return try {
+            val response = FirebaseFunctions.getInstance()
+                .getHttpsCallable("isPhoneNumberRegistered")
+                .call(mapOf("phoneNumber" to phoneNumber))
+                .await()
+            val registered = (response.data as? Map<*, *>)?.get("registered") as? Boolean
+                ?: return Resource.Error("Could not verify this phone number. Try again.")
+            Resource.Success(registered)
+        } catch (error: Exception) {
+            Log.w(TAG, "Phone registration check failed", error)
+            val message = if (error is FirebaseFunctionsException &&
+                error.code == FirebaseFunctionsException.Code.UNAUTHENTICATED
+            ) {
+                "Could not verify this phone number. Please try again."
+            } else {
+                error.localizedMessage ?: "Could not verify this phone number. Please try again."
+            }
+            Resource.Error(message)
+        }
+    }
+
     suspend fun resendPhoneOtp(): Resource<PhoneAuthSession> {
         val currentSession = state.value.pendingPhoneSession
         if (currentSession == null) {
@@ -334,7 +357,11 @@ class AuthViewModel(
             return Resource.Error("No phone verification session is active.")
         }
         Log.d(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp for verificationId: '${phoneSession.verificationId}', isAutoVerified: ${phoneSession.isAutoVerified}, code length: ${otpCode.length}")
-        if (phoneSession.isAutoVerified) {
+        if (phoneSession.isAutoVerified ||
+            state.value.phoneVerificationStatus == PhoneVerificationStatus.AutoVerified ||
+            state.value.phoneVerificationStatus == PhoneVerificationStatus.VerificationSuccess ||
+            state.value.authenticatedUser?.isPhoneVerified == true
+        ) {
             Log.i(TAG, "[OTP_SYSTEM] AuthViewModel.verifyPhoneOtp processing auto-verified session")
             return when (val completion = markPhoneVerified(
                 phoneSession.phoneNumber,
@@ -501,6 +528,11 @@ class AuthViewModel(
             errorMessage = null
         )
         return Resource.Success(Unit)
+    }
+
+    fun onAutoVerified(session: PhoneAuthSession) {
+        Log.i(TAG, "[OTP_SYSTEM] AuthViewModel.onAutoVerified received auto-verified session for ${session.phoneNumber}")
+        updatePhoneSession(Resource.Success(session))
     }
 
     private fun updateAuthSession(result: Resource<AuthSession>) {

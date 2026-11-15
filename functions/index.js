@@ -11,6 +11,10 @@ const { defineSecret } = require("firebase-functions/params");
 const leaderboardScoring = require("./leaderboardScoring");
 const { projectPublicProfile } = require("./userProfileProjection");
 const { parseMatchInviteToken, hashMatchInviteSecret, matchInviteUnavailableReason } = require("./matchInviteToken");
+const {
+  consumePhoneRegistrationRateLimit,
+  createPhoneRegistrationHandler
+} = require("./phoneRegistration");
 
 initializeApp();
 
@@ -59,6 +63,22 @@ exports.assertAccountAccess = onCall(async (request) => {
   }
   return { allowed: true };
 });
+
+exports.isPhoneNumberRegistered = onCall(
+  { enforceAppCheck: true },
+  createPhoneRegistrationHandler({
+    checkRateLimit: (sourceHash) => consumePhoneRegistrationRateLimit(db, sourceHash),
+    lookupPhone: async (phoneNumber) => {
+      try {
+        await getAuth().getUserByPhoneNumber(phoneNumber);
+        return true;
+      } catch (error) {
+        if (error.code === "auth/user-not-found") return false;
+        throw error;
+      }
+    }
+  })
+);
 
 function sharedPostImageValue(post) {
   for (const key of ["imageUrl", "imageURL", "image", "imagePath", "storagePath"]) {
